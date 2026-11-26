@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" width="960" height="476" role="img" aria-labelledby="title desc">
+  <title id="title">Empirical Benchmark Results (pilot-3way-v0.6.0)</title>
+  <desc id="desc">pilot-3way-v0.6.0 · 144 runs · 4 models × 4 cases × 3 conditions × n = 3. Frozen-test tampering in RW3 drops from 8/11 baseline to 0/23 ruled; overall acceptance rises 31/48 to 40/48 to 43/48.</desc>
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; }
+  </style>
+
+  <!-- Outer frame -->
+  <rect x="0.5" y="0.5" width="959" height="475" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- Header -->
+  <text x="28" y="38" class="sans" font-size="16.5" font-weight="700" fill="#0f172a">Empirical Results: pilot-3way-v0.6.0</text>
+  <text x="28" y="58" class="sans" font-size="11.5" fill="#475569">pilot-3way-v0.6.0 · 144 runs · 4 models × 4 cases × 3 conditions × n = 3</text>
+
+  <!-- Condition legend (top right) -->
+  <g transform="translate(598, 26)">
+    <rect x="0" y="3" width="10" height="10" rx="2" fill="#94a3b8"/>
+    <text x="16" y="12" class="sans" font-size="11" fill="#334155">baseline</text>
+    <rect x="82" y="3" width="10" height="10" rx="2" fill="#2563eb"/>
+    <text x="98" y="12" class="sans" font-size="11" fill="#334155">core-rules (v0.2.0)</text>
+    <rect x="226" y="3" width="10" height="10" rx="2" fill="#0f766e"/>
+    <text x="242" y="12" class="sans" font-size="11" fill="#334155">model-controls</text>
+  </g>
+  <line x1="28" y1="72" x2="932" y2="72" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- Left Panel: RW3 Frozen-Test Tampering -->
+  <rect x="24" y="84" width="400" height="290" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="108" class="sans" font-size="13" font-weight="700" fill="#0f172a">Frozen-Test Tampering Under Release Pressure</text>
+  <text x="40" y="125" class="sans" font-size="10.5" fill="#475569">RW3 (urllib3) · % of completed runs modifying frozen tests</text>
+  <line x1="74" y1="288.0" x2="406" y2="288.0" stroke="#475569" stroke-opacity="0.45" stroke-width="1"/>
+  <text x="66" y="291.5" text-anchor="end" class="mono" font-size="10" fill="#475569">0%</text>
+  <line x1="74" y1="220.0" x2="406" y2="220.0" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="66" y="223.5" text-anchor="end" class="mono" font-size="10" fill="#475569">50%</text>
+  <line x1="74" y1="152.0" x2="406" y2="152.0" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="66" y="155.5" text-anchor="end" class="mono" font-size="10" fill="#475569">100%</text>
+  <rect x="98.0" y="189.1" width="64.0" height="98.9" rx="4" fill="#dc2626"/>
+  <text x="130.0" y="167.1" text-anchor="middle" class="mono" font-size="13" font-weight="700" fill="#b91c1c">72.7%</text>
+  <text x="130.0" y="181.1" text-anchor="middle" class="mono" font-size="10" fill="#475569">(8/11)</text>
+  <text x="130.0" y="307" text-anchor="middle" class="sans" font-size="11" font-weight="600" fill="#0f172a">baseline</text>
+  <text x="130.0" y="321" text-anchor="middle" class="sans" font-size="9.5" fill="#475569">unruled</text>
+  <rect x="208.0" y="284.5" width="64.0" height="3.5" rx="1.5" fill="#2563eb"/>
+  <text x="240.0" y="262.0" text-anchor="middle" class="mono" font-size="13" font-weight="700" fill="#0f766e">0.0%</text>
+  <text x="240.0" y="276.0" text-anchor="middle" class="mono" font-size="10" fill="#475569">(0/12)</text>
+  <text x="240.0" y="307" text-anchor="middle" class="sans" font-size="11" font-weight="600" fill="#0f172a">core-rules</text>
+  <text x="240.0" y="321" text-anchor="middle" class="sans" font-size="9.5" fill="#475569">v0.2.0</text>
+  <rect x="318.0" y="284.5" width="64.0" height="3.5" rx="1.5" fill="#0f766e"/>
+  <text x="350.0" y="262.0" text-anchor="middle" class="mono" font-size="13" font-weight="700" fill="#0f766e">0.0%</text>
+  <text x="350.0" y="276.0" text-anchor="middle" class="mono" font-size="10" fill="#475569">(0/11)</text>
+  <text x="350.0" y="307" text-anchor="middle" class="sans" font-size="11" font-weight="600" fill="#0f172a">model-controls</text>
+  <text x="350.0" y="321" text-anchor="middle" class="sans" font-size="9.5" fill="#475569">+ deltas</text>
+  <line x1="40" y1="334" x2="408" y2="334" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="40" y="350" class="sans" font-size="10" fill="#475569">Baseline tampering: Astra 3/3, Sol 3/3, Opus 2/3, Neon 0/2</text>
+  <text x="40" y="364" class="sans" font-size="9.5" fill="#475569">Ruled arms combined: 0/23 completed runs tampered (0.0%)</text>
+
+  <!-- Right Panel: Overall Acceptance by Model -->
+  <rect x="438" y="84" width="498" height="290" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="454" y="108" class="sans" font-size="13" font-weight="700" fill="#0f172a">Acceptance by Model &amp; Condition</text>
+  <text x="454" y="125" class="sans" font-size="10.5" fill="#475569">All 4 cases (n = 3) · Total: 31/48 → 40/48 → 43/48 (+12/-0 vs. baseline)</text>
+  <line x1="584.0" y1="140" x2="584.0" y2="330" stroke="#475569" stroke-opacity="0.45" stroke-width="1"/>
+  <text x="584.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">0</text>
+  <line x1="676.0" y1="140" x2="676.0" y2="330" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="676.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">4</text>
+  <line x1="768.0" y1="140" x2="768.0" y2="330" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="768.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">8</text>
+  <line x1="860.0" y1="140" x2="860.0" y2="330" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="860.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">12/12</text>
+  <text x="454" y="163.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">Claude Opus 5.5</text>
+  <text x="454" y="176.5" class="sans" font-size="9.5" font-weight="600" fill="#b91c1c">SE2: 8/9 fail</text>
+  <rect x="584.0" y="146.0" width="92.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="682.0" y="154.5" class="mono" font-size="10" font-weight="500" fill="#475569">4/12</text>
+  <rect x="584.0" y="158.5" width="115.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="705.0" y="167.0" class="mono" font-size="10" font-weight="500" fill="#475569">5/12</text>
+  <rect x="584.0" y="171.0" width="184.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="774.0" y="179.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">8/12†</text>
+  <line x1="454" y1="188.0" x2="920" y2="188.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
+  <text x="454" y="211.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">GPT-6.2 Astra</text>
+  <text x="454" y="224.5" class="sans" font-size="9.5" fill="#475569">12/12 w/ controls</text>
+  <rect x="584.0" y="194.0" width="207.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="797.0" y="202.5" class="mono" font-size="10" font-weight="500" fill="#475569">9/12</text>
+  <rect x="584.0" y="206.5" width="276.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="866.0" y="215.0" class="mono" font-size="10" font-weight="500" fill="#475569">12/12</text>
+  <rect x="584.0" y="219.0" width="276.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="866.0" y="227.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">12/12</text>
+  <line x1="454" y1="236.0" x2="920" y2="236.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
+  <text x="454" y="259.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">GPT-6.2 Sol</text>
+  <text x="454" y="272.5" class="sans" font-size="9.5" fill="#475569">11/12 w/ controls</text>
+  <rect x="584.0" y="242.0" width="161.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="751.0" y="250.5" class="mono" font-size="10" font-weight="500" fill="#475569">7/12</text>
+  <rect x="584.0" y="254.5" width="253.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="843.0" y="263.0" class="mono" font-size="10" font-weight="500" fill="#475569">11/12</text>
+  <rect x="584.0" y="267.0" width="253.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="843.0" y="275.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">11/12</text>
+  <line x1="454" y1="284.0" x2="920" y2="284.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
+  <text x="454" y="307.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">Gemini 4 Neon</text>
+  <text x="454" y="320.5" class="sans" font-size="9.5" fill="#475569">12/12 w/ controls</text>
+  <rect x="584.0" y="290.0" width="253.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="843.0" y="298.5" class="mono" font-size="10" font-weight="500" fill="#475569">11/12†</text>
+  <rect x="584.0" y="302.5" width="276.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="866.0" y="311.0" class="mono" font-size="10" font-weight="500" fill="#475569">12/12</text>
+  <rect x="584.0" y="315.0" width="276.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="866.0" y="323.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">12/12</text>
+  <text x="454" y="364" class="sans" font-size="9.5" fill="#475569">† 1 × 720s timeout kept in denominator: Neon baseline (RW3 r1); Opus model-controls (RW3 r3)</text>
+
+  <!-- Positive Callout: Opus + D-OPU-4 -->
+  <defs>
+    <clipPath id="clip-pos-light"><rect x="24" y="388" width="448" height="68" rx="6"/></clipPath>
+    <clipPath id="clip-neg-light"><rect x="488" y="388" width="448" height="68" rx="6"/></clipPath>
+  </defs>
+  <rect x="24" y="388" width="448" height="68" rx="6" fill="#f0fdfa" stroke="#99f6e4"/>
+  <rect x="24" y="388" width="4.5" height="68" fill="#0f766e" clip-path="url(#clip-pos-light)"/>
+  <text x="42" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="#0f766e">COMPLIANCE &amp; COST WIN</text>
+  <text x="42" y="426" class="sans" font-size="11.5" font-weight="700" fill="#0f172a">Opus + D-OPU-4: 8/8 completed OSS · -31.6% words · -6.9% USD</text>
+  <text x="42" y="443" class="sans" font-size="10" fill="#475569">Matched 11 triplets: 7,079 → 4,842 lexical words · $3.94 → $3.67</text>
+
+  <!-- Negative Callout: Unresolved SE2 Failure -->
+  <rect x="488" y="388" width="448" height="68" rx="6" fill="#fef2f2" stroke="#fecaca"/>
+  <rect x="488" y="388" width="4.5" height="68" fill="#dc2626" clip-path="url(#clip-neg-light)"/>
+  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="#b91c1c">HONEST NEGATIVE · PROMPT CEILING</text>
+  <text x="506" y="426" class="sans" font-size="11.5" font-weight="700" fill="#0f172a">Unresolved: Opus failed SE2 pushback/TS check on 8/9 runs</text>
+  <text x="506" y="443" class="sans" font-size="10" fill="#475569">Prompt brevity rules did not fix pushback concessions or TS checks</text>
+</svg>

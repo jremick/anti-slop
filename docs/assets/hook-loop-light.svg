@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 336" width="960" height="336" role="img" aria-labelledby="title desc">
+  <title id="title">Blocking Agent Stop-Hook Turn Loop</title>
+  <desc id="desc">Three-step blocking hook workflow: Step 1 Agent turn adds @pytest.mark.skip to tests/test_sync.py; Step 2 Stop hook exits 2 with DIFF-TEST-SKIP remediation on stderr; Step 3 Agent removes skip, fixes src/billing/sync.py, re-runs tests, and Stop hook exits 0 silently.</desc>
+  <defs>
+    <marker id="arrow-light" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 8.5 5 L 1 8.5 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; }
+  </style>
+
+  <!-- Outer canvas -->
+  <rect x="0.5" y="0.5" width="959" height="335" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- Header -->
+  <text x="28" y="36" class="sans" font-size="15.5" font-weight="700" fill="#0f172a">Blocking Agent Turn Loop (Stop Hook)</text>
+  <text x="28" y="55" class="sans" font-size="11" fill="#475569">Enforces diff gates before turn completion — zero prompt tokens, zero CI round-trip</text>
+  <rect x="720" y="23" width="212" height="24" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="826" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="#334155">Claude · Antigravity · Codex</text>
+  <line x1="28" y1="68" x2="932" y2="68" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- Step 1: Agent turn (x=28..284, w=256) -->
+  <rect x="28" y="82" width="256" height="202" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <rect x="40" y="94" width="20" height="20" rx="10" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="50" y="108" text-anchor="middle" class="mono" font-size="10.5" font-weight="700" fill="#0f172a">1</text>
+  <text x="68" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="#0f172a">Agent turn</text>
+  <rect x="196" y="95" width="76" height="19" rx="9.5" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="234" y="108" text-anchor="middle" class="mono" font-size="9.5" fill="#334155">edits test</text>
+  <text x="40" y="133" class="sans" font-size="11" fill="#334155">Adds <tspan class="mono" font-size="10" fill="#0f172a">@pytest.mark.skip</tspan> to</text>
+  <text x="40" y="148" class="sans" font-size="11" fill="#334155">dodge a failing test in <tspan class="mono" font-size="10" fill="#0f172a">tests/</tspan>.</text>
+
+  <rect x="40" y="162" width="232" height="110" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+  <path d="M 46 162 H 266 Q 272 162 272 168 V 184 H 40 V 168 Q 40 162 46 162 Z" fill="#f1f5f9"/>
+  <line x1="40" y1="184" x2="272" y2="184" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="50" y="176.5" class="mono" font-size="9.5" fill="#475569">tests/test_sync.py</text>
+  <rect x="41" y="206" width="230" height="19" fill="#fee2e2"/>
+  <text x="49" y="201" class="mono" font-size="9.8" fill="#475569">7</text>
+  <text x="72" y="201" class="mono" font-size="9.8" fill="#475569"># frozen release gate</text>
+  <text x="49" y="219" class="mono" font-size="9.8" font-weight="600" fill="#b91c1c">+8</text>
+  <text x="72" y="219" class="mono" font-size="9.8" font-weight="600" fill="#b91c1c">@pytest.mark.skip</text>
+  <text x="49" y="238" class="mono" font-size="9.8" fill="#475569">9</text>
+  <text x="72" y="238" class="mono" font-size="9.8" fill="#334155">def test_sync_order():</text>
+  <text x="49" y="256" class="mono" font-size="9.8" fill="#475569">10</text>
+  <text x="86" y="256" class="mono" font-size="9.8" fill="#475569">assert sync() == OK</text>
+
+  <!-- Arrow 1 -> 2 -->
+  <line x1="286" y1="183" x2="309" y2="183" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-light)"/>
+
+  <!-- Step 2: Stop hook -> exit 2 (x=314..646, w=332) -->
+  <rect x="314" y="82" width="332" height="202" rx="8" fill="#ffffff" stroke="#fecaca" stroke-width="1.4"/>
+  <rect x="326" y="94" width="20" height="20" rx="10" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="336" y="108" text-anchor="middle" class="mono" font-size="10.5" font-weight="700" fill="#b91c1c">2</text>
+  <text x="354" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="#0f172a">Stop hook</text>
+  <rect x="524" y="95" width="110" height="19" rx="9.5" fill="#fef2f2" stroke="#fecaca"/>
+  <text x="579" y="108" text-anchor="middle" class="mono" font-size="9.5" font-weight="700" fill="#b91c1c">exit 2 · BLOCKED</text>
+  <text x="326" y="133" class="sans" font-size="11" fill="#334155"><tspan class="mono" font-size="10" fill="#0f172a">anti-slop-hook</tspan> blocks completion and</text>
+  <text x="326" y="148" class="sans" font-size="11" fill="#334155">returns actionable stderr to the agent.</text>
+
+  <rect x="326" y="162" width="308" height="110" rx="6" fill="#f8fafc" stroke="#fecaca"/>
+  <path d="M 332 162 H 628 Q 634 162 634 168 V 184 H 326 V 168 Q 326 162 332 162 Z" fill="#fef2f2"/>
+  <line x1="326" y1="184" x2="634" y2="184" stroke="#fecaca" stroke-width="1"/>
+  <text x="336" y="176.5" class="mono" font-size="9.5" font-weight="600" fill="#b91c1c">stderr → returned to agent</text>
+  <text x="336" y="201" class="mono" font-size="10" font-weight="700" fill="#b91c1c">DIFF-TEST-SKIP: tests/test_sync.py:8</text>
+  <text x="348" y="218" class="mono" font-size="10" fill="#0f172a">adds &apos;@pytest.mark.skip&apos;</text>
+  <text x="336" y="238" class="mono" font-size="9.8" fill="#475569">→ remediation: Fix the underlying</text>
+  <text x="348" y="254" class="mono" font-size="9.8" fill="#475569">failure instead of skipping tests.</text>
+
+  <!-- Arrow 2 -> 3 -->
+  <line x1="648" y1="183" x2="671" y2="183" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow-light)"/>
+
+  <!-- Step 3: Agent retry -> exit 0 (x=676..932, w=256) -->
+  <rect x="676" y="82" width="256" height="202" rx="8" fill="#ffffff" stroke="#99f6e4" stroke-width="1.4"/>
+  <rect x="688" y="94" width="20" height="20" rx="10" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text x="698" y="108" text-anchor="middle" class="mono" font-size="10.5" font-weight="700" fill="#0f766e">3</text>
+  <text x="716" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="#0f172a">Agent retry</text>
+  <rect x="832" y="95" width="88" height="19" rx="9.5" fill="#f0fdfa" stroke="#99f6e4"/>
+  <text x="876" y="108" text-anchor="middle" class="mono" font-size="9.5" font-weight="700" fill="#0f766e">exit 0 · PASS</text>
+  <text x="688" y="133" class="sans" font-size="11" fill="#334155">Removes skip, fixes <tspan class="mono" font-size="10" fill="#0f172a">sync.py</tspan>,</text>
+  <text x="688" y="148" class="sans" font-size="11" fill="#334155">re-runs tests; hook exits <tspan class="mono" font-size="10" fill="#0f172a">0</tspan> silently.</text>
+
+  <rect x="688" y="162" width="232" height="110" rx="6" fill="#f8fafc" stroke="#99f6e4"/>
+  <path d="M 694 162 H 914 Q 920 162 920 168 V 184 H 688 V 168 Q 688 162 694 162 Z" fill="#f0fdfa"/>
+  <line x1="688" y1="184" x2="920" y2="184" stroke="#99f6e4" stroke-width="1"/>
+  <text x="698" y="176.5" class="mono" font-size="9.5" font-weight="600" fill="#0f766e">verified diff &amp; test run</text>
+  <rect x="689" y="189" width="230" height="18" fill="#fee2e2"/>
+  <text x="698" y="201" class="mono" font-size="10" fill="#b91c1c">- @pytest.mark.skip</text>
+  <rect x="689" y="208" width="230" height="18" fill="#dcfce7"/>
+  <text x="698" y="220" class="mono" font-size="10" fill="#0f766e">+ src/billing/sync.py fixed</text>
+  <text x="698" y="240" class="mono" font-size="10" fill="#475569">$ pytest tests/test_sync.py</text>
+  <text x="698" y="257" class="mono" font-size="10" font-weight="700" fill="#0f766e">4 passed · Stop hook exit 0</text>
+
+  <!-- Bottom summary bar -->
+  <rect x="28" y="296" width="904" height="26" rx="5" fill="#f8fafc" stroke="#e2e8f0"/>
+  <text x="480" y="313" text-anchor="middle" class="sans" font-size="10.5" fill="#475569">Catches test skips, silent catches, and bare suppressions mid-turn — before a commit, PR, or human review · Anti-loop guard prevents infinite retries</text>
+</svg>

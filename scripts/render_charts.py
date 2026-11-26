@@ -1,0 +1,986 @@
+#!/usr/bin/env python3
+"""Render deterministic, publication-grade SVG visuals from pilot-3way-v0.6.0 data.
+
+Zero external dependencies (stdlib Python 3.11+ only). Reads
+`results/pilot-3way-v0.6.0/runs.jsonl` and its referenced stage artifacts
+directly — never hardcodes benchmark counts, rates, or deltas.
+
+Outputs written under `docs/assets/`:
+  - pilot-v0.6.0-results-light.svg
+  - pilot-v0.6.0-results-dark.svg
+  - hook-loop-light.svg
+  - hook-loop-dark.svg
+
+Optional flag `--social-svg PATH` also writes a 1280x640 dark technical social
+preview SVG (using the same live metrics from runs.jsonl) for PNG rasterization.
+"""
+
+from __future__ import annotations
+
+import argparse
+from collections import defaultdict
+from dataclasses import dataclass
+from html import escape
+import json
+from pathlib import Path
+import re
+import sys
+from typing import Any
+
+
+FONT_SANS = (
+    "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+)
+FONT_MONO = (
+    "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
+)
+
+CONDITIONS: tuple[str, ...] = ("baseline", "core-rules-v0.2.0", "model-controls")
+MODEL_ORDER: tuple[tuple[str, str, str], ...] = (
+    ("claude-opus-5-5", "Claude Opus 5.5", "Opus"),
+    ("gpt-6.2-astra", "GPT-6.2 Astra", "Astra"),
+    ("gpt-6.2-sol", "GPT-6.2 Sol", "Sol"),
+    ("gemini-4-neon", "Gemini 4 Neon", "Neon"),
+)
+
+END_MARKER_RE = re.compile(
+    r"^## (?:Workspace Grader & Diff|Deterministic Text Constraints)\b",
+    re.MULTILINE,
+)
+
+
+@dataclass(frozen=True)
+class Theme:
+    name: str
+    canvas_bg: str
+    canvas_border: str
+    panel_bg: str
+    panel_border: str
+    code_bg: str
+    code_header_bg: str
+    code_border: str
+    ink: str
+    ink_secondary: str
+    muted: str
+    grid: str
+    divider: str
+    baseline: str
+    core: str
+    controls: str
+    danger: str
+    danger_bg: str
+    danger_border: str
+    danger_ink: str
+    positive: str
+    positive_bg: str
+    positive_border: str
+    positive_ink: str
+    neutral_badge_bg: str
+    neutral_badge_border: str
+    neutral_badge_ink: str
+    diff_del_bg: str
+    diff_add_bg: str
+    arrow: str
+
+
+LIGHT_THEME = Theme(
+    name="light",
+    canvas_bg="#ffffff",
+    canvas_border="#d0d7de",
+    panel_bg="#ffffff",
+    panel_border="#e2e8f0",
+    code_bg="#f8fafc",
+    code_header_bg="#f1f5f9",
+    code_border="#e2e8f0",
+    ink="#0f172a",
+    ink_secondary="#334155",
+    muted="#475569",
+    grid="#e2e8f0",
+    divider="#e2e8f0",
+    baseline="#94a3b8",
+    core="#2563eb",
+    controls="#0f766e",
+    danger="#dc2626",
+    danger_bg="#fef2f2",
+    danger_border="#fecaca",
+    danger_ink="#b91c1c",
+    positive="#0f766e",
+    positive_bg="#f0fdfa",
+    positive_border="#99f6e4",
+    positive_ink="#0f766e",
+    neutral_badge_bg="#f1f5f9",
+    neutral_badge_border="#cbd5e1",
+    neutral_badge_ink="#334155",
+    diff_del_bg="#fee2e2",
+    diff_add_bg="#dcfce7",
+    arrow="#64748b",
+)
+
+DARK_THEME = Theme(
+    name="dark",
+    canvas_bg="#0d1117",
+    canvas_border="#30363d",
+    panel_bg="#161b22",
+    panel_border="#21262d",
+    code_bg="#0d1117",
+    code_header_bg="#1c2128",
+    code_border="#30363d",
+    ink="#e6edf3",
+    ink_secondary="#c9d1d9",
+    muted="#8b949e",
+    grid="#21262d",
+    divider="#21262d",
+    baseline="#6e7681",
+    core="#58a6ff",
+    controls="#2fb6a4",
+    danger="#f85149",
+    danger_bg="#241416",
+    danger_border="#5c2226",
+    danger_ink="#ff7b72",
+    positive="#2fb6a4",
+    positive_bg="#0e2222",
+    positive_border="#1f4d4b",
+    positive_ink="#5eead4",
+    neutral_badge_bg="#21262d",
+    neutral_badge_border="#30363d",
+    neutral_badge_ink="#c9d1d9",
+    diff_del_bg="#31181c",
+    diff_add_bg="#122b23",
+    arrow="#8b949e",
+)
+
+
+@dataclass(frozen=True)
+class ModelCondStats:
+    passed: int
+    completed: int
+    total: int
+
+    @property
+    def timeouts(self) -> int:
+        return self.total - self.completed
+
+
+@dataclass(frozen=True)
+class PilotStats:
+    experiment_id: str
+    total_runs: int
+    completed_runs: int
+    timeout_runs: int
+    n_models: int
+    n_cases: int
+    n_conditions: int
+    n_replicates: int
+    cond_pass: dict[str, int]
+    cond_total: dict[str, int]
+    net_improved_bm: int
+    net_regressed_bm: int
+    rw3_tampered: dict[str, int]
+    rw3_completed: dict[str, int]
+    rw3_baseline_by_model: dict[str, tuple[int, int]]
+    model_cond: dict[tuple[str, str], ModelCondStats]
+    opus_oss_passed_m: int
+    opus_oss_completed_m: int
+    opus_oss_total_m: int
+    opus_matched_triplets: int
+    opus_words_baseline: int
+    opus_words_controls: int
+    opus_words_delta_pct: float
+    opus_usd_baseline: float
+    opus_usd_controls: float
+    opus_usd_delta_pct: float
+    opus_se2_failed: int
+    opus_se2_total: int
+    timeout_notes: tuple[str, ...]
+
+
+def _is_accepted(run: dict[str, Any]) -> bool:
+    if run.get("status") != "completed":
+        return False
+    if run.get("material_defects"):
+        return False
+    checks = run.get("checks") or []
+    return bool(checks) and all(ch.get("status") == "pass" for ch in checks)
+
+
+def _extract_raw_model_output(md_text: str) -> str:
+    marker = "## Raw Model Output\n"
+    idx = md_text.find(marker)
+    if idx < 0:
+        return ""
+    body = md_text[idx + len(marker) :]
+    match = END_MARKER_RE.search(body)
+    if match:
+        body = body[: match.start()]
+    return body.strip()
+
+
+def _count_lexical_words(text: str) -> int:
+    return sum(1 for tok in text.split() if any(ch.isalnum() for ch in tok))
+
+
+def compute_pilot_stats(repo_root: Path, runs_path: Path) -> PilotStats:
+    """Parse runs.jsonl and stage artifacts to compute all empirical figures."""
+    runs = [
+        json.loads(line)
+        for line in runs_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if not runs:
+        raise ValueError(f"No run records found in {runs_path}")
+
+    experiment_id = str(runs[0]["experiment_id"])
+    models = {r["model"]["id"] for r in runs}
+    cases = {r["case_id"] for r in runs}
+    conditions = {r["condition"] for r in runs}
+    replicates = {r["replicate"] for r in runs}
+
+    completed_runs = sum(1 for r in runs if r["status"] == "completed")
+    timeout_runs = sum(1 for r in runs if r["status"] != "completed")
+
+    cond_pass: dict[str, int] = {c: 0 for c in CONDITIONS}
+    cond_total: dict[str, int] = {c: 0 for c in CONDITIONS}
+    rw3_tampered: dict[str, int] = {c: 0 for c in CONDITIONS}
+    rw3_completed: dict[str, int] = {c: 0 for c in CONDITIONS}
+    rw3_baseline_counts: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+
+    mc_raw: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
+    paired_cells: dict[tuple[str, str, int], dict[str, dict[str, Any]]] = defaultdict(dict)
+    timeout_list: list[str] = []
+
+    short_name = {mid: sname for mid, _, sname in MODEL_ORDER}
+    short_cond = {
+        "baseline": "baseline",
+        "core-rules-v0.2.0": "core-rules",
+        "model-controls": "model-controls",
+    }
+
+    for r in runs:
+        mid = r["model"]["id"]
+        cid = r["case_id"]
+        cond = r["condition"]
+        rep = int(r["replicate"])
+        acc = _is_accepted(r)
+        comp = r["status"] == "completed"
+
+        cond_total[cond] += 1
+        if acc:
+            cond_pass[cond] += 1
+
+        mc = mc_raw[(mid, cond)]
+        mc[2] += 1
+        if comp:
+            mc[1] += 1
+        if acc:
+            mc[0] += 1
+
+        paired_cells[(mid, cid, rep)][cond] = r
+
+        if not comp:
+            timeout_list.append(
+                f"{short_name.get(mid, mid)} {short_cond.get(cond, cond)} ({cid} r{rep})"
+            )
+
+        if cid == "RW3" and comp:
+            rw3_completed[cond] += 1
+            tampered = any(
+                ch.get("id") == "readonly_and_no_test_tampering"
+                and ch.get("status") == "fail"
+                for ch in (r.get("checks") or [])
+            )
+            if tampered:
+                rw3_tampered[cond] += 1
+            if cond == "baseline":
+                rw3_baseline_counts[mid][1] += 1
+                if tampered:
+                    rw3_baseline_counts[mid][0] += 1
+
+    net_improved_bm = 0
+    net_regressed_bm = 0
+    for cell_runs in paired_cells.values():
+        b_pass = _is_accepted(cell_runs["baseline"])
+        m_pass = _is_accepted(cell_runs["model-controls"])
+        if not b_pass and m_pass:
+            net_improved_bm += 1
+        elif b_pass and not m_pass:
+            net_regressed_bm += 1
+
+    model_cond: dict[tuple[str, str], ModelCondStats] = {
+        key: ModelCondStats(passed=vals[0], completed=vals[1], total=vals[2])
+        for key, vals in mc_raw.items()
+    }
+
+    # Opus OSS (real_work = RW* cases) under model-controls
+    opus_oss_m = [
+        r
+        for r in runs
+        if r["model"]["id"] == "claude-opus-5-5"
+        and r["case_id"].startswith("RW")
+        and r["condition"] == "model-controls"
+    ]
+    opus_oss_passed_m = sum(1 for r in opus_oss_m if _is_accepted(r))
+    opus_oss_completed_m = sum(1 for r in opus_oss_m if r["status"] == "completed")
+    opus_oss_total_m = len(opus_oss_m)
+
+    # Opus matched always-completed triplets: lexical words & USD (baseline vs model-controls)
+    opus_matched_triplets = 0
+    opus_words_b = 0
+    opus_words_m = 0
+    opus_usd_b = 0.0
+    opus_usd_m = 0.0
+    for (mid, _cid, _rep), cell_runs in sorted(paired_cells.items()):
+        if mid != "claude-opus-5-5":
+            continue
+        if not all(cell_runs[c]["status"] == "completed" for c in CONDITIONS):
+            continue
+        opus_matched_triplets += 1
+        rb = cell_runs["baseline"]
+        rm = cell_runs["model-controls"]
+        opus_usd_b += float(rb["metrics"]["cost_usd"])
+        opus_usd_m += float(rm["metrics"]["cost_usd"])
+        for sa in rb["stage_artifacts"]:
+            raw_out = _extract_raw_model_output(
+                (repo_root / sa["path"]).read_text(encoding="utf-8")
+            )
+            opus_words_b += _count_lexical_words(raw_out)
+        for sa in rm["stage_artifacts"]:
+            raw_out = _extract_raw_model_output(
+                (repo_root / sa["path"]).read_text(encoding="utf-8")
+            )
+            opus_words_m += _count_lexical_words(raw_out)
+
+    opus_words_delta_pct = (
+        (opus_words_m - opus_words_b) / opus_words_b * 100.0
+        if opus_words_b
+        else 0.0
+    )
+    opus_usd_delta_pct = (
+        (opus_usd_m - opus_usd_b) / opus_usd_b * 100.0
+        if opus_usd_b
+        else 0.0
+    )
+
+    # Opus SE2 failure rate across all conditions
+    opus_se2 = [
+        r
+        for r in runs
+        if r["model"]["id"] == "claude-opus-5-5" and r["case_id"] == "SE2"
+    ]
+    opus_se2_failed = sum(1 for r in opus_se2 if not _is_accepted(r))
+    opus_se2_total = len(opus_se2)
+
+    rw3_baseline_by_model = {
+        mid: (vals[0], vals[1]) for mid, vals in rw3_baseline_counts.items()
+    }
+
+    return PilotStats(
+        experiment_id=experiment_id,
+        total_runs=len(runs),
+        completed_runs=completed_runs,
+        timeout_runs=timeout_runs,
+        n_models=len(models),
+        n_cases=len(cases),
+        n_conditions=len(conditions),
+        n_replicates=len(replicates),
+        cond_pass=cond_pass,
+        cond_total=cond_total,
+        net_improved_bm=net_improved_bm,
+        net_regressed_bm=net_regressed_bm,
+        rw3_tampered=rw3_tampered,
+        rw3_completed=rw3_completed,
+        rw3_baseline_by_model=rw3_baseline_by_model,
+        model_cond=model_cond,
+        opus_oss_passed_m=opus_oss_passed_m,
+        opus_oss_completed_m=opus_oss_completed_m,
+        opus_oss_total_m=opus_oss_total_m,
+        opus_matched_triplets=opus_matched_triplets,
+        opus_words_baseline=opus_words_b,
+        opus_words_controls=opus_words_m,
+        opus_words_delta_pct=opus_words_delta_pct,
+        opus_usd_baseline=opus_usd_b,
+        opus_usd_controls=opus_usd_m,
+        opus_usd_delta_pct=opus_usd_delta_pct,
+        opus_se2_failed=opus_se2_failed,
+        opus_se2_total=opus_se2_total,
+        timeout_notes=tuple(sorted(timeout_list)),
+    )
+
+
+def _esc(text: str) -> str:
+    return escape(text, quote=True)
+
+
+def render_pilot_results_svg(stats: PilotStats, theme: Theme) -> str:
+    """Render the two-panel empirical results SVG for light or dark theme."""
+    width, height = 960, 476
+    t = theme
+
+    subtitle = (
+        f"{stats.experiment_id} · {stats.total_runs} runs · "
+        f"{stats.n_models} models × {stats.n_cases} cases × "
+        f"{stats.n_conditions} conditions × n = {stats.n_replicates}"
+    )
+
+    # Left panel: RW3 tampering metrics
+    rw3_items: list[tuple[str, str, int, int, str]] = [
+        (
+            "baseline",
+            "unruled",
+            stats.rw3_tampered["baseline"],
+            stats.rw3_completed["baseline"],
+            t.danger,
+        ),
+        (
+            "core-rules",
+            "v0.2.0",
+            stats.rw3_tampered["core-rules-v0.2.0"],
+            stats.rw3_completed["core-rules-v0.2.0"],
+            t.core,
+        ),
+        (
+            "model-controls",
+            "+ deltas",
+            stats.rw3_tampered["model-controls"],
+            stats.rw3_completed["model-controls"],
+            t.controls,
+        ),
+    ]
+
+    footnote_order = (
+        ("gpt-6.2-astra", "Astra"),
+        ("gpt-6.2-sol", "Sol"),
+        ("claude-opus-5-5", "Opus"),
+        ("gemini-4-neon", "Neon"),
+    )
+    rw3_breakdown = ", ".join(
+        f"{label} {stats.rw3_baseline_by_model[mid][0]}/{stats.rw3_baseline_by_model[mid][1]}"
+        for mid, label in footnote_order
+    )
+    ruled_tampered = (
+        stats.rw3_tampered["core-rules-v0.2.0"] + stats.rw3_tampered["model-controls"]
+    )
+    ruled_completed = (
+        stats.rw3_completed["core-rules-v0.2.0"] + stats.rw3_completed["model-controls"]
+    )
+
+    lines: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" aria-labelledby="title desc">',
+        f'  <title id="title">Empirical Benchmark Results ({_esc(stats.experiment_id)})</title>',
+        f'  <desc id="desc">{_esc(subtitle)}. Frozen-test tampering in RW3 drops from '
+        f'{stats.rw3_tampered["baseline"]}/{stats.rw3_completed["baseline"]} baseline to '
+        f'{ruled_tampered}/{ruled_completed} ruled; overall acceptance rises '
+        f'{stats.cond_pass["baseline"]}/{stats.cond_total["baseline"]} to '
+        f'{stats.cond_pass["core-rules-v0.2.0"]}/{stats.cond_total["core-rules-v0.2.0"]} to '
+        f'{stats.cond_pass["model-controls"]}/{stats.cond_total["model-controls"]}.</desc>',
+        "  <style>",
+        f"    .sans {{ font-family: {FONT_SANS}; }}",
+        f"    .mono {{ font-family: {FONT_MONO}; }}",
+        "  </style>",
+        "",
+        f'  <!-- Outer frame -->',
+        f'  <rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="10" fill="{t.canvas_bg}" stroke="{t.canvas_border}"/>',
+        "",
+        "  <!-- Header -->",
+        f'  <text x="28" y="38" class="sans" font-size="16.5" font-weight="700" fill="{t.ink}">Empirical Results: {_esc(stats.experiment_id)}</text>',
+        f'  <text x="28" y="58" class="sans" font-size="11.5" fill="{t.muted}">{_esc(subtitle)}</text>',
+        "",
+        "  <!-- Condition legend (top right) -->",
+        f'  <g transform="translate(598, 26)">',
+        f'    <rect x="0" y="3" width="10" height="10" rx="2" fill="{t.baseline}"/>',
+        f'    <text x="16" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">baseline</text>',
+        f'    <rect x="82" y="3" width="10" height="10" rx="2" fill="{t.core}"/>',
+        f'    <text x="98" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">core-rules (v0.2.0)</text>',
+        f'    <rect x="226" y="3" width="10" height="10" rx="2" fill="{t.controls}"/>',
+        f'    <text x="242" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">model-controls</text>',
+        "  </g>",
+        f'  <line x1="28" y1="72" x2="{width - 28}" y2="72" stroke="{t.divider}" stroke-width="1"/>',
+        "",
+        "  <!-- Left Panel: RW3 Frozen-Test Tampering -->",
+        f'  <rect x="24" y="84" width="400" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <text x="40" y="108" class="sans" font-size="13" font-weight="700" fill="{t.ink}">Frozen-Test Tampering Under Release Pressure</text>',
+        f'  <text x="40" y="125" class="sans" font-size="10.5" fill="{t.muted}">RW3 (urllib3) · % of completed runs modifying frozen tests</text>',
+    ]
+
+    # Left panel chart area: y_top=152 (100%) to y_bottom=288 (0%), height=136
+    lp_y_top = 152.0
+    lp_y_bottom = 288.0
+    lp_h = lp_y_bottom - lp_y_top
+    lp_x_left = 74.0
+    lp_x_right = 406.0
+
+    for pct in (0, 50, 100):
+        y = lp_y_bottom - (pct / 100.0) * lp_h
+        stroke_color = t.muted if pct == 0 else t.grid
+        stroke_op = "0.45" if pct == 0 else "1"
+        dash = "" if pct == 0 else ' stroke-dasharray="3 3"'
+        lines.append(
+            f'  <line x1="{lp_x_left:.0f}" y1="{y:.1f}" x2="{lp_x_right:.0f}" y2="{y:.1f}" '
+            f'stroke="{stroke_color}" stroke-opacity="{stroke_op}" stroke-width="1"{dash}/>'
+        )
+        lines.append(
+            f'  <text x="{lp_x_left - 8:.0f}" y="{y + 3.5:.1f}" text-anchor="end" '
+            f'class="mono" font-size="10" fill="{t.muted}">{pct}%</text>'
+        )
+
+    bar_centers = (130.0, 240.0, 350.0)
+    bar_w = 64.0
+    for (label, sublabel, tamp, comp, color), cx in zip(rw3_items, bar_centers):
+        pct = (tamp / comp * 100.0) if comp else 0.0
+        bh = (pct / 100.0) * lp_h
+        bx = cx - bar_w / 2.0
+        if bh > 0:
+            by = lp_y_bottom - bh
+            lines.append(
+                f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{bh:.1f}" '
+                f'rx="4" fill="{color}"/>'
+            )
+            val_y = by - 22.0
+            sub_y = by - 8.0
+            val_color = t.danger_ink
+        else:
+            # Crisp 3px zero-indicator bar right above baseline
+            lines.append(
+                f'  <rect x="{bx:.1f}" y="{lp_y_bottom - 3.5:.1f}" width="{bar_w:.1f}" height="3.5" '
+                f'rx="1.5" fill="{color}"/>'
+            )
+            val_y = lp_y_bottom - 26.0
+            sub_y = lp_y_bottom - 12.0
+            val_color = t.positive_ink
+
+        lines.append(
+            f'  <text x="{cx:.1f}" y="{val_y:.1f}" text-anchor="middle" '
+            f'class="mono" font-size="13" font-weight="700" fill="{val_color}">{pct:.1f}%</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="{sub_y:.1f}" text-anchor="middle" '
+            f'class="mono" font-size="10" fill="{t.muted}">({tamp}/{comp})</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="307" text-anchor="middle" '
+            f'class="sans" font-size="11" font-weight="600" fill="{t.ink}">{_esc(label)}</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="321" text-anchor="middle" '
+            f'class="sans" font-size="9.5" fill="{t.muted}">{_esc(sublabel)}</text>'
+        )
+
+    lines.extend([
+        f'  <line x1="40" y1="334" x2="408" y2="334" stroke="{t.divider}" stroke-width="1"/>',
+        f'  <text x="40" y="350" class="sans" font-size="10" fill="{t.muted}">Baseline tampering: {_esc(rw3_breakdown)}</text>',
+        f'  <text x="40" y="364" class="sans" font-size="9.5" fill="{t.muted}">Ruled arms combined: {ruled_tampered}/{ruled_completed} completed runs tampered (0.0%)</text>',
+        "",
+        "  <!-- Right Panel: Overall Acceptance by Model -->",
+        f'  <rect x="438" y="84" width="498" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <text x="454" y="108" class="sans" font-size="13" font-weight="700" fill="{t.ink}">Acceptance by Model &amp; Condition</text>',
+        f'  <text x="454" y="125" class="sans" font-size="10.5" fill="{t.muted}">'
+        f'All {stats.n_cases} cases (n = {stats.n_replicates}) · Total: '
+        f'{stats.cond_pass["baseline"]}/{stats.cond_total["baseline"]} → '
+        f'{stats.cond_pass["core-rules-v0.2.0"]}/{stats.cond_total["core-rules-v0.2.0"]} → '
+        f'{stats.cond_pass["model-controls"]}/{stats.cond_total["model-controls"]} '
+        f'(+{stats.net_improved_bm}/-{stats.net_regressed_bm} vs. baseline)</text>',
+    ])
+
+    # Right panel grouped horizontal bars
+    rp_x0 = 584.0
+    rp_x1 = 860.0  # 276px track -> 23px per run for 12 runs
+    rp_track_w = rp_x1 - rp_x0
+    max_runs = 12
+    rp_y_top = 140.0
+    rp_y_bot = 330.0
+
+    for tick in (0, 4, 8, 12):
+        tx = rp_x0 + (tick / max_runs) * rp_track_w
+        stroke_color = t.muted if tick == 0 else t.grid
+        stroke_op = "0.45" if tick == 0 else "1"
+        dash = "" if tick == 0 else ' stroke-dasharray="3 3"'
+        lines.append(
+            f'  <line x1="{tx:.1f}" y1="{rp_y_top:.0f}" x2="{tx:.1f}" y2="{rp_y_bot:.0f}" '
+            f'stroke="{stroke_color}" stroke-opacity="{stroke_op}" stroke-width="1"{dash}/>'
+        )
+        tick_label = f"{tick}/12" if tick == 12 else str(tick)
+        lines.append(
+            f'  <text x="{tx:.1f}" y="346" text-anchor="middle" '
+            f'class="mono" font-size="10" fill="{t.muted}">{tick_label}</text>'
+        )
+
+    cond_colors = {
+        "baseline": t.baseline,
+        "core-rules-v0.2.0": t.core,
+        "model-controls": t.controls,
+    }
+    group_ys = (146.0, 194.0, 242.0, 290.0)
+    bar_h = 10.0
+    bar_step = 12.5
+
+    for idx, ((mid, display_name, _short), gy) in enumerate(zip(MODEL_ORDER, group_ys)):
+        if idx > 0:
+            sep_y = gy - 6.0
+            lines.append(
+                f'  <line x1="454" y1="{sep_y:.1f}" x2="920" y2="{sep_y:.1f}" '
+                f'stroke="{t.divider}" stroke-opacity="0.65" stroke-width="1"/>'
+            )
+
+        # Model label on the left
+        label_y = gy + 17.0
+        lines.append(
+            f'  <text x="454" y="{label_y:.1f}" class="sans" font-size="11.5" font-weight="600" fill="{t.ink}">{_esc(display_name)}</text>'
+        )
+        if mid == "claude-opus-5-5":
+            lines.append(
+                f'  <text x="454" y="{label_y + 13.5:.1f}" class="sans" font-size="9.5" font-weight="600" fill="{t.danger_ink}">'
+                f'SE2: {stats.opus_se2_failed}/{stats.opus_se2_total} fail</text>'
+            )
+        else:
+            mc_m = stats.model_cond[(mid, "model-controls")]
+            sub_txt = f"{mc_m.passed}/{mc_m.total} w/ controls"
+            lines.append(
+                f'  <text x="454" y="{label_y + 13.5:.1f}" class="sans" font-size="9.5" fill="{t.muted}">{_esc(sub_txt)}</text>'
+            )
+
+        for c_idx, cond in enumerate(CONDITIONS):
+            mc = stats.model_cond[(mid, cond)]
+            by = gy + c_idx * bar_step
+            bw = (mc.passed / mc.total) * rp_track_w if mc.total else 0.0
+            lines.append(
+                f'  <rect x="{rp_x0:.1f}" y="{by:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" '
+                f'rx="2.5" fill="{cond_colors[cond]}"/>'
+            )
+            lbl = f"{mc.passed}/{mc.total}" + ("†" if mc.timeouts > 0 else "")
+            lbl_weight = "700" if cond == "model-controls" else "500"
+            lbl_fill = t.ink if cond == "model-controls" else t.muted
+            lines.append(
+                f'  <text x="{rp_x0 + bw + 6:.1f}" y="{by + 8.5:.1f}" '
+                f'class="mono" font-size="10" font-weight="{lbl_weight}" fill="{lbl_fill}">{_esc(lbl)}</text>'
+            )
+
+    timeout_footer = "† 1 × 720s timeout kept in denominator: " + "; ".join(
+        stats.timeout_notes
+    )
+    lines.append(
+        f'  <text x="454" y="364" class="sans" font-size="9.5" fill="{t.muted}">{_esc(timeout_footer)}</text>'
+    )
+
+    # Bottom two crisp callout boxes
+    words_sign = "+" if stats.opus_words_delta_pct > 0 else ""
+    usd_sign = "+" if stats.opus_usd_delta_pct > 0 else ""
+    pos_headline = (
+        f"Opus + D-OPU-4: {stats.opus_oss_passed_m}/{stats.opus_oss_completed_m} completed OSS · "
+        f"{words_sign}{stats.opus_words_delta_pct:.1f}% words · "
+        f"{usd_sign}{stats.opus_usd_delta_pct:.1f}% USD"
+    )
+    pos_detail = (
+        f"Matched {stats.opus_matched_triplets} triplets: "
+        f"{stats.opus_words_baseline:,} → {stats.opus_words_controls:,} lexical words · "
+        f"${stats.opus_usd_baseline:.2f} → ${stats.opus_usd_controls:.2f}"
+    )
+
+    neg_headline = (
+        f"Unresolved: Opus failed SE2 pushback/TS check on "
+        f"{stats.opus_se2_failed}/{stats.opus_se2_total} runs"
+    )
+    neg_detail = (
+        "Prompt brevity rules did not fix pushback concessions or TS checks"
+    )
+
+    lines.extend([
+        "",
+        "  <!-- Positive Callout: Opus + D-OPU-4 -->",
+        f'  <defs>',
+        f'    <clipPath id="clip-pos-{t.name}"><rect x="24" y="388" width="448" height="68" rx="6"/></clipPath>',
+        f'    <clipPath id="clip-neg-{t.name}"><rect x="488" y="388" width="448" height="68" rx="6"/></clipPath>',
+        f'  </defs>',
+        f'  <rect x="24" y="388" width="448" height="68" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+        f'  <rect x="24" y="388" width="4.5" height="68" fill="{t.positive}" clip-path="url(#clip-pos-{t.name})"/>',
+        f'  <text x="42" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.positive_ink}">COMPLIANCE &amp; COST WIN</text>',
+        f'  <text x="42" y="426" class="sans" font-size="11.5" font-weight="700" fill="{t.ink}">{_esc(pos_headline)}</text>',
+        f'  <text x="42" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(pos_detail)}</text>',
+        "",
+        "  <!-- Negative Callout: Unresolved SE2 Failure -->",
+        f'  <rect x="488" y="388" width="448" height="68" rx="6" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
+        f'  <rect x="488" y="388" width="4.5" height="68" fill="{t.danger}" clip-path="url(#clip-neg-{t.name})"/>',
+        f'  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.danger_ink}">HONEST NEGATIVE · PROMPT CEILING</text>',
+        f'  <text x="506" y="426" class="sans" font-size="11.5" font-weight="700" fill="{t.ink}">{_esc(neg_headline)}</text>',
+        f'  <text x="506" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(neg_detail)}</text>',
+        "</svg>",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def render_hook_loop_svg(theme: Theme) -> str:
+    """Render the 3-step blocking agent Stop-hook turn-loop SVG."""
+    width, height = 960, 336
+    t = theme
+
+    lines: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" aria-labelledby="title desc">',
+        '  <title id="title">Blocking Agent Stop-Hook Turn Loop</title>',
+        '  <desc id="desc">Three-step blocking hook workflow: Step 1 Agent turn adds @pytest.mark.skip to tests/test_sync.py; Step 2 Stop hook exits 2 with DIFF-TEST-SKIP remediation on stderr; Step 3 Agent removes skip, fixes src/billing/sync.py, re-runs tests, and Stop hook exits 0 silently.</desc>',
+        "  <defs>",
+        f'    <marker id="arrow-{t.name}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">',
+        f'      <path d="M 1 1.5 L 8.5 5 L 1 8.5 z" fill="{t.arrow}"/>',
+        "    </marker>",
+        "  </defs>",
+        "  <style>",
+        f"    .sans {{ font-family: {FONT_SANS}; }}",
+        f"    .mono {{ font-family: {FONT_MONO}; }}",
+        "  </style>",
+        "",
+        f'  <!-- Outer canvas -->',
+        f'  <rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="10" fill="{t.canvas_bg}" stroke="{t.canvas_border}"/>',
+        "",
+        "  <!-- Header -->",
+        f'  <text x="28" y="36" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">Blocking Agent Turn Loop (Stop Hook)</text>',
+        f'  <text x="28" y="55" class="sans" font-size="11" fill="{t.muted}">Enforces diff gates before turn completion — zero prompt tokens, zero CI round-trip</text>',
+        f'  <rect x="720" y="23" width="212" height="24" rx="12" fill="{t.neutral_badge_bg}" stroke="{t.neutral_badge_border}"/>',
+        f'  <text x="826" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="{t.neutral_badge_ink}">Claude · Antigravity · Codex</text>',
+        f'  <line x1="28" y1="68" x2="{width - 28}" y2="68" stroke="{t.divider}" stroke-width="1"/>',
+        "",
+        "  <!-- Step 1: Agent turn (x=28..284, w=256) -->",
+        f'  <rect x="28" y="82" width="256" height="202" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <rect x="40" y="94" width="20" height="20" rx="10" fill="{t.neutral_badge_bg}" stroke="{t.neutral_badge_border}"/>',
+        f'  <text x="50" y="108" text-anchor="middle" class="mono" font-size="10.5" font-weight="700" fill="{t.ink}">1</text>',
+        f'  <text x="68" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="{t.ink}">Agent turn</text>',
+        f'  <rect x="196" y="95" width="76" height="19" rx="9.5" fill="{t.neutral_badge_bg}" stroke="{t.neutral_badge_border}"/>',
+        f'  <text x="234" y="108" text-anchor="middle" class="mono" font-size="9.5" fill="{t.neutral_badge_ink}">edits test</text>',
+        f'  <text x="40" y="133" class="sans" font-size="11" fill="{t.ink_secondary}">Adds <tspan class="mono" font-size="10" fill="{t.ink}">@pytest.mark.skip</tspan> to</text>',
+        f'  <text x="40" y="148" class="sans" font-size="11" fill="{t.ink_secondary}">dodge a failing test in <tspan class="mono" font-size="10" fill="{t.ink}">tests/</tspan>.</text>',
+        "",
+        f'  <rect x="40" y="162" width="232" height="110" rx="6" fill="{t.code_bg}" stroke="{t.code_border}"/>',
+        f'  <path d="M 46 162 H 266 Q 272 162 272 168 V 184 H 40 V 168 Q 40 162 46 162 Z" fill="{t.code_header_bg}"/>',
+        f'  <line x1="40" y1="184" x2="272" y2="184" stroke="{t.code_border}" stroke-width="1"/>',
+        f'  <text x="50" y="176.5" class="mono" font-size="9.5" fill="{t.muted}">tests/test_sync.py</text>',
+        f'  <rect x="41" y="206" width="230" height="19" fill="{t.diff_del_bg}"/>',
+        f'  <text x="49" y="201" class="mono" font-size="9.8" fill="{t.muted}">7</text>',
+        f'  <text x="72" y="201" class="mono" font-size="9.8" fill="{t.muted}"># frozen release gate</text>',
+        f'  <text x="49" y="219" class="mono" font-size="9.8" font-weight="600" fill="{t.danger_ink}">+8</text>',
+        f'  <text x="72" y="219" class="mono" font-size="9.8" font-weight="600" fill="{t.danger_ink}">@pytest.mark.skip</text>',
+        f'  <text x="49" y="238" class="mono" font-size="9.8" fill="{t.muted}">9</text>',
+        f'  <text x="72" y="238" class="mono" font-size="9.8" fill="{t.ink_secondary}">def test_sync_order():</text>',
+        f'  <text x="49" y="256" class="mono" font-size="9.8" fill="{t.muted}">10</text>',
+        f'  <text x="86" y="256" class="mono" font-size="9.8" fill="{t.muted}">assert sync() == OK</text>',
+        "",
+        "  <!-- Arrow 1 -> 2 -->",
+        f'  <line x1="286" y1="183" x2="309" y2="183" stroke="{t.arrow}" stroke-width="1.6" marker-end="url(#arrow-{t.name})"/>',
+        "",
+        "  <!-- Step 2: Stop hook -> exit 2 (x=314..646, w=332) -->",
+        f'  <rect x="314" y="82" width="332" height="202" rx="8" fill="{t.panel_bg}" stroke="{t.danger_border}" stroke-width="1.4"/>',
+        f'  <rect x="326" y="94" width="20" height="20" rx="10" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
+        f'  <text x="336" y="108" text-anchor="middle" class="mono" font-size="10.5" font-weight="700" fill="{t.danger_ink}">2</text>',
+        f'  <text x="354" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="{t.ink}">Stop hook</text>',
+        f'  <rect x="524" y="95" width="110" height="19" rx="9.5" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
+        f'  <text x="579" y="108" text-anchor="middle" class="mono" font-size="9.5" font-weight="700" fill="{t.danger_ink}">exit 2 · BLOCKED</text>',
+        f'  <text x="326" y="133" class="sans" font-size="11" fill="{t.ink_secondary}"><tspan class="mono" font-size="10" fill="{t.ink}">anti-slop-hook</tspan> blocks completion and</text>',
+        f'  <text x="326" y="148" class="sans" font-size="11" fill="{t.ink_secondary}">returns actionable stderr to the agent.</text>',
+        "",
+        f'  <rect x="326" y="162" width="308" height="110" rx="6" fill="{t.code_bg}" stroke="{t.danger_border}"/>',
+        f'  <path d="M 332 162 H 628 Q 634 162 634 168 V 184 H 326 V 168 Q 326 162 332 162 Z" fill="{t.danger_bg}"/>',
+        f'  <line x1="326" y1="184" x2="634" y2="184" stroke="{t.danger_border}" stroke-width="1"/>',
+        f'  <text x="336" y="176.5" class="mono" font-size="9.5" font-weight="600" fill="{t.danger_ink}">stderr → returned to agent</text>',
+        f'  <text x="336" y="201" class="mono" font-size="10" font-weight="700" fill="{t.danger_ink}">DIFF-TEST-SKIP: tests/test_sync.py:8</text>',
+        f'  <text x="348" y="218" class="mono" font-size="10" fill="{t.ink}">adds &apos;@pytest.mark.skip&apos;</text>',
+        f'  <text x="336" y="238" class="mono" font-size="9.8" fill="{t.muted}">→ remediation: Fix the underlying</text>',
+        f'  <text x="348" y="254" class="mono" font-size="9.8" fill="{t.muted}">failure instead of skipping tests.</text>',
+        "",
+        "  <!-- Arrow 2 -> 3 -->",
+        f'  <line x1="648" y1="183" x2="671" y2="183" stroke="{t.arrow}" stroke-width="1.6" marker-end="url(#arrow-{t.name})"/>',
+        "",
+        "  <!-- Step 3: Agent retry -> exit 0 (x=676..932, w=256) -->",
+        f'  <rect x="676" y="82" width="256" height="202" rx="8" fill="{t.panel_bg}" stroke="{t.positive_border}" stroke-width="1.4"/>',
+        f'  <rect x="688" y="94" width="20" height="20" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+        f'  <text x="698" y="108" text-anchor="middle" class="mono" font-size="10.5" font-weight="700" fill="{t.positive_ink}">3</text>',
+        f'  <text x="716" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="{t.ink}">Agent retry</text>',
+        f'  <rect x="832" y="95" width="88" height="19" rx="9.5" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+        f'  <text x="876" y="108" text-anchor="middle" class="mono" font-size="9.5" font-weight="700" fill="{t.positive_ink}">exit 0 · PASS</text>',
+        f'  <text x="688" y="133" class="sans" font-size="11" fill="{t.ink_secondary}">Removes skip, fixes <tspan class="mono" font-size="10" fill="{t.ink}">sync.py</tspan>,</text>',
+        f'  <text x="688" y="148" class="sans" font-size="11" fill="{t.ink_secondary}">re-runs tests; hook exits <tspan class="mono" font-size="10" fill="{t.ink}">0</tspan> silently.</text>',
+        "",
+        f'  <rect x="688" y="162" width="232" height="110" rx="6" fill="{t.code_bg}" stroke="{t.positive_border}"/>',
+        f'  <path d="M 694 162 H 914 Q 920 162 920 168 V 184 H 688 V 168 Q 688 162 694 162 Z" fill="{t.positive_bg}"/>',
+        f'  <line x1="688" y1="184" x2="920" y2="184" stroke="{t.positive_border}" stroke-width="1"/>',
+        f'  <text x="698" y="176.5" class="mono" font-size="9.5" font-weight="600" fill="{t.positive_ink}">verified diff &amp; test run</text>',
+        f'  <rect x="689" y="189" width="230" height="18" fill="{t.diff_del_bg}"/>',
+        f'  <text x="698" y="201" class="mono" font-size="10" fill="{t.danger_ink}">- @pytest.mark.skip</text>',
+        f'  <rect x="689" y="208" width="230" height="18" fill="{t.diff_add_bg}"/>',
+        f'  <text x="698" y="220" class="mono" font-size="10" fill="{t.positive_ink}">+ src/billing/sync.py fixed</text>',
+        f'  <text x="698" y="240" class="mono" font-size="10" fill="{t.muted}">$ pytest tests/test_sync.py</text>',
+        f'  <text x="698" y="257" class="mono" font-size="10" font-weight="700" fill="{t.positive_ink}">4 passed · Stop hook exit 0</text>',
+        "",
+        "  <!-- Bottom summary bar -->",
+        f'  <rect x="28" y="296" width="904" height="26" rx="5" fill="{t.code_bg}" stroke="{t.divider}"/>',
+        f'  <text x="480" y="313" text-anchor="middle" class="sans" font-size="10.5" fill="{t.muted}">'
+        'Catches test skips, silent catches, and bare suppressions mid-turn — before a commit, PR, or human review · Anti-loop guard prevents infinite retries</text>',
+        "</svg>",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def render_social_preview_svg(stats: PilotStats) -> str:
+    """Render the 1280x640 dark minimalist GitHub social preview SVG."""
+    width, height = 1280, 640
+    t = DARK_THEME
+
+    b_tamp = stats.rw3_tampered["baseline"]
+    b_comp = stats.rw3_completed["baseline"]
+    b_pct = (b_tamp / b_comp * 100.0) if b_comp else 0.0
+    ruled_tamp = (
+        stats.rw3_tampered["core-rules-v0.2.0"] + stats.rw3_tampered["model-controls"]
+    )
+    ruled_comp = (
+        stats.rw3_completed["core-rules-v0.2.0"] + stats.rw3_completed["model-controls"]
+    )
+    ruled_pct = (ruled_tamp / ruled_comp * 100.0) if ruled_comp else 0.0
+    stat_arrow = f"{b_pct:.1f}% → {ruled_pct:.0f}%"
+    stat_detail = (
+        f"{stats.experiment_id} · {b_tamp}/{b_comp} baseline → "
+        f"{ruled_tamp}/{ruled_comp} ruled (urllib3)"
+    )
+
+    lines: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
+        "  <defs>",
+        '    <pattern id="subtle-grid" width="40" height="40" patternUnits="userSpaceOnUse">',
+        '      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#161b22" stroke-width="1"/>',
+        "    </pattern>",
+        '    <clipPath id="clip-stat-pill"><rect x="596" y="472" width="608" height="72" rx="10"/></clipPath>',
+        "  </defs>",
+        "  <style>",
+        f"    .sans {{ font-family: {FONT_SANS}; }}",
+        f"    .mono {{ font-family: {FONT_MONO}; }}",
+        "  </style>",
+        "",
+        "  <!-- Background & architectural frame -->",
+        f'  <rect x="0" y="0" width="{width}" height="{height}" fill="{t.canvas_bg}"/>',
+        f'  <rect x="0" y="0" width="{width}" height="{height}" fill="url(#subtle-grid)" opacity="0.7"/>',
+        f'  <rect x="28" y="28" width="{width - 56}" height="{height - 56}" rx="16" fill="{t.canvas_bg}" fill-opacity="0.72" stroke="{t.canvas_border}" stroke-width="1.5"/>',
+        "",
+        "  <!-- Left column: identity -->",
+        '  <g transform="translate(76, 118)">',
+        f'    <rect x="0" y="0" width="262" height="32" rx="16" fill="{t.panel_bg}" stroke="{t.canvas_border}"/>',
+        f'    <circle cx="18" cy="16" r="4.5" fill="{t.controls}"/>',
+        f'    <text x="32" y="20.5" class="mono" font-size="12.5" font-weight="600" fill="{t.ink_secondary}">v0.6.0 · DETERMINISTIC GATES</text>',
+        "",
+        f'    <text x="0" y="114" class="mono" font-size="72" font-weight="700" letter-spacing="-2.5" fill="{t.ink}">anti-slop</text>',
+        f'    <rect x="0" y="136" width="64" height="3.5" rx="1.75" fill="{t.controls}"/>',
+        "",
+        f'    <text x="0" y="188" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">Deterministic diff gates, blocking</text>',
+        f'    <text x="0" y="222" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">agent hooks, and empirical benchmarks</text>',
+        f'    <text x="0" y="256" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">for AI-assisted engineering.</text>',
+        "",
+        f'    <line x1="0" y1="306" x2="466" y2="306" stroke="{t.divider}" stroke-width="1.2"/>',
+        f'    <text x="0" y="346" class="mono" font-size="15.5" font-weight="600" fill="{t.ink}">Zero dependencies · Python stdlib · MIT</text>',
+        f'    <text x="0" y="378" class="mono" font-size="13" fill="{t.muted}">Claude Code · Antigravity · Codex CLI · GitHub Actions</text>',
+        "  </g>",
+        "",
+        "  <!-- Right column: terminal stderr card -->",
+        f'  <rect x="596" y="102" width="608" height="348" rx="12" fill="#090d13" stroke="{t.canvas_border}" stroke-width="1.5"/>',
+        f'  <path d="M 608 102 H 1192 Q 1204 102 1204 114 V 144 H 596 V 114 Q 596 102 608 102 Z" fill="{t.panel_bg}"/>',
+        f'  <line x1="596" y1="144" x2="1204" y2="144" stroke="{t.divider}" stroke-width="1"/>',
+        '  <circle cx="620" cy="123" r="5" fill="#30363d"/>',
+        '  <circle cx="638" cy="123" r="5" fill="#30363d"/>',
+        '  <circle cx="656" cy="123" r="5" fill="#30363d"/>',
+        f'  <text x="680" y="128" class="mono" font-size="13" fill="{t.muted}">anti-slop-diff · stderr (exit 1 / hook exit 2)</text>',
+        "",
+        f'  <text x="622" y="179" class="mono" font-size="13.5" fill="{t.muted}">$ git diff origin/main...HEAD | anti-slop-diff --diff -</text>',
+        "",
+        f'  <text x="622" y="218" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[ERROR] DIFF-TEST-SKIP</text>',
+        f'  <text x="822" y="218" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:8</text>',
+        f'  <text x="638" y="239" class="mono" font-size="13" fill="{t.ink_secondary}">adds test-skip annotation &apos;@pytest.mark.skip&apos;</text>',
+        "",
+        f'  <text x="622" y="280" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[ERROR] DIFF-SILENT-CATCH</text>',
+        f'  <text x="846" y="280" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:17</text>',
+        f'  <text x="638" y="301" class="mono" font-size="13" fill="{t.ink_secondary}">swallows errors via silent handler (except Exception: pass)</text>',
+        "",
+        f'  <text x="622" y="342" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[ERROR] DIFF-SUPPRESSION</text>',
+        f'  <text x="838" y="342" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:13</text>',
+        f'  <text x="638" y="363" class="mono" font-size="13" fill="{t.ink_secondary}">adds bare &apos;# type: ignore&apos; without [code] and reason</text>',
+        "",
+        f'  <rect x="618" y="394" width="564" height="36" rx="6" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
+        f'  <text x="634" y="416.5" class="mono" font-size="12.5" font-weight="600" fill="{t.danger_ink}">BLOCKED · 3 errors · 0 LLM calls · 0 standing prompt tokens</text>',
+        "",
+        "  <!-- Empirical Stat Pill -->",
+        f'  <rect x="596" y="472" width="608" height="72" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}" stroke-width="1.5"/>',
+        f'  <rect x="596" y="472" width="6" height="72" fill="{t.positive}" clip-path="url(#clip-stat-pill)"/>',
+        f'  <text x="620" y="517" class="mono" font-size="24" font-weight="700" fill="{t.positive_ink}">{_esc(stat_arrow)}</text>',
+        f'  <line x1="776" y1="487" x2="776" y2="529" stroke="{t.positive_border}" stroke-width="1.2"/>',
+        f'  <text x="794" y="503" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">frozen-test tampering in n = {stats.n_replicates} OSS eval</text>',
+        f'  <text x="794" y="525" class="sans" font-size="12.5" fill="{t.muted}">{_esc(stat_detail)}</text>',
+        "</svg>",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _write_if_changed(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return
+    path.write_text(content, encoding="utf-8", newline="\n")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Render deterministic SVG assets from pilot-3way-v0.6.0/runs.jsonl."
+    )
+    parser.add_argument(
+        "--runs",
+        type=Path,
+        default=None,
+        help="Path to runs.jsonl (default: results/pilot-3way-v0.6.0/runs.jsonl)",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="Output directory for SVGs (default: docs/assets)",
+    )
+    parser.add_argument(
+        "--social-svg",
+        type=Path,
+        default=None,
+        help="Optional path to write the 1280x640 social preview SVG for PNG rasterization",
+    )
+    args = parser.parse_args(argv)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    runs_path = args.runs if args.runs is not None else (
+        repo_root / "results" / "pilot-3way-v0.6.0" / "runs.jsonl"
+    )
+    out_dir = args.out_dir if args.out_dir is not None else (
+        repo_root / "docs" / "assets"
+    )
+
+    stats = compute_pilot_stats(repo_root, runs_path)
+
+    outputs = {
+        out_dir / "pilot-v0.6.0-results-light.svg": render_pilot_results_svg(
+            stats, LIGHT_THEME
+        ),
+        out_dir / "pilot-v0.6.0-results-dark.svg": render_pilot_results_svg(
+            stats, DARK_THEME
+        ),
+        out_dir / "hook-loop-light.svg": render_hook_loop_svg(LIGHT_THEME),
+        out_dir / "hook-loop-dark.svg": render_hook_loop_svg(DARK_THEME),
+    }
+    for path, content in outputs.items():
+        _write_if_changed(path, content)
+
+    if args.social_svg is not None:
+        _write_if_changed(args.social_svg, render_social_preview_svg(stats))
+
+    print(
+        f"Rendered {len(outputs)} SVG assets from {runs_path.name} "
+        f"({stats.total_runs} runs; RW3 tampering {stats.rw3_tampered['baseline']}/"
+        f"{stats.rw3_completed['baseline']} -> "
+        f"{stats.rw3_tampered['core-rules-v0.2.0']}/{stats.rw3_completed['core-rules-v0.2.0']} / "
+        f"{stats.rw3_tampered['model-controls']}/{stats.rw3_completed['model-controls']}; "
+        f"overall {stats.cond_pass['baseline']}/{stats.cond_total['baseline']} -> "
+        f"{stats.cond_pass['core-rules-v0.2.0']}/{stats.cond_total['core-rules-v0.2.0']} -> "
+        f"{stats.cond_pass['model-controls']}/{stats.cond_total['model-controls']})."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
