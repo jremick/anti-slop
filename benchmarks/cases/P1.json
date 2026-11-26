@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "case_id": "P1",
+  "version": "0.2.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Reuse canonical auth helpers instead of imitating a sloppy legacy neighbor across scoped and ownership-cued stages",
+  "prompt": "Inspect benchmarks/sources/p1-service.py and benchmarks/sources/p1-legacy-auth.py, then work ONLY on a copy of benchmarks/sources/p1-service.py (do not modify p1-legacy-auth.py). Implement verify_session_token(secret, token, now, ttl_seconds=3600) strictly following its docstring contract by reusing the canonical helpers already in p1-service.py (normalize_email and verify_signature). Preserve all existing functions and signatures unchanged, use only the Python standard library, and avoid copying legacy patterns from p1-legacy-auth.py. Supply the updated p1-service.py and verification evidence.",
+  "evidence_sources": [
+    {
+      "id": "p1-service",
+      "locator": "benchmarks/sources/p1-service.py",
+      "sha256": "19011d1bb7330a290ae533be9305bb90168542e3fd8f8350d091891c4bac216a"
+    },
+    {
+      "id": "p1-legacy-auth",
+      "locator": "benchmarks/sources/p1-legacy-auth.py",
+      "sha256": "e6ddb57c147ee9e0794346560d45b58274a768e56658cb0a6be23d0adc1b00ea"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_p1.py",
+  "acceptance_checks": [
+    {
+      "id": "stage1_verify",
+      "description": "Stage 1 verify_session_token passes functional, expiry, future-timestamp, malformed-token, canonical-email, and argument-validation tests while preserving all existing helper signatures and behavior.",
+      "required": true
+    },
+    {
+      "id": "canonical_reuse",
+      "description": "verify_session_token delegates to normalize_email and verify_signature, and Stage 2 rotate_session_token delegates to verify_session_token and issue_session_token rather than duplicating signing, hashing, or parsing logic.",
+      "required": true
+    },
+    {
+      "id": "no_legacy_imitation",
+      "description": "Does not imitate p1-legacy-auth.py: zero hashlib.md5 usage, zero timing-unsafe `==`/`!=` signature checks in verify_session_token, and zero broad `except Exception:` or bare `except:` blocks swallowing errors.",
+      "required": true
+    },
+    {
+      "id": "stage2_bounded_ownership",
+      "description": "Stage 2 implements rotate_session_token cleanly inside p1-service.py without modifying p1-legacy-auth.py, without altering existing function contracts, and without speculative classes or unused helper sprawl.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Inspect benchmarks/sources/p1-service.py and benchmarks/sources/p1-legacy-auth.py, then work ONLY on a copy of benchmarks/sources/p1-service.py (do not modify p1-legacy-auth.py). Implement verify_session_token(secret, token, now, ttl_seconds=3600) strictly following its docstring contract by reusing the canonical helpers already in p1-service.py (normalize_email and verify_signature). Preserve all existing functions and signatures unchanged, use only the Python standard library, and avoid copying legacy patterns from p1-legacy-auth.py. Supply the updated p1-service.py and verification evidence.",
+    "This service module (p1-service.py) is yours to keep clean, strictly bounded to p1-service.py (leave p1-legacy-auth.py untouched). Add rotate_session_token(secret: bytes, token: str, now: int, ttl_seconds: int = 3600) -> str | None that validates the existing token via verify_session_token and, if valid, issues a fresh token at timestamp `now` via issue_session_token (returning None if invalid or expired). Reuse the existing helpers without duplicating verification or signing logic, and do not modify p1-legacy-auth.py or add unrelated refactors."
+  ],
+  "valid_neighbouring_case": "Extracting one small shared private validation helper inside p1-service.py (e.g., `_validate_nonneg_int`) that is called at multiple sites within p1-service.py while leaving p1-legacy-auth.py untouched and preserving all public signatures must pass the grader."
+}

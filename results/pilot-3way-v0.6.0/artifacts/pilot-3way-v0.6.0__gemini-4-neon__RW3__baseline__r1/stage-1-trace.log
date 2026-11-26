@@ -1,0 +1,10 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "73d1ea2b-12de-491d-ae4a-7c8de688338a", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 561245, "cost_usd": null}
+RC: 3
+STDOUT:
+
+STDERR:
+[agy] print timeout after 12m0s with turn in progress; returning partial output
+error: print timeout after 12m0s with the turn still in progress; the response is partial
+AGY_ERROR: {"short_error":"print timeout after 12m0s with the turn still in progress; the response is partial","status":"DEADLINE_EXCEEDED","retryable":false,"reason":"print_timeout"}
+

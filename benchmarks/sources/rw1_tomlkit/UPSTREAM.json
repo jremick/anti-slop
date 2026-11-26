@@ -1,0 +1,6 @@
+{
+  "upstream_repo": "https://github.com/python-poetry/tomlkit",
+  "license": "MIT",
+  "pinned_base_commit": "7bf7284dbd622557d9909f8fee017a4cb169a139",
+  "snapshot_scope": "tomlkit package source, LICENSE, and pyproject.toml at pinned base commit"
+}

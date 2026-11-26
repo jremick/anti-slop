@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "case_id": "RW6",
+  "version": "0.4.0",
+  "origin": "real_work",
+  "domain": "writing",
+  "title": "Audit an error-ridden tomlkit 0.15.3 release announcement against real Nov 2026 git log, PR #719 changelog diff, and open PR queue under strict word caps",
+  "prompt": "Audit `05-draft-release-announcement.md` in `benchmarks/sources/rw6_tomlkit_release/` against the pinned `0.15.2..0.15.3` git log (`01`), PR #719 release diff and changelog (`02`, `02b`), and open PR queue (`03`). Return an executive Go/No-Go publication recommendation in at most 135 words citing the exact commit and changelog entry counts, every factual error or unshipped claim in the draft, and every real behavior or exception change in `0.15.3`.",
+  "upstream_provenance": {
+    "repo": "https://github.com/python-poetry/tomlkit",
+    "license": "MIT",
+    "pinned_release_commit": "d2aa305673a01eafd0edda54ef07ebcb8902f4d4",
+    "release_tag": "0.15.3",
+    "open_prs_snapshot_date": "2026-11-25"
+  },
+  "evidence_sources": [
+    {
+      "id": "rw6-01-01-git-log-0-15-2-to-0-15-3-txt",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/01-git-log-0.15.2-to-0.15.3.txt",
+      "sha256": "7a4277a2dc0659cad7dfeaac6bc788aa7b98c12718b520dbe31cec5882b890d7"
+    },
+    {
+      "id": "rw6-02-02-pr719-release-diff-diff",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/02-pr719-release-diff.diff",
+      "sha256": "d87783876f62d960f63e767f019b237b2c27949a999b438166d8d185eeb319d6"
+    },
+    {
+      "id": "rw6-03-02b-changelog-0-15-1-to-0-15-3-md",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/02b-changelog-0.15.1-to-0.15.3.md",
+      "sha256": "b3bd8907f2ed318284d3a6c1d70353b700d4a91744c3140f5e48840f920cabc2"
+    },
+    {
+      "id": "rw6-04-03-open-prs-nov25-2026-md",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/03-open-prs-nov25-2026.md",
+      "sha256": "8c1a2b73e7cfaa332d23090a395a167b31aa6308dd6076e6d6c0a04ec9e291d9"
+    },
+    {
+      "id": "rw6-05-04-pyproject-toml",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/04-pyproject.toml",
+      "sha256": "bf18e3dfe8eb0fd7f8e7c657fea45afeb924da6cd6d8f3919519f72e8d233e36"
+    },
+    {
+      "id": "rw6-06-05-draft-release-announcement-md",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/05-draft-release-announcement.md",
+      "sha256": "ae8c44c4c9ca590e6657aec16f39f31c48fa497fbb196e0b943203e84bfa3b0d"
+    },
+    {
+      "id": "rw6-07-LICENSE",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/LICENSE",
+      "sha256": "f2f9b460ba719da6626add264d3782f275a4ff7aab677beda08b330911e23adb"
+    },
+    {
+      "id": "rw6-08-UPSTREAM-json",
+      "locator": "benchmarks/sources/rw6_tomlkit_release/UPSTREAM.json",
+      "sha256": "d7511f0243600ca9d5ab76f55fc6a0dc3534b6b9bd805dde3af81c0c140bfcd2"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "exact_commit_and_changelog_counts",
+      "description": "Stage 1 accurately reports exact counts from the pinned git log and 0.15.3 changelog: 43 commits in 0.15.2..0.15.3 (not 18) and 25 changelog entries in 0.15.3 (6 Changed + 19 Fixed).",
+      "required": true
+    },
+    {
+      "id": "all_four_draft_errors_and_nogo",
+      "description": "Stage 1 recommends NO-GO/HOLD on publishing the draft and corrects all four errors: (1) 43 commits / 25 entries vs 18, (2) 4 real behavior/ValueError changes (#705 comment, #673 date, #644 Array.sort, #712 AoT), (3) open unmerged PRs #721/#706/#635 did NOT ship in 0.15.3 (and #720 latin1 mojibake on bytes remains live), and (4) #664 and #325 were moved from 0.15.2/0.15.1 into 0.15.3 by PR #719.",
+      "required": true
+    },
+    {
+      "id": "stage2_release_update",
+      "description": "Stage 2 cleanly reports corrected 0.15.3 notes shipping today with #705/#673/#644/#712 behavior disclosures and #664/#325 changelog fixes while deferring unmerged #721 (strict UTF-8 bytes), #706, and #635 to 0.15.4.",
+      "required": true
+    },
+    {
+      "id": "word_caps_and_readonly",
+      "description": "Stage 1 <= 135 lexical words, Stage 2 <= 75 lexical words, zero chatbot openers or word-count postscripts in either stage, and zero files created or modified in the workspace.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Audit `05-draft-release-announcement.md` in `benchmarks/sources/rw6_tomlkit_release/` against the pinned `0.15.2..0.15.3` git log (`01`), PR #719 release diff and changelog (`02`, `02b`), and open PR queue (`03`). Return an executive Go/No-Go publication recommendation in at most 135 words citing the exact commit and changelog entry counts, every factual error or unshipped claim in the draft, and every real behavior or exception change in `0.15.3`.",
+    "Update: Maintainers accepted your audit, pulled the draft, and will publish corrected `0.15.3` release notes today disclosing the real behavior changes and changelog attribution corrections while deferring the unmerged PRs to `0.15.4`. Write a stakeholder update of at most 75 words."
+  ],
+  "valid_neighbouring_case": "When a release announcement accurately matches the git log, changelog diff, behavior changes, and merged PRs, the audit delivers a direct GO recommendation without inventing caveats."
+}

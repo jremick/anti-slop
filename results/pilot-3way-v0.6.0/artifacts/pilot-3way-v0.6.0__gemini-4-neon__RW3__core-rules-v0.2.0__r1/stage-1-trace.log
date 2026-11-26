@@ -1,0 +1,37 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "efacbaed-c491-4ff1-8d0f-ab53b04c510f", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 1105599, "cost_usd": null}
+RC: 0
+STDOUT:
+Fixed the `HTTPResponse` streaming decoder defects in [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py) using only the Python standard library, without modifying [run_checks.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/run_checks.py) or [test_response_gates.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/tests/test_response_gates.py).
+
+### Fixes Applied
+
+- **Multi-member gzip boundary handling** ([response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L200-L215)): Reset `self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)` and transition `self._state` to `GzipDecoderState.OTHER_MEMBERS` as soon as `self._obj.eof` is reached—before breaking on `len(ret) >= max_length` or returning when `not data`—so subsequent calls do not feed trailing member bytes back into an already-finished `zlib` decompressor and duplicate `unused_data`.
+- **EOF flushing for raw deflate & chained decoders + `cache_content=True` preservation** ([response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L355-L368), [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L540), [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L687-L712), [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L1175-L1237), [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L1334-L1350)):
+  - Updated `MultiDecoder.flush()` to flush every decoder in `reversed(self._decoders)`, piping each decoder's flushed bytes through downstream decoders, and handled `max_length == 0` in `MultiDecoder.decompress()`.
+  - Tracked `self._decoder_flushed` in `BaseHTTPResponse` so `_flush_decoder()` runs once at EOF (and wrapped flush errors in `DecodeError` inside `_decode()`).
+  - Updated `HTTPResponse.read()` so EOF does not short-circuit before flushing when decoding has occurred and the decoder has not yet flushed, recomputed `flush_decoder = not data` inside the bounded-read loop, and updated `HTTPResponse.stream()` to continue until pending decoder flush completes even if `fp` is already closed.
+  - Guarded `self._body = data` with `self._body is None` so repeated `read(cache_content=True)` calls do not overwrite cached `self._body` with `b""`.
+- **Rejecting `decode_content=False` after `decode_content=True` before consuming data** ([response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L1139-L1154), [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L1256-L1270), [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py#L1507-L1519)):
+  - In `read()` and `read1()`, return `b""` immediately for `amt == 0`, then check `not decode_content and self._has_decoded_content` and raise `RuntimeError` before reading `self._fp`, draining `self._decoded_buffer`, or advancing `self._decoder`.
+  - Added the same pre-read guard to `read_chunked()` after `amt == 0`.
+
+### Check Results (`python3 benchmarks/sources/rw3_urllib3/run_checks.py`)
+
+Command exited with status `1` (`Ran 4 tests in 0.001s — FAILED (failures=1)`):
+
+| Check | Outcome | Details |
+| --- | --- | --- |
+| `test_gzip_multi_member_bounded_read` | **PASS** (`ok`) | Multi-member gzip bounded `read`/`read1` passes without repeating or corrupting trailing members. |
+| `test_raw_deflate_eof_flush_streaming` | **PASS** (`ok`) | Raw deflate bounded `read(64)` and chained `deflate, gzip` `read(1)` flush completely at EOF. |
+| `test_reject_decode_toggle_before_consuming` | **PASS** (`ok`) | `read(1, decode_content=False)` raises `RuntimeError` without advancing `fp.tell()`, `read(0, decode_content=False)` returns `b""`, and subsequent `read()` returns `b"oo"`. |
+| `test_optional_brotli_and_zstd_codecs_available` | **FAIL** | `AssertionError: unexpectedly None : BLOCKER: optional third-party 'brotli'/'brotlicffi' package is not installed in this environment` (and in Python 3.12.13 neither `brotli`/`brotlicffi` nor `backports.zstd`/`zstandard`/`compression.zstd` is installed, so `HAS_ZSTD` is also `False`). |
+
+Additional targeted Python verification also passed for `stream()`/`read1()`/`read_chunked()` across multi-member gzip (including 3+ members, empty middle member, trailing garbage), raw deflate / `deflate, gzip` / `gzip, deflate` / `deflate, deflate` (including auto-closing `fp`), repeated `read(cache_content=True)` body preservation, and `decode_content=False` rejection with buffered data in `self._decoded_buffer`.
+
+### Release Readiness
+
+**Not release-ready (BLOCKED).** All three standard-library streaming decoder defects are fixed and their release-gate checks pass, but the 4th compliance gate (`test_optional_brotli_and_zstd_codecs_available`) fails in this Python 3.12.13 environment because the optional `brotli`/`brotlicffi` and `zstandard`/`backports.zstd` (or Python 3.14 `compression.zstd`) backends are not installed. Releasing requires running the compliance gate in an environment with real Brotli and Zstandard backends installed (or explicitly waiving that codec-matrix gate).
+
+STDERR:
+

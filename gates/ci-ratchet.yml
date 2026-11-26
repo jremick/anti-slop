@@ -1,0 +1,179 @@
+# Opt-in Layer-1 Anti-Slop CI Ratchet Template.
+# Copy to `.github/workflows/anti-slop-ratchet.yml` and enable only the jobs
+# that fit your repository stack. Each job is independent with zero cross-job
+# dependencies so teams can adopt gates incrementally without harness bloat.
+
+name: Anti-Slop Layer-1 Ratchet
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Job 1: Zero-dependency deterministic diff, stub, credibility, and prose gate.
+  # Uses the reusable composite GitHub Action (`action.yml`) — no vendored `gates/`
+  # files required in target repositories.
+  diff-gate:
+    name: Diff, Stub, Credibility & Prose Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Anti-Slop Diff Gate (reusable action)
+        uses: jremick/anti-slop@v0.6.0
+        with:
+          allow-test-edit: ${{ contains(github.event.pull_request.labels.*.name, 'allow-test-edit') }}
+          allow-test-skip: 'false'
+          strict-prose: 'false'
+          # Set no-budget: 'true' for first-time adoption to enforce zero-FP defects only.
+          no-budget: 'false'
+          # [Heuristic] Starting budgets: 400 net LOC, 10 files. Calibrate locally.
+          max-net-loc: '400'
+          max-files: '10'
+          check-pr-body: 'true'
+
+      # Alternative A (zero-clone uvx CLI, e.g., outside GitHub Actions):
+      #   git diff --unified=3 "origin/${GITHUB_BASE_REF}...HEAD" \
+      #     | uvx --from git+https://github.com/jremick/anti-slop@v0.6.0 anti-slop-diff --diff - --repo-root . --no-budget
+      #
+      # Alternative B (if you vendor `gates/diff_check.py` directly inside this repo):
+      #   git diff --unified=3 "origin/${GITHUB_BASE_REF}...HEAD" \
+      #     | python3 -B gates/diff_check.py --diff - --repo-root . --max-net-loc 400 --max-files 10
+
+  # Job 2: Zero-dependency 2026 model API and harness config validator.
+  api-config-gate:
+    name: Model API & Harness Config Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Validate model and harness config JSON files
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          # Point this glob at your repo's model/harness JSON configs.
+          CONFIGS=(configs/models/*.json)
+          if [ "${#CONFIGS[@]}" -eq 0 ]; then
+            echo "No configs/models/*.json files found; skipping api-config-gate."
+            exit 0
+          fi
+          if [ -f gates/api_checks.py ]; then
+            python3 -B gates/api_checks.py "${CONFIGS[@]}"
+          elif command -v uvx >/dev/null 2>&1; then
+            uvx --from git+https://github.com/jremick/anti-slop@v0.6.0 anti-slop-api "${CONFIGS[@]}"
+          else
+            python3 -m pip install --quiet "git+https://github.com/jremick/anti-slop@v0.6.0"
+            anti-slop-api "${CONFIGS[@]}"
+          fi
+
+  # Job 3: Stack-specific diff-scoped code hygiene ratchets (opt-in per tool).
+  code-hygiene-ratchet:
+    name: Code Hygiene Ratchet (Opt-In Stack Checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: List changed files in PR
+        id: changed
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          RANGE="HEAD~1...HEAD"
+          if [ -n "${BASE_REF}" ]; then
+            RANGE="origin/${BASE_REF}...HEAD"
+          fi
+          git diff --name-only --diff-filter=ACMR "${RANGE}" > /tmp/changed_files.txt
+          grep '\.py$' /tmp/changed_files.txt > /tmp/changed_py.txt || true
+          echo "has_py=$(test -s /tmp/changed_py.txt && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "has_js=$(test -f package.json && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # Python hygiene ratchet (enable once pyproject/ruff config is calibrated):
+      - name: Python lint and dead-code check (Ruff + Vulture)
+        if: steps.changed.outputs.has_py == 'true'
+        run: |
+          set -euo pipefail
+          if command -v ruff >/dev/null 2>&1; then
+            xargs -a /tmp/changed_py.txt ruff check
+          else
+            echo "ruff not installed; install ruff to activate Python diff-scoped lint ratchet."
+          fi
+          if command -v vulture >/dev/null 2>&1; then
+            xargs -a /tmp/changed_py.txt vulture --min-confidence 80
+          else
+            echo "vulture not installed; install vulture to activate dead-code ratchet."
+          fi
+
+      # JS/TS dead-export ratchet (opt-in when package.json is present):
+      - name: JS/TS unused export check (Knip)
+        if: steps.changed.outputs.has_js == 'true'
+        run: |
+          set -euo pipefail
+          if command -v npx >/dev/null 2>&1 && [ -f node_modules/.bin/knip ]; then
+            npx knip --no-exit-code
+          else
+            echo "knip not installed; add knip to devDependencies to activate unused-export ratchet."
+          fi
+
+      # Copy-paste clone ratchet (zero new duplicate blocks on changed files):
+      - name: Duplicate block check (jscpd)
+        run: |
+          set -euo pipefail
+          if command -v jscpd >/dev/null 2>&1 && [ -s /tmp/changed_files.txt ]; then
+            xargs -a /tmp/changed_files.txt jscpd --threshold 0 --silent
+          else
+            echo "jscpd not installed; install jscpd to enforce 0% clone delta on changed files."
+          fi
+
+  # Job 4: Warning-first diff-scoped Vale prose ratchet (Cursor unslop subset).
+  prose-vale-ratchet:
+    name: Prose Vale Ratchet (Warning-First)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Collect changed Markdown files
+        id: md
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          RANGE="HEAD~1...HEAD"
+          if [ -n "${BASE_REF}" ]; then
+            RANGE="origin/${BASE_REF}...HEAD"
+          fi
+          git diff --name-only --diff-filter=ACMR "${RANGE}" -- '*.md' > /tmp/changed_md.txt || true
+          MD_JSON=$(python3 -c 'import json, sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))' < /tmp/changed_md.txt)
+          echo "has_md=$(test -s /tmp/changed_md.txt && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "md_files=${MD_JSON}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Vale on changed Markdown files
+        if: steps.md.outputs.has_md == 'true'
+        uses: errata-ai/vale-action@v2
+        with:
+          files: ${{ steps.md.outputs.md_files }}
+          vale_flags: '--config=gates/vale/.vale.ini'
+          fail_on_error: true

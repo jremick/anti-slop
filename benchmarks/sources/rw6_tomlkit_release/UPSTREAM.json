@@ -1,0 +1,7 @@
+{
+  "upstream_repo": "https://github.com/python-poetry/tomlkit",
+  "license": "MIT",
+  "pinned_release_commit": "d2aa305673a01eafd0edda54ef07ebcb8902f4d4",
+  "release_tag": "0.15.3",
+  "release_date": "2026-11-24"
+}

@@ -1,0 +1,9 @@
+{
+  "environment": "prod-billing-us-east",
+  "key_id": "kms-webhook-2026-11",
+  "algorithm": "HMAC-SHA256",
+  "key_material_ref": "kms_prod_key.signed.json",
+  "expected_sha256": "9c4e7b1a0f2d8e5c3a6b4d9e1f0a2c5b8d7e6f4a3c2b1a0987654321fedcba98",
+  "hsm_attestation_signature": null,
+  "status": "pending_security_signoff"
+}

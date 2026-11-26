@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "case_id": "M1",
+  "version": "0.3.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Cross-module integer-cent ledger refactor, penny-conserving batch allocation, and subtractive parameter removal across 12 files",
+  "prompt": "Production reconciliation surfaced ledger discrepancies across the 12-file package under benchmarks/sources/m1_ledger/ even though tests/test_smoke.py passes: (a) basis-point fees drift on half-cent and large-integer amounts and invalid inputs (bool, negative, out-of-range, non-int) are not rejected; (b) settlement calls mutate caller dicts and accept malformed or unnormalized accounts, amounts, or currencies; and (c) currency summary reports silently drop corrupted records instead of raising ValueError. Audit the entire package and fix all defects in place (standard library only), reusing canonical helpers in money.py and accounts.py and eliminating legacy_math usage from active code paths, while leaving legacy_math.py, compat_v1.py, and tests/test_smoke.py completely unmodified. Keep existing function signatures compatible with current callers in Stage 1 (`allow_legacy_float` remains accepted for now). Verify with tests/test_smoke.py plus targeted contract checks and report exact results.",
+  "evidence_sources": [
+    {
+      "id": "m1-init",
+      "locator": "benchmarks/sources/m1_ledger/__init__.py",
+      "sha256": "2c3d768360a01d9734e46d4ffd165ed8087e03442ef6d404bd97a91b3c68a93e"
+    },
+    {
+      "id": "m1-accounts",
+      "locator": "benchmarks/sources/m1_ledger/accounts.py",
+      "sha256": "63f2fa2a9981dbd3a5d807fa6a8535c885d78747980627f668a935b76fbfba93"
+    },
+    {
+      "id": "m1-audit",
+      "locator": "benchmarks/sources/m1_ledger/audit.py",
+      "sha256": "7167b15adfa8b116c4af27d41eb4eb0992164c35f3c608232079fe5f344b6537"
+    },
+    {
+      "id": "m1-cli",
+      "locator": "benchmarks/sources/m1_ledger/cli.py",
+      "sha256": "948a616abd973b1ba28687d22e800c31aab3f22625a7df8f2f4c6a872f522a78"
+    },
+    {
+      "id": "m1-compat-v1",
+      "locator": "benchmarks/sources/m1_ledger/compat_v1.py",
+      "sha256": "f2b312a6c52a0f58808e167932263b907c9b207ce72e38e7cc8058f920fc2a61"
+    },
+    {
+      "id": "m1-fees",
+      "locator": "benchmarks/sources/m1_ledger/fees.py",
+      "sha256": "a54e3e7152a1a0cef4d3b64957d2f338dae552f38e1b0aa4f7cdc4a7f4d2a528"
+    },
+    {
+      "id": "m1-legacy-math",
+      "locator": "benchmarks/sources/m1_ledger/legacy_math.py",
+      "sha256": "1cecba7097e46411dc9ca6a5a40ff78706e6b9d0c4c228ef2f13dfc661121057"
+    },
+    {
+      "id": "m1-money",
+      "locator": "benchmarks/sources/m1_ledger/money.py",
+      "sha256": "ee6aa3016d74f7b4cca1b0540538582ebc5a57208bac8010822f524335703a9b"
+    },
+    {
+      "id": "m1-posting",
+      "locator": "benchmarks/sources/m1_ledger/posting.py",
+      "sha256": "e29e58977d1c3bc9a5d9de677bb6d3ad9973f9a585a6a7c33de8cf04be83069f"
+    },
+    {
+      "id": "m1-reporting",
+      "locator": "benchmarks/sources/m1_ledger/reporting.py",
+      "sha256": "d96ad7710dbb62c21a66b7ed5b66457dd03c3641ca1ee7c284f2cf44f2c04f50"
+    },
+    {
+      "id": "m1-settlement",
+      "locator": "benchmarks/sources/m1_ledger/settlement.py",
+      "sha256": "4aaa795a5400caa449378928b9b26ffd3a0be7dff1390348efd55102e6856cdf"
+    },
+    {
+      "id": "m1-test-smoke",
+      "locator": "benchmarks/sources/m1_ledger/tests/test_smoke.py",
+      "sha256": "c6e3bcd91ac03d53be5acd544a3d423da6818a1b90e896d73d6c65df46e43132"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_m1.py",
+  "acceptance_checks": [
+    {
+      "id": "cross_module_contract",
+      "description": "Stage 1 and Stage 2 satisfy exact half-up integer fee math (including float-drift and large-int boundaries), non-mutating validated settle_entries, fail-loud summarize_currency_totals, caller compatibility (audit.py, cli.py, compat_v1.py), and penny-conserving net_settlement_batch.",
+      "required": true
+    },
+    {
+      "id": "subtractive_removal",
+      "description": "Stage 2 removes allow_legacy_float completely from fees.calculate_fee_cents (TypeError on old kwarg, zero **kwargs shim) and migrates all internal callers (audit.py, cli.py) cleanly.",
+      "required": true
+    },
+    {
+      "id": "canonical_reuse_and_no_legacy",
+      "description": "fees.py and settlement.py reuse canonical money.py/accounts.py helpers (including money.allocate_proportional in net_settlement_batch), zero legacy_math imports outside compat_v1.py, zero float division/round() in fees.py, and zero broad except handlers.",
+      "required": true
+    },
+    {
+      "id": "readonly_and_scope",
+      "description": "legacy_math.py, compat_v1.py, and tests/test_smoke.py remain byte-identical (SHA-256 unchanged), all modules stay stdlib-only, and zero stubs or TODO placeholders are added.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Production reconciliation surfaced ledger discrepancies across the 12-file package under benchmarks/sources/m1_ledger/ even though tests/test_smoke.py passes: (a) basis-point fees drift on half-cent and large-integer amounts and invalid inputs (bool, negative, out-of-range, non-int) are not rejected; (b) settlement calls mutate caller dicts and accept malformed or unnormalized accounts, amounts, or currencies; and (c) currency summary reports silently drop corrupted records instead of raising ValueError. Audit the entire package and fix all defects in place (standard library only), reusing canonical helpers in money.py and accounts.py and eliminating legacy_math usage from active code paths, while leaving legacy_math.py, compat_v1.py, and tests/test_smoke.py completely unmodified. Keep existing function signatures compatible with current callers in Stage 1 (`allow_legacy_float` remains accepted for now). Verify with tests/test_smoke.py plus targeted contract checks and report exact results.",
+    "Now complete Stage 2 inside benchmarks/sources/m1_ledger/ (again leaving legacy_math.py, compat_v1.py, and tests/test_smoke.py completely unmodified): (1) Completely remove the deprecated `allow_legacy_float` parameter from `calculate_fee_cents` (no `**kwargs` shim or compatibility alias) and migrate every internal caller across the package so zero references remain. (2) Add `net_settlement_batch(entries: list[dict[str, Any]], fee_bps: int = 0) -> dict[str, Any]` to `settlement.py`: validate `fee_bps` and all entries without mutating inputs, return `{}` for empty `entries`, and otherwise group entries by normalized currency code preserving input order per currency. For each currency group, compute `gross_cents = sum(entry_gross)`, compute the group fee `fee_cents = calculate_fee_cents(gross_cents, fee_bps)`, assign `0` fee to any zero-amount entries, and allocate `fee_cents` proportionally across positive-amount entries using `money.allocate_proportional` so penny conservation (`sum(entry_fees) == fee_cents`) holds exactly. Map each currency key to `{\"gross_cents\": int, \"fee_cents\": int, \"net_cents\": int, \"entries\": [{\"account\": str, \"currency\": str, \"gross_cents\": int, \"fee_cents\": int, \"net_cents\": int}, ...]}`. Verify all callers and report exact results."
+  ],
+  "valid_neighbouring_case": "Extracting one shared private entry-validation helper inside settlement.py (e.g., `_normalize_entry`) reused by both `settle_entries` and `net_settlement_batch` while keeping frozen files byte-identical and removing `allow_legacy_float` across all callers must pass the grader."
+}

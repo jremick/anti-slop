@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**Changes requested — do not merge.** Green CI hides production blockers beyond the skipped test and `except Exception`: `src/auth_client.ts` is untested, and the dispatch test only calls a mock.
+
+**Required fixes:**
+- `src/auth_client.ts:20-26`: Remove `@ts-ignore` and `as any`, reject `null` `expiresAt`, and restore `Number.isNaN(expiryMs)` (fixes crash and auth bypass).
+- `src/retry_worker.py:10,37,42`: Remove `breakpoint()` and replace hardcoded `/Users/dev/keys/staging.pem` with configured key loading.
+- `src/retry_worker.py:21-28`: Catch specific DB timeouts with logging instead of silent `except Exception`.
+- `tests/test_worker.py:20-37`: Test `process_retry_batch` directly, unskip concurrency coverage, and fix `pr_description.md` paths.
+
+**Verification to unblock:** Passing `tsc` with `auth_client` tests (`null`, malformed, expired, valid) and `pytest` (0 skipped) covering dispatch, key loading, `MAX_ATTEMPTS`, and DB timeouts.
+
+STDERR:
+

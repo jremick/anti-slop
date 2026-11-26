@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-v0.4.0",
+  "status": "completed",
+  "standard_version": "0.2.0",
+  "suite": "real-work-pinned-oss",
+  "cases": [
+    {
+      "case_id": "RW3",
+      "case_version": "0.4.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_rw3.py"
+    },
+    {
+      "case_id": "RW4",
+      "case_version": "0.4.0",
+      "stages": 2
+    },
+    {
+      "case_id": "RW5",
+      "case_version": "0.4.0",
+      "stages": 2
+    },
+    {
+      "case_id": "RW6",
+      "case_version": "0.4.0",
+      "stages": 2
+    }
+  ],
+  "models": [
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "anthropic",
+      "id": "claude-fable-5-2",
+      "display_name": "Claude Fable 5.2"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules-v0.2.0",
+    "model-controls"
+  ],
+  "replicates": 1,
+  "planned_matched_pairs": 20,
+  "planned_run_records": 60,
+  "planned_generation_stages": 120,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules-v0.2.0",
+      "baseline": "baseline",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Primary paired comparison of standard/core.md v0.2.0 against frozen provider-native baseline across four calibrated Nov 2026 origin: real_work OSS tasks (RW3-RW6).",
+      "case_ids": [
+        "RW3",
+        "RW4",
+        "RW5",
+        "RW6"
+      ],
+      "planned_matched_pairs": 20,
+      "planned_run_records": 40,
+      "planned_generation_stages": 80
+    },
+    {
+      "track_id": "core-rules-v0.2.0-vs-model-controls",
+      "baseline": "core-rules-v0.2.0",
+      "treatment": "model-controls",
+      "description": "Per-model delta overlay ablation testing model-specific rules from gates/model_deltas.json (including D-OPU-4 and refined D-AST-1/D-SOL-1) layered on top of standard/core.md v0.2.0 on real OSS tasks.",
+      "case_ids": [
+        "RW3",
+        "RW4",
+        "RW5",
+        "RW6"
+      ],
+      "planned_matched_pairs": 20,
+      "planned_run_records": 40,
+      "planned_generation_stages": 80
+    },
+    {
+      "track_id": "baseline-vs-model-controls",
+      "baseline": "baseline",
+      "treatment": "model-controls",
+      "description": "End-to-end comparison of standard/core.md v0.2.0 + per-model delta overlays against provider-native baseline on real OSS tasks (RW3-RW6).",
+      "case_ids": [
+        "RW3",
+        "RW4",
+        "RW5",
+        "RW6"
+      ],
+      "planned_matched_pairs": 20,
+      "planned_run_records": 40,
+      "planned_generation_stages": 80
+    }
+  ],
+  "limits": [
+    "Four calibrated Nov 2026 public OSS origin: real_work scenarios across four permissively licensed Python repositories (urllib3, pypa/packaging, sqlparse, tomlkit); models and lineage stages are not additional independent task scenarios.",
+    "RW1 (tomlkit) and RW2 (Python-Markdown) remain preserved in benchmarks/cases/ after 3-model baseline calibration hit 6/6 (100%) baseline pass while consuming 68% of Claude Opus token spend; pilot-v0.4.0 focuses full 5-model 3-way quota on RW3-RW6 where 3-model baseline hit 6/12 (50.0%).",
+    "Preserve benchmarks/pilot.json, benchmarks/pilot-v0.3.0.json, W1-W3, and committed results/pilot-3way-v0.2.0/ & results/pilot-3way-v0.3.0/ unmodified.",
+    "Never substitute a different model without a new explicitly labelled experiment."
+  ]
+}

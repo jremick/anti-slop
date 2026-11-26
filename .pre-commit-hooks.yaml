@@ -1,0 +1,26 @@
+- id: anti-slop-diff
+  name: Anti-Slop Deterministic Diff & Prose Gate
+  description: >-
+    Zero-dependency Layer-1 gate blocking stub placeholders, test-skip waivers
+    (DIFF-TEST-SKIP), unjustified suppressions, silent broad catches, debug
+    leftovers, hardcoded host paths, chatbot openers/closers, and broken local
+    Markdown paths (allows normal tests/ edits; override with anti-slop-diff-lock-tests
+    to lock tests/).
+  entry: anti-slop-diff
+  args: [--no-budget, --allow-test-edit]
+  language: python
+  types: [file]
+  files: '\.(py|js|jsx|ts|tsx|mjs|cjs|go|md|markdown)$'
+  minimum_pre_commit_version: '2.9.2'
+
+- id: anti-slop-diff-lock-tests
+  name: Anti-Slop Diff Gate (Strict Test-Directory Lock)
+  description: >-
+    Strict opt-in variant of anti-slop-diff that also blocks edits under tests/
+    (DIFF-UNAUTHORIZED-TEST-EDIT) in addition to all objective defect gates.
+  entry: anti-slop-diff
+  args: [--no-budget]
+  language: python
+  types: [file]
+  files: '\.(py|js|jsx|ts|tsx|mjs|cjs|go|md|markdown)$'
+  minimum_pre_commit_version: '2.9.2'

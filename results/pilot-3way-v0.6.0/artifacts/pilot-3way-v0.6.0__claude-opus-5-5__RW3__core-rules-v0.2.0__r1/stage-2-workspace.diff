@@ -1,0 +1,118 @@
+--- a/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
++++ b/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
+@@ -176,6 +176,13 @@
+ 
+         ret: bytes | bytearray = b""
+         while True:
++            # When the end of a gzip member was reached (possibly during a
++            # previous bounded call), a new decompressor must be created for
++            # the remaining data. Feeding it to the finished decompressor
++            # would only append it to ``unused_data`` again.
++            if self._obj.eof:
++                self._state = GzipDecoderState.OTHER_MEMBERS
++                self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
+             try:
+                 chunk = self._obj.decompress(
+                     data, max_length=max(max_length - len(ret), 0)
+@@ -205,11 +212,6 @@
+ 
+             if not data:
+                 return ret if isinstance(ret, bytes) else bytes(ret)
+-            # When the end of a gzip member is reached, a new decompressor
+-            # must be created for unused (possibly future) data.
+-            if self._obj.eof:
+-                self._state = GzipDecoderState.OTHER_MEMBERS
+-                self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
+ 
+         return ret if isinstance(ret, bytes) else bytes(ret)
+ 
+@@ -351,7 +353,12 @@
+         self._decoders = [_get_decoder(e) for e in encodings]
+ 
+     def flush(self) -> bytes:
+-        return self._decoders[0].flush()
++        # Decoders are applied in reverse order; whatever an outer decoder
++        # flushes must still pass through (and flush) the inner ones.
++        data = b""
++        for d in reversed(self._decoders):
++            data = d.decompress(data) + d.flush()
++        return data
+ 
+     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
+         if max_length <= 0:
+@@ -516,6 +523,7 @@
+         self.reason = reason
+         self.decode_content = decode_content
+         self._has_decoded_content = False
++        self._decoder_flushed = False
+         self._request_url: str | None = request_url
+         self.retries = retries
+ 
+@@ -696,7 +704,8 @@
+         Flushes the decoder. Should only be called if the decoder is actually
+         being used.
+         """
+-        if self._decoder:
++        if self._decoder and not self._decoder_flushed:
++            self._decoder_flushed = True
+             return self._decoder.decompress(b"") + self._decoder.flush()
+         return b""
+ 
+@@ -1132,7 +1141,15 @@
+         if amt and amt < 0:
+             # Negative numbers and `None` should be treated the same.
+             amt = None
+-        elif amt is not None:
++
++        if not decode_content and self._has_decoded_content and amt != 0:
++            # Raise before touching `fp` or the decoded buffer.
++            raise RuntimeError(
++                "Calling read(decode_content=False) is not supported after "
++                "read(decode_content=True) was called."
++            )
++
++        if amt is not None:
+             cache_content = False
+ 
+             if (
+@@ -1156,10 +1173,18 @@
+ 
+         flush_decoder = amt is None or (amt != 0 and not data)
+ 
++        # At EOF, a decoder that was fed data may still hold buffered output.
++        pending_flush = (
++            flush_decoder
++            and decode_content
++            and self._has_decoded_content
++            and not self._decoder_flushed
++        )
+         if (
+             not data
+             and len(self._decoded_buffer) == 0
+             and not (self._decoder and self._decoder.has_unconsumed_tail)
++            and not pending_flush
+         ):
+             return data
+ 
+@@ -1171,7 +1196,12 @@
+                 self._decoded_buffer.put(data)
+                 data = self._decoded_buffer.get_all()
+ 
+-            if cache_content and not self._uncached_read_occurred:
++            # Later reads of an exhausted body must not replace the cache.
++            if (
++                cache_content
++                and not self._uncached_read_occurred
++                and (data or self._body is None)
++            ):
+                 self._body = data
+         else:
+             # do not waste memory on buffer when not decoding
+@@ -1196,6 +1226,7 @@
+                 # For example, the GZ file header takes 10 bytes, we don't want to read
+                 # it one byte at a time
+                 data = self._raw_read(amt)
++                flush_decoder = not data
+                 decoded_data = self._decode(
+                     data,
+                     decode_content,

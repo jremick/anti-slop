@@ -1,0 +1,14 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "7321713b-644a-4a15-b4c6-68e76e66c752", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 437604, "cost_usd": null}
+RC: 0
+STDOUT:
+**NO-GO (do not publish).**
+
+**Scope (`0.15.2..0.15.3`, PR #719):** 43 commits; 25 changelog entries (6 Changed, 19 Fixed).
+
+**Draft errors/unshipped claims:** Misstates "18-commit" and "zero behavior or exception-raising changes"; cites three open, unmerged PRs—strict UTF-8 `bytes`/`UnicodeDecodeError` (#721/#720), `dumps(..., multiline=True)` (#706), and out-of-order multi-delete `IndexError` (#635); misattributes #664 (emptied dotted inline-table) and #325/#627 (literal quotes) to 0.15.2/0.15.1, though both shipped in 0.15.3 (`85d391e`, `e67098d`), relocated by PR #719.
+
+**Real `0.15.3` exception/behavior changes:** `ValueError` on forbidden comment control chars (#705), `date()` datetime strings (#673), and non-table AoT assignments pre-mutation (#712); wrong-length extended AoT slices raise pre-mutation (#631); `ParseError` replaces `RecursionError` (#714/#716); `Array.sort()` serializes order (#644); recursive `sort_keys=True` (#614/#617); `round(Float)` returns `Integer` (#695); sub-minute offsets write UTC (#701); local-tz `astimezone()` (#651); optional `setdefault()` default (#710); copied `Trivia` (#683); `escape=False` newline fix (#655/#658); encoder `_parent`/`_sort_keys` filtering (#698).
+
+STDERR:
+

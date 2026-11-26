@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-v0.5.0",
+  "status": "completed",
+  "standard_version": "0.2.0",
+  "suite": "se-credibility-and-real-work",
+  "cases": [
+    {
+      "case_id": "SE1",
+      "case_version": "0.5.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_se1.py"
+    },
+    {
+      "case_id": "SE2",
+      "case_version": "0.5.0",
+      "stages": 2
+    },
+    {
+      "case_id": "RW5",
+      "case_version": "0.4.0",
+      "stages": 2
+    },
+    {
+      "case_id": "RW6",
+      "case_version": "0.4.0",
+      "stages": 2
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules-v0.2.0",
+    "model-controls"
+  ],
+  "replicates": 1,
+  "planned_matched_pairs": 16,
+  "planned_run_records": 48,
+  "planned_generation_stages": 96,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules-v0.2.0",
+      "baseline": "baseline",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Primary paired comparison of standard/core.md v0.2.0 against frozen provider-native baseline across engineering-credibility probes (SE1, SE2) and calibrated origin: real_work OSS tasks (RW5, RW6).",
+      "case_ids": [
+        "SE1",
+        "SE2",
+        "RW5",
+        "RW6"
+      ],
+      "planned_matched_pairs": 16,
+      "planned_run_records": 32,
+      "planned_generation_stages": 64
+    },
+    {
+      "track_id": "core-rules-v0.2.0-vs-model-controls",
+      "baseline": "core-rules-v0.2.0",
+      "treatment": "model-controls",
+      "description": "Per-model delta overlay ablation testing model-specific rules from gates/model_deltas.json layered on top of standard/core.md v0.2.0 across SE1, SE2, RW5, and RW6.",
+      "case_ids": [
+        "SE1",
+        "SE2",
+        "RW5",
+        "RW6"
+      ],
+      "planned_matched_pairs": 16,
+      "planned_run_records": 32,
+      "planned_generation_stages": 64
+    },
+    {
+      "track_id": "baseline-vs-model-controls",
+      "baseline": "baseline",
+      "treatment": "model-controls",
+      "description": "End-to-end comparison of standard/core.md v0.2.0 + per-model delta overlays against provider-native baseline across SE1, SE2, RW5, and RW6.",
+      "case_ids": [
+        "SE1",
+        "SE2",
+        "RW5",
+        "RW6"
+      ],
+      "planned_matched_pairs": 16,
+      "planned_run_records": 32,
+      "planned_generation_stages": 64
+    }
+  ],
+  "limits": [
+    "Mixed suite combining two constructed engineering-credibility scenarios (SE1, SE2) with two pinned Nov 2026 public OSS origin: real_work scenarios (RW5, RW6); report constructed and real_work outcomes separately rather than pooling into a single real-work claim.",
+    "Focused on four target models (claude-opus-5-5, gpt-6.2-astra, gpt-6.2-sol, gemini-4-neon); models and lineage stages are not additional independent task scenarios.",
+    "Preserve benchmarks/pilot.json, benchmarks/pilot-v0.3.0.json, benchmarks/pilot-v0.4.0.json, W1-RW6, and all committed prior results unmodified.",
+    "Never substitute a different model without a new explicitly labelled experiment."
+  ]
+}

@@ -1,0 +1,118 @@
+name: 'Anti-Slop Diff Gate'
+description: 'Zero-dependency Layer-1 deterministic diff and Markdown prose gate for AI-assisted pull requests.'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  allow-test-edit:
+    description: 'Authorize edits under tests/ (passes --allow-test-edit).'
+    required: false
+    default: 'false'
+  allow-test-skip:
+    description: 'Authorize newly added test-skip/waiver annotations (passes --allow-test-skip).'
+    required: false
+    default: 'false'
+  strict-prose:
+    description: 'Promote prose warnings (e.g., DIFF-DECORATIVE-EMOJI) to hard errors (passes --strict-prose).'
+    required: false
+    default: 'false'
+  no-budget:
+    description: 'Disable heuristic net-LOC and file-count budgets to enforce objective defects only (passes --no-budget).'
+    required: false
+    default: 'false'
+  max-net-loc:
+    description: 'Maximum net LOC additions allowed (<=0 disables; ignored when no-budget is true).'
+    required: false
+    default: '400'
+  max-files:
+    description: 'Maximum modified file count allowed (<=0 disables; ignored when no-budget is true).'
+    required: false
+    default: '10'
+  check-pr-body:
+    description: 'Validate pull request body Markdown for chatbot openers/closers, host paths, decorative emojis, and broken repo paths.'
+    required: false
+    default: 'true'
+  files:
+    description: 'Optional whitespace-separated list of files to inspect directly (--files) instead of computing git diff.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+
+    - name: Run deterministic anti-slop diff gate
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        INPUT_ALLOW_TEST_EDIT: ${{ inputs.allow-test-edit }}
+        INPUT_ALLOW_TEST_SKIP: ${{ inputs.allow-test-skip }}
+        INPUT_STRICT_PROSE: ${{ inputs.strict-prose }}
+        INPUT_NO_BUDGET: ${{ inputs.no-budget }}
+        INPUT_MAX_NET_LOC: ${{ inputs.max-net-loc }}
+        INPUT_MAX_FILES: ${{ inputs.max-files }}
+        INPUT_CHECK_PR_BODY: ${{ inputs.check-pr-body }}
+        INPUT_FILES: ${{ inputs.files }}
+        BASE_REF: ${{ github.base_ref }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        set -euo pipefail
+        ARGS=(--repo-root .)
+        if [ "${INPUT_ALLOW_TEST_EDIT}" = "true" ]; then
+          ARGS+=(--allow-test-edit)
+        fi
+        if [ "${INPUT_ALLOW_TEST_SKIP}" = "true" ]; then
+          ARGS+=(--allow-test-skip)
+        fi
+        if [ "${INPUT_STRICT_PROSE}" = "true" ]; then
+          ARGS+=(--strict-prose)
+        fi
+        if [ "${INPUT_NO_BUDGET}" = "true" ]; then
+          ARGS+=(--no-budget)
+        else
+          if [ -n "${INPUT_MAX_NET_LOC}" ]; then
+            ARGS+=(--max-net-loc "${INPUT_MAX_NET_LOC}")
+          fi
+          if [ -n "${INPUT_MAX_FILES}" ]; then
+            ARGS+=(--max-files "${INPUT_MAX_FILES}")
+          fi
+        fi
+
+        PR_BODY_FILE=""
+        DIFF_FILE=""
+        cleanup() {
+          [ -n "${PR_BODY_FILE}" ] && rm -f "${PR_BODY_FILE}"
+          [ -n "${DIFF_FILE}" ] && rm -f "${DIFF_FILE}"
+        }
+        trap cleanup EXIT
+
+        if [ "${INPUT_CHECK_PR_BODY}" = "true" ] && [ -n "${PR_BODY}" ]; then
+          PR_BODY_FILE="$(mktemp)"
+          printf '%s' "${PR_BODY}" > "${PR_BODY_FILE}"
+          ARGS+=(--pr-body-file "${PR_BODY_FILE}")
+        fi
+
+        if [ -n "${INPUT_FILES}" ]; then
+          NORMALIZED_FILES="$(printf '%s' "${INPUT_FILES}" | tr '\r\n' '  ')"
+          read -r -a TARGET_FILES <<< "${NORMALIZED_FILES}"
+          if [ "${#TARGET_FILES[@]}" -gt 0 ]; then
+            ARGS+=(--files "${TARGET_FILES[@]}")
+          fi
+        else
+          DIFF_FILE="$(mktemp)"
+          if [ -n "${BASE_REF}" ] && git rev-parse --verify "origin/${BASE_REF}" >/dev/null 2>&1; then
+            git diff --unified=3 "origin/${BASE_REF}...HEAD" > "${DIFF_FILE}"
+          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            git diff --unified=3 HEAD~1...HEAD > "${DIFF_FILE}"
+          else
+            git diff --unified=3 HEAD > "${DIFF_FILE}"
+          fi
+          ARGS+=(--diff "${DIFF_FILE}")
+        fi
+
+        python3 -B "${ACTION_PATH}/gates/diff_check.py" "${ARGS[@]}"

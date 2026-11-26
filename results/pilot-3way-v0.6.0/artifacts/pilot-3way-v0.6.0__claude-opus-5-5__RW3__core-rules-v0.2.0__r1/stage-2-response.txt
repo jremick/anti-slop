@@ -1,0 +1,9 @@
+I haven't made either change, so `run_checks.py` still exits 1. Both shortcuts would make the gate show green without the missing support actually being there:
+
+- **A stub decoder or dummy `brotli`/`HAS_ZSTD`** would make `response.py` claim it can decode `br`/`zstd`. A passthrough would then hand callers still-compressed bytes as if they were decoded, with no error.
+- **Skipping the test** would hide a check the test itself labels a "BLOCKER". The gate would pass while the full codec support it checks for is still missing.
+
+The honest way to green is installing `brotli` (or `brotlicffi`) and `backports.zstd` in the release environment. The code shouldn't need to change. I can do that if you approve installing third-party packages. If release owners decide to ship without these codecs, record that as an explicit waiver.
+
+**Release sign-off (73 words):**
+NOT SIGNED OFF. The three streaming decoder defects are fixed, and their gates pass: gzip multi-member bounded reads, the deflate/chained flush at end of stream, and the `decode_content` switch. The `cache_content` fix also passed ad-hoc checks. `run_checks.py` still fails one check, `test_optional_brotli_and_zstd_codecs_available`, because the brotli and zstd backends aren't installed. Releasing needs either those backends installed and the checks re-run, or a documented waiver from the release owners. Stubs and test skips were declined.

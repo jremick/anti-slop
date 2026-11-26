@@ -1,0 +1,205 @@
+--- a/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
++++ b/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
+@@ -197,19 +197,16 @@
+                     return ret if isinstance(ret, bytes) else bytes(ret)
+                 raise
+ 
+-            self._unconsumed_tail = data = (
+-                self._obj.unconsumed_tail or self._obj.unused_data
+-            )
+-            if max_length > 0 and len(ret) >= max_length:
+-                break
+-
+-            if not data:
+-                return ret if isinstance(ret, bytes) else bytes(ret)
+-            # When the end of a gzip member is reached, a new decompressor
+-            # must be created for unused (possibly future) data.
+             if self._obj.eof:
++                # Only the next member owns unused_data, even if this read is full.
++                data = self._obj.unused_data
+                 self._state = GzipDecoderState.OTHER_MEMBERS
+                 self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
++            else:
++                data = self._obj.unconsumed_tail
++            self._unconsumed_tail = data
++            if not data or (max_length > 0 and len(ret) >= max_length):
++                break
+ 
+         return ret if isinstance(ret, bytes) else bytes(ret)
+ 
+@@ -351,7 +348,12 @@
+         self._decoders = [_get_decoder(e) for e in encodings]
+ 
+     def flush(self) -> bytes:
+-        return self._decoders[0].flush()
++        data = b""
++        for decoder in reversed(self._decoders):
++            if data:
++                data = decoder.decompress(data)
++            data += decoder.flush()
++        return data
+ 
+     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
+         if max_length <= 0:
+@@ -529,6 +531,7 @@
+         self._decoder: ContentDecoder | None = None
+         # Distinguish an uninitialized decoder from a response needing no decoder.
+         self._decoder_initialized = False
++        self._decoder_flushed = False
+         self.length_remaining: int | None
+ 
+     def get_redirect_location(self) -> str | None | typing.Literal[False]:
+@@ -654,6 +657,17 @@
+ 
+         self._decoder_initialized = True
+ 
++    def _resolve_decode_content(self, decode_content: bool | None) -> bool:
++        if decode_content is None:
++            decode_content = self.decode_content
++
++        if not decode_content and self._has_decoded_content:
++            raise RuntimeError(
++                "Calling read(decode_content=False) is not supported after "
++                "read(decode_content=True) was called."
++            )
++        return decode_content
++
+     def _decode(
+         self,
+         data: bytes,
+@@ -665,12 +679,10 @@
+         Decode the data passed in and potentially flush the decoder.
+         """
+         if not decode_content:
+-            if self._has_decoded_content:
+-                raise RuntimeError(
+-                    "Calling read(decode_content=False) is not supported after "
+-                    "read(decode_content=True) was called."
+-                )
+             return data
++
++        if self._decoder_flushed:
++            return b""
+ 
+         if max_length is None or flush_decoder:
+             max_length = -1
+@@ -697,7 +709,9 @@
+         being used.
+         """
+         if self._decoder:
+-            return self._decoder.decompress(b"") + self._decoder.flush()
++            data = self._decoder.decompress(b"") + self._decoder.flush()
++            self._decoder_flushed = True
++            return data
+         return b""
+ 
+     # Compatibility methods for `io` module
+@@ -1125,9 +1139,10 @@
+             after having ``.read()`` the file object. (Overridden if ``amt`` is
+             set.)
+         """
++        if amt == 0:
++            return b""
+         self._init_decoder()
+-        if decode_content is None:
+-            decode_content = self.decode_content
++        decode_content = self._resolve_decode_content(decode_content)
+ 
+         if amt and amt < 0:
+             # Negative numbers and `None` should be treated the same.
+@@ -1154,13 +1169,9 @@
+         if not cache_content:
+             self._uncached_read_occurred = True
+ 
+-        flush_decoder = amt is None or (amt != 0 and not data)
+-
+-        if (
+-            not data
+-            and len(self._decoded_buffer) == 0
+-            and not (self._decoder and self._decoder.has_unconsumed_tail)
+-        ):
++        flush_decoder = amt is None or not data
++
++        if not data and not self._has_decoded_content and not len(self._decoded_buffer):
+             return data
+ 
+         if amt is None:
+@@ -1171,16 +1182,11 @@
+                 self._decoded_buffer.put(data)
+                 data = self._decoded_buffer.get_all()
+ 
+-            if cache_content and not self._uncached_read_occurred:
++            if cache_content and self._body is None and not self._uncached_read_occurred:
+                 self._body = data
+         else:
+             # do not waste memory on buffer when not decoding
+             if not decode_content:
+-                if self._has_decoded_content:
+-                    raise RuntimeError(
+-                        "Calling read(decode_content=False) is not supported after "
+-                        "read(decode_content=True) was called."
+-                    )
+                 return data
+ 
+             decoded_data = self._decode(
+@@ -1199,7 +1205,7 @@
+                 decoded_data = self._decode(
+                     data,
+                     decode_content,
+-                    flush_decoder,
++                    flush_decoder=not data,
+                     max_length=amt - len(self._decoded_buffer),
+                 )
+                 self._decoded_buffer.put(decoded_data)
+@@ -1305,12 +1311,13 @@
+             while (
+                 not is_fp_closed(self._fp)
+                 or len(self._decoded_buffer) > 0
+-                or (self._decoder and self._decoder.has_unconsumed_tail)
++                or (self._has_decoded_content and not self._decoder_flushed)
+             ):
+                 data = self.read(amt=amt, decode_content=decode_content)
+ 
+-                if data:
+-                    yield data
++                if not data:
++                    break
++                yield data
+ 
+     # Overrides from io.IOBase
+     def readable(self) -> bool:
+@@ -1455,6 +1462,10 @@
+                 "It should have have an fp attribute which returns raw chunks."
+             )
+ 
++        if amt == 0:
++            return
++        decode_content = self._resolve_decode_content(decode_content)
++
+         with self._error_catcher():
+             # Don't bother reading the body of a HEAD request.
+             if self._original_response and is_response_to_head(self._original_response):
+@@ -1466,9 +1477,7 @@
+             if self._fp.fp is None:  # type: ignore[union-attr]
+                 return None
+ 
+-            if amt == 0:
+-                return
+-            elif amt and amt < 0:
++            if amt and amt < 0:
+                 # Negative numbers and `None` should be treated the same,
+                 # but httplib handles only `None` correctly.
+                 amt = None
+@@ -1497,8 +1506,10 @@
+                 # decoder. However, on Jython we *might* need to, so
+                 # lets defensively do it anyway.
+                 decoded = self._flush_decoder()
+-                if decoded:  # Platform-specific: Jython.
+-                    yield decoded
++                if decoded:
++                    size = amt or len(decoded)
++                    for offset in range(0, len(decoded), size):
++                        yield decoded[offset : offset + size]
+ 
+             # Chunk content ends with \r\n: discard it.
+             while self._fp is not None:

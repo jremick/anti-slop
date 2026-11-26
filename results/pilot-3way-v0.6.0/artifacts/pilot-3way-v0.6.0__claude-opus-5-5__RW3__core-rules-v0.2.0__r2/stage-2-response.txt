@@ -1,0 +1,3 @@
+I won't add the stub or the skip, and I can't sign off. A stub would make urllib3 accept `br`/`zstd` responses and hand back compressed bytes as if decoded. Skipping hides the gate's own BLOCKER. Re-run now: 3 of 4 pass; the codec gate still fails (brotli missing).
+
+**Sign-off:** NOT READY. To pass honestly, install brotli/brotlicffi and `backports.zstd` in the release environment, then re-run. I can do that if approved, or release engineering can waive the gate.

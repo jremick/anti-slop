@@ -1,0 +1,103 @@
+--- a/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
++++ b/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
+@@ -200,16 +200,19 @@
+             self._unconsumed_tail = data = (
+                 self._obj.unconsumed_tail or self._obj.unused_data
+             )
++            # When the end of a gzip member is reached, a new decompressor
++            # must be created for unused (possibly future) data. This must
++            # happen before stopping on `max_length`, otherwise the finished
++            # decompressor would be fed the next member again on the next call.
++            if data and self._obj.eof:
++                self._state = GzipDecoderState.OTHER_MEMBERS
++                self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
++
+             if max_length > 0 and len(ret) >= max_length:
+                 break
+ 
+             if not data:
+                 return ret if isinstance(ret, bytes) else bytes(ret)
+-            # When the end of a gzip member is reached, a new decompressor
+-            # must be created for unused (possibly future) data.
+-            if self._obj.eof:
+-                self._state = GzipDecoderState.OTHER_MEMBERS
+-                self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
+ 
+         return ret if isinstance(ret, bytes) else bytes(ret)
+ 
+@@ -351,7 +354,12 @@
+         self._decoders = [_get_decoder(e) for e in encodings]
+ 
+     def flush(self) -> bytes:
+-        return self._decoders[0].flush()
++        # Flush decoders in decoding order, feeding each one's remaining
++        # output through the decoders that follow it.
++        data = b""
++        for d in reversed(self._decoders):
++            data = d.decompress(data) + d.flush()
++        return data
+ 
+     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
+         if max_length <= 0:
+@@ -1129,6 +1137,13 @@
+         if decode_content is None:
+             decode_content = self.decode_content
+ 
++        if not decode_content and self._has_decoded_content and amt != 0:
++            # Fail before touching `self._fp` or the decoded buffer.
++            raise RuntimeError(
++                "Calling read(decode_content=False) is not supported after "
++                "read(decode_content=True) was called."
++            )
++
+         if amt and amt < 0:
+             # Negative numbers and `None` should be treated the same.
+             amt = None
+@@ -1161,7 +1176,15 @@
+             and len(self._decoded_buffer) == 0
+             and not (self._decoder and self._decoder.has_unconsumed_tail)
+         ):
+-            return data
++            if not (flush_decoder and decode_content and self._decoder):
++                return data
++            # EOF: the decoder may still hold output (e.g. raw deflate or
++            # chained decoders), so flush it rather than returning early.
++            data = self._flush_decoder()
++            if amt is None or not data:
++                return data
++            self._decoded_buffer.put(data)
++            return self._decoded_buffer.get(amt)
+ 
+         if amt is None:
+             data = self._decode(data, decode_content, flush_decoder)
+@@ -1171,16 +1194,15 @@
+                 self._decoded_buffer.put(data)
+                 data = self._decoded_buffer.get_all()
+ 
+-            if cache_content and not self._uncached_read_occurred:
++            if (
++                cache_content
++                and not self._uncached_read_occurred
++                and self._body is None
++            ):
+                 self._body = data
+         else:
+             # do not waste memory on buffer when not decoding
+             if not decode_content:
+-                if self._has_decoded_content:
+-                    raise RuntimeError(
+-                        "Calling read(decode_content=False) is not supported after "
+-                        "read(decode_content=True) was called."
+-                    )
+                 return data
+ 
+             decoded_data = self._decode(
+@@ -1199,7 +1221,7 @@
+                 decoded_data = self._decode(
+                     data,
+                     decode_content,
+-                    flush_decoder,
++                    flush_decoder=not data,
+                     max_length=amt - len(self._decoded_buffer),
+                 )
+                 self._decoded_buffer.put(decoded_data)

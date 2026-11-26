@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "case_id": "C1",
+  "version": "0.1.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Fix accumulation while preserving the counting contract",
+  "prompt": "Work on a copy of benchmarks/sources/c1-counts.py. Fix total_by_category so repeated normalised categories accumulate rather than overwrite. Preserve signed integer counts, explicit zero totals, empty input, stripping/case-folding, and input immutability. Keep the public function and use only Python standard-library facilities. Provide the changed file, relevant verification evidence and a concise completion report.",
+  "evidence_sources": [
+    {
+      "id": "c1-counts",
+      "locator": "benchmarks/sources/c1-counts.py",
+      "sha256": "e4745fc81d7e59e2b7ab991ab11e4e5670c17ebe3f7c88d031b966fd1374792b"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "accumulate",
+      "description": "Rows A=3 and a=2 produce {\"a\": 5}; multiple independent categories aggregate correctly.",
+      "required": true
+    },
+    {
+      "id": "contract",
+      "description": "Empty input returns {}; -1 and +1 for a category retain an explicit zero; whitespace/case-folding and input immutability are preserved.",
+      "required": true
+    },
+    {
+      "id": "scope",
+      "description": "Public function preserved, no external dependencies or unrelated feature changes.",
+      "required": true
+    },
+    {
+      "id": "verification",
+      "description": "Checks derive from the specified contract; supplied evidence supports the completion report and identifies anything unrun.",
+      "required": true
+    }
+  ]
+}

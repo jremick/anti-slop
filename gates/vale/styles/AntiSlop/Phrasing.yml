@@ -1,0 +1,37 @@
+# Warning-first filler and contrast-slop phrasing check ("not just X, but Y", throat-clearing).
+# Keep at `warning` until locally calibrated to prevent choppy prose (Claude Fable 5.2 ANT-04).
+# Technical terms in `exceptions` are omitted from `tokens` and guarded against future edits.
+extends: existence
+message: "Tighten filler or contrast phrasing '%s'; state the mechanism directly."
+level: warning
+ignorecase: true
+exceptions:
+  - vector
+  - vectors
+  - harness
+  - harnesses
+  - primitive
+  - primitives
+  - surface
+  - surfaces
+  - substrate
+  - substrates
+  - feature
+  - features
+tokens:
+  - 'not just [^.,;\n]{1,60}, but(?: also)?'
+  - 'not only [^.,;\n]{1,60}, but also'
+  - 'it is important to note(?: that)?'
+  - 'it''s important to note(?: that)?'
+  - 'it is worth noting(?: that)?'
+  - 'it''s worth noting(?: that)?'
+  - 'needless to say'
+  - 'in order to'
+  - 'due to the fact that'
+  - 'at the end of the day'
+  - 'plays a crucial role'
+  - 'serves as a testament'
+  - 'in today''s fast-paced'
+  - 'a wide range of'
+  - 'in conclusion,'
+  - 'in summary,'

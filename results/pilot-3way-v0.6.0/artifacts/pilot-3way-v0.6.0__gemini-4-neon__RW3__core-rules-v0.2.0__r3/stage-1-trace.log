@@ -1,0 +1,34 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "acd35100-55f5-4de9-9eb2-58182b839716", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 1378522, "cost_usd": null}
+RC: 0
+STDOUT:
+Fixed the three streaming decoder defects in [response.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/src/urllib3/response.py) (standard library only; [run_checks.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/run_checks.py) and [test_response_gates.py](file://<TMP_WORKSPACE>/benchmarks/sources/rw3_urllib3/tests/test_response_gates.py) left untouched).
+
+### Changes Made
+1. **Multi-member gzip boundary handling (`GzipDecoder.decompress`)**: Captured `self._obj.unused_data` on `self._obj.eof` (otherwise `self._obj.unconsumed_tail`) and immediately transitioned to `GzipDecoderState.OTHER_MEMBERS` with a fresh `zlib.decompressobj(16 + zlib.MAX_WBITS)` before the `max_length` break or empty-data return, preventing trailing member bytes from being re-fed to an exhausted decompressor and duplicated.
+2. **EOF decoder flushing and `cache_content` preservation (`MultiDecoder.flush`, `BaseHTTPResponse`, `HTTPResponse.read`, `HTTPResponse.stream`)**:
+   - Updated `MultiDecoder.flush()` to drain and flush every decoder in `reversed(self._decoders)`, piping each outer decoder's remaining and flushed bytes into the next inner decoder.
+   - Tracked `self._decoder_flushed` in `BaseHTTPResponse` (set in `_flush_decoder()`, invoked inside `_decode()`'s decoder-error `try` block) so `HTTPResponse.read()` does not return early on EOF while a used decoder still needs flushing, `HTTPResponse.stream()` runs the final flush read even if `_fp` closed on the last byte, and `HTTPResponse.read()` recomputes `flush_decoder=not data` inside its bounded read loop.
+   - Guarded caching with `self._body is None` so repeated `read(cache_content=True)` calls after EOF do not overwrite cached `self._body` with `b""`.
+3. **Reject `decode_content=False` toggle before consuming (`HTTPResponse.read`, `HTTPResponse.read1`, `HTTPResponse.read_chunked`)**:
+   - Handled `amt == 0` first (returning `b""` for `read(0, decode_content=False)` and `read1(0, decode_content=False)`).
+   - Raised `RuntimeError` immediately when `not decode_content and self._has_decoded_content` before reading from `self._decoded_buffer`, `self._decoder`, or `self._fp`.
+
+### Verification Results
+
+Re-ran `python3 benchmarks/sources/rw3_urllib3/run_checks.py` (exit code `1`, `Ran 4 tests`, `FAILED (failures=1)`):
+
+| Check | Outcome | Details |
+| --- | --- | --- |
+| `test_gzip_multi_member_bounded_read` | **PASS (`ok`)** | Bounded `read`/`read1` across multi-member gzip boundaries return exact member payloads and EOF `b""`. |
+| `test_raw_deflate_eof_flush_streaming` | **PASS (`ok`)** | Bounded `read(64)` on raw deflate and 1-byte reads on chained `deflate, gzip` flush completely at EOF. |
+| `test_reject_decode_toggle_before_consuming` | **PASS (`ok`)** | Switching to `decode_content=False` raises `RuntimeError` without advancing `fp.tell()`; `read(0, decode_content=False)` returns `b""`, and subsequent `read()` succeeds. |
+| `test_optional_brotli_and_zstd_codecs_available` | **FAIL** | `AssertionError: unexpectedly None : BLOCKER: optional third-party 'brotli'/'brotlicffi' package is not installed in this environment` (verified under Python 3.12.13: `brotli`, `brotlicffi`, `zstandard`, `backports.zstd`, and Python 3.14 `compression.zstd` are all missing, so `resp_mod.brotli` is `None` and `HAS_ZSTD` is `False`). |
+
+Also verified additional standard-library edge cases in an ad-hoc check script (passing): multi-member gzip via `read`/`read1`/`stream` with 3 members, empty middle member, split member-2 header, and trailing garbage; raw deflate and chained `deflate, gzip`, `gzip, deflate`, and `deflate, deflate` with both `BytesIO` and auto-closing streams; repeated `read(cache_content=True)` preserving `self._body` and `.data`; and decode-toggle rejection with populated `_decoded_buffer` and chunked responses.
+
+### Release Readiness
+**Not release-ready** for the full compliance gate. All three streaming decoder defects in `HTTPResponse` are fixed and pass their release-gate checks, but `test_optional_brotli_and_zstd_codecs_available` remains a hard environment blocker until real `brotli`/`brotlicffi` and `zstd` (`backports.zstd` or Python 3.14+ `compression.zstd`) backends are installed.
+
+STDERR:
+

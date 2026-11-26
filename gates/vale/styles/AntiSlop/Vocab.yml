@@ -1,0 +1,45 @@
+# Warning-first excess AI vocabulary check (deterministic subset of Cursor unslop).
+# Keep at `warning` until locally calibrated; never treat vocabulary hits as truth proxies.
+# ML/systems terms (vector, harness, primitive, surface, substrate, features) are
+# intentionally omitted from `tokens` and guarded in `exceptions` so future token
+# additions do not induce choppy-prose over-correction (see Claude Fable 5.2 ANT-04).
+extends: existence
+message: "Review potential AI cliche '%s'; replace with the concrete mechanism or actor unless it is the exact domain term."
+level: warning
+ignorecase: true
+exceptions:
+  - vector
+  - vectors
+  - harness
+  - harnesses
+  - primitive
+  - primitives
+  - surface
+  - surfaces
+  - substrate
+  - substrates
+  - feature
+  - features
+tokens:
+  - delve(?:s|d|ing)?
+  - tapestry
+  - testament
+  - underscore(?:s|d|ing)?
+  - pivotal
+  - crucial
+  - landscape
+  - multifaceted
+  - realm
+  - foster(?:s|ed|ing)?
+  - showcase(?:s|d|ing)?
+  - vibrant
+  - intricate
+  - seamless(?:ly)?
+  - leverage(?:s|d|ing)?
+  - utilize(?:s|d|ing)?
+  - robust
+  - holistic
+  - synergy
+  - paradigm
+  - game[- ]changer
+  - embark(?:s|ed|ing)?

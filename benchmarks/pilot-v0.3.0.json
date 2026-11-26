@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-v0.3.0",
+  "status": "completed",
+  "standard_version": "0.2.0",
+  "suite": "constructed-harder-diagnostic-probes",
+  "cases": [
+    {
+      "case_id": "M1",
+      "case_version": "0.3.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_m1.py"
+    },
+    {
+      "case_id": "M2",
+      "case_version": "0.3.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_m2.py"
+    },
+    {
+      "case_id": "B2",
+      "case_version": "0.3.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_b2.py"
+    },
+    {
+      "case_id": "D1",
+      "case_version": "0.3.0",
+      "stages": 2
+    },
+    {
+      "case_id": "S2",
+      "case_version": "0.3.0",
+      "stages": 2
+    },
+    {
+      "case_id": "W3",
+      "case_version": "0.3.0",
+      "stages": 2
+    }
+  ],
+  "models": [
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "anthropic",
+      "id": "claude-fable-5-2",
+      "display_name": "Claude Fable 5.2"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules-v0.2.0",
+    "model-controls"
+  ],
+  "replicates": 1,
+  "planned_matched_pairs": 30,
+  "planned_run_records": 90,
+  "planned_generation_stages": 180,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules-v0.2.0",
+      "baseline": "baseline",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Primary paired comparison of standard/core.md v0.2.0 against frozen provider-native baseline across the 6 harder v0.3.0 multi-file/multi-document probes.",
+      "case_ids": [
+        "M1",
+        "M2",
+        "B2",
+        "D1",
+        "S2",
+        "W3"
+      ],
+      "planned_matched_pairs": 30,
+      "planned_run_records": 60,
+      "planned_generation_stages": 120
+    },
+    {
+      "track_id": "core-rules-v0.2.0-vs-model-controls",
+      "baseline": "core-rules-v0.2.0",
+      "treatment": "model-controls",
+      "description": "Per-model delta overlay ablation testing model-specific rules from gates/model_deltas.json (including D-OPU-4) layered on top of standard/core.md v0.2.0.",
+      "case_ids": [
+        "M1",
+        "M2",
+        "B2",
+        "D1",
+        "S2",
+        "W3"
+      ],
+      "planned_matched_pairs": 30,
+      "planned_run_records": 60,
+      "planned_generation_stages": 120
+    },
+    {
+      "track_id": "baseline-vs-model-controls",
+      "baseline": "baseline",
+      "treatment": "model-controls",
+      "description": "End-to-end comparison of standard/core.md v0.2.0 + per-model delta overlays against provider-native baseline.",
+      "case_ids": [
+        "M1",
+        "M2",
+        "B2",
+        "D1",
+        "S2",
+        "W3"
+      ],
+      "planned_matched_pairs": 30,
+      "planned_run_records": 60,
+      "planned_generation_stages": 120
+    }
+  ],
+  "limits": [
+    "Constructed probes calibrated to break the 96% baseline ceiling observed in pilot-3way-v0.2.0; they are still diagnostic probes, not a representative sample of origin: real_work tasks.",
+    "Six independent multi-file or multi-document scenarios (M1, M2, B2, D1, S2, W3); models and chain stages are not additional independent scenarios.",
+    "Calibrate baseline pass rates first before committing full 3-way quota across all 5 models.",
+    "Preserve benchmarks/pilot.json and W1-P1 unmodified so results/pilot-3way-v0.2.0/ reconciliation remains byte-identical.",
+    "Never substitute a different model without a new explicitly labelled experiment."
+  ]
+}

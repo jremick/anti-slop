@@ -1,0 +1,33 @@
+# pilot-3way-v0.6.0__gemini-4-neon__RW6__baseline__r1 — Stage 1/2
+
+- Timestamp UTC: 2026-11-26T09:56:54Z
+- Model: google/gemini-4-neon (reasoning=high, observed=gemini-4-neon-high)
+- Condition: baseline
+- Elapsed seconds: 106.50
+- Workspace modified: []
+- Workspace created: []
+- Workspace deleted: []
+
+## Prompt
+
+Audit `05-draft-release-announcement.md` in `benchmarks/sources/rw6_tomlkit_release/` against the pinned `0.15.2..0.15.3` git log (`01`), PR #719 release diff and changelog (`02`, `02b`), and open PR queue (`03`). Return an executive Go/No-Go publication recommendation in at most 135 words citing the exact commit and changelog entry counts, every factual error or unshipped claim in the draft, and every real behavior or exception change in `0.15.3`.
+
+## Raw Model Output
+
+**Recommendation: NO-GO** — rewrite before publishing.
+
+**Counts:** `0.15.2..0.15.3` has **43 commits** (including PR #719/`d2aa305`) and **25 changelog entries** (**6 Changed**, **19 Fixed**), refuting "18 commits" and "zero behavior or exception-raising changes."
+
+**Errors & unshipped claims:**
+- **Open/unmerged PRs:** #721/#720 (strict UTF-8 bytes parsing; `tomllib` safety claim is false), #706 (`dumps(..., multiline=True)`), #635 (out-of-order proxy multi-delete `IndexError`).
+- **Wrong history:** #664 and #325/#627 shipped in `0.15.3`, not `0.15.2`/`0.15.1` (PR #719 moved them).
+
+**Real `0.15.3` behavior/exception changes:**
+- **Exceptions:** `ValueError` on forbidden comment control chars (#705), datetime strings in `date()` (#673), and non-table AoT assignments (#712); wrong-length extended AoT slices raise pre-mutation (#631); `ParseError` replaces `RecursionError` (#714/#716).
+- **Behavior:** `Array.sort()` reorders serialized TOML (#644); recursive `sort_keys=True` (#614/#617); `round(Float)` returns `Integer` (#695); sub-minute offsets emit UTC (#701); encoders receive only declared `_parent`/`_sort_keys` kwargs (#698).
+
+## Deterministic Text Constraints
+- Lexical words: 125/135 (raw=131)
+- Opener hit: False
+- Word-count postscript hit: False
+- Passed: True

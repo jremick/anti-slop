@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v anti-slop-hook >/dev/null 2>&1; then anti-slop-hook --harness claude --stdin-tool-json; elif [ -f gates/hooks/run_diff_gate_hook.py ]; then python3 -B gates/hooks/run_diff_gate_hook.py --harness claude --stdin-tool-json; else uvx --from git+https://github.com/jremick/anti-slop anti-slop-hook --harness claude --stdin-tool-json; fi"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v anti-slop-hook >/dev/null 2>&1; then anti-slop-hook --harness claude --no-budget; elif [ -f gates/hooks/run_diff_gate_hook.py ]; then python3 -B gates/hooks/run_diff_gate_hook.py --harness claude --no-budget; else uvx --from git+https://github.com/jremick/anti-slop anti-slop-hook --harness claude --no-budget; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

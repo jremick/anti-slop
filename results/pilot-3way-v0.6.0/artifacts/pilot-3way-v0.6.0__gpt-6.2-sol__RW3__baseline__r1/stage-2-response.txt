@@ -1,0 +1,1 @@
+**2.x release sign-off under the temporary codec waiver.** On Python 3.15.0, `run_checks.py` exited 0 with three checks passed and one skipped. The optional codec check was skipped because Brotli is unavailable. Zstandard is available. Full codec verification remains pending.

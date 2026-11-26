@@ -1,0 +1,118 @@
+--- a/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
++++ b/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
+@@ -176,6 +176,15 @@
+ 
+         ret: bytes | bytearray = b""
+         while True:
++            # When the end of a gzip member is reached, a new decompressor
++            # must be created for the remaining (next member) data. This also
++            # covers the case where the previous call stopped exactly on a
++            # member boundary because ``max_length`` was reached: feeding data
++            # to a finished decompressor would only append it to
++            # ``unused_data`` and duplicate it.
++            if self._obj.eof and data:
++                self._state = GzipDecoderState.OTHER_MEMBERS
++                self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
+             try:
+                 chunk = self._obj.decompress(
+                     data, max_length=max(max_length - len(ret), 0)
+@@ -205,11 +214,6 @@
+ 
+             if not data:
+                 return ret if isinstance(ret, bytes) else bytes(ret)
+-            # When the end of a gzip member is reached, a new decompressor
+-            # must be created for unused (possibly future) data.
+-            if self._obj.eof:
+-                self._state = GzipDecoderState.OTHER_MEMBERS
+-                self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
+ 
+         return ret if isinstance(ret, bytes) else bytes(ret)
+ 
+@@ -351,7 +355,14 @@
+         self._decoders = [_get_decoder(e) for e in encodings]
+ 
+     def flush(self) -> bytes:
+-        return self._decoders[0].flush()
++        # Decoders run in reverse order of application; flushed output of an
++        # outer decoder must still pass through the inner decoders.
++        data = b""
++        for d in reversed(self._decoders):
++            if data:
++                data = d.decompress(data)
++            data += d.flush()
++        return data
+ 
+     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
+         if max_length <= 0:
+@@ -1129,7 +1140,17 @@
+         if decode_content is None:
+             decode_content = self.decode_content
+ 
+-        if amt and amt < 0:
++        if amt == 0:
++            return b""
++
++        if not decode_content and self._has_decoded_content:
++            # Fail before consuming anything from `fp` or the decoded buffer.
++            raise RuntimeError(
++                "Calling read(decode_content=False) is not supported after "
++                "read(decode_content=True) was called."
++            )
++
++        if amt is not None and amt < 0:
+             # Negative numbers and `None` should be treated the same.
+             amt = None
+         elif amt is not None:
+@@ -1160,6 +1181,7 @@
+             not data
+             and len(self._decoded_buffer) == 0
+             and not (self._decoder and self._decoder.has_unconsumed_tail)
++            and not (flush_decoder and decode_content and self._decoder)
+         ):
+             return data
+ 
+@@ -1171,7 +1193,11 @@
+                 self._decoded_buffer.put(data)
+                 data = self._decoded_buffer.get_all()
+ 
+-            if cache_content and not self._uncached_read_occurred:
++            if (
++                cache_content
++                and not self._uncached_read_occurred
++                and (data or not self._body)
++            ):
+                 self._body = data
+         else:
+             # do not waste memory on buffer when not decoding
+@@ -1196,6 +1222,8 @@
+                 # For example, the GZ file header takes 10 bytes, we don't want to read
+                 # it one byte at a time
+                 data = self._raw_read(amt)
++                # Flush the decoder once the underlying stream is exhausted.
++                flush_decoder = not data
+                 decoded_data = self._decode(
+                     data,
+                     decode_content,
+@@ -1226,7 +1254,9 @@
+         """
+         if decode_content is None:
+             decode_content = self.decode_content
+-        if amt and amt < 0:
++        if amt == 0:
++            return b""
++        if amt is not None and amt < 0:
+             # Negative numbers and `None` should be treated the same.
+             amt = None
+         # try and respond without going to the network
+@@ -1468,6 +1498,11 @@
+ 
+             if amt == 0:
+                 return
++            if not decode_content and self._has_decoded_content:
++                raise RuntimeError(
++                    "Calling read(decode_content=False) is not supported after "
++                    "read(decode_content=True) was called."
++                )
+             elif amt and amt < 0:
+                 # Negative numbers and `None` should be treated the same,
+                 # but httplib handles only `None` correctly.

@@ -1,0 +1,178 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-v0.2.0",
+  "status": "in_progress",
+  "standard_version": "0.2.0",
+  "suite": "constructed-diagnostic-probes",
+  "cases": [
+    {
+      "case_id": "W1",
+      "case_version": "0.1.0",
+      "stages": 1
+    },
+    {
+      "case_id": "W2",
+      "case_version": "0.1.0",
+      "stages": 3
+    },
+    {
+      "case_id": "R1",
+      "case_version": "0.1.0",
+      "stages": 1
+    },
+    {
+      "case_id": "R2",
+      "case_version": "0.1.0",
+      "stages": 3
+    },
+    {
+      "case_id": "C1",
+      "case_version": "0.1.0",
+      "stages": 1,
+      "automated_grader": "benchmarks/graders/grade_c1.py"
+    },
+    {
+      "case_id": "C2",
+      "case_version": "0.1.0",
+      "stages": 3,
+      "automated_grader": "benchmarks/graders/grade_c2.py"
+    },
+    {
+      "case_id": "B1",
+      "case_version": "0.2.0",
+      "stages": 2
+    },
+    {
+      "case_id": "S1",
+      "case_version": "0.2.0",
+      "stages": 2
+    },
+    {
+      "case_id": "T1",
+      "case_version": "0.2.0",
+      "stages": 1,
+      "automated_grader": "benchmarks/graders/grade_t1.py"
+    },
+    {
+      "case_id": "P1",
+      "case_version": "0.2.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_p1.py"
+    }
+  ],
+  "models": [
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "anthropic",
+      "id": "claude-fable-5-2",
+      "display_name": "Claude Fable 5.2"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules"
+  ],
+  "replicates": 1,
+  "planned_matched_pairs": 50,
+  "planned_run_records": 100,
+  "planned_generation_stages": 190,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules",
+      "baseline": "baseline",
+      "treatment": "core-rules",
+      "description": "Primary paired comparison of standard/core.md v0.2.0 against frozen provider-native baseline across all 10 diagnostic scenarios.",
+      "case_ids": [
+        "W1",
+        "W2",
+        "R1",
+        "R2",
+        "C1",
+        "C2",
+        "B1",
+        "S1",
+        "T1",
+        "P1"
+      ],
+      "planned_matched_pairs": 50,
+      "planned_run_records": 100,
+      "planned_generation_stages": 190
+    },
+    {
+      "track_id": "core-rules-v0.1.0-vs-v0.2.0",
+      "baseline": "core-rules-v0.1.0",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Head-to-head standard revision ablation comparing main (v0.1.0) against feat/v0.2.0-best-of-both (v0.2.0); W1-C2 remain byte-identical across branches for identical SHA-256 case_revision matching.",
+      "case_ids": [
+        "W1",
+        "W2",
+        "R1",
+        "R2",
+        "C1",
+        "C2",
+        "B1",
+        "S1",
+        "T1",
+        "P1"
+      ],
+      "v0_1_0_byte_identical_subset": [
+        "W1",
+        "W2",
+        "R1",
+        "R2",
+        "C1",
+        "C2"
+      ],
+      "planned_matched_pairs": 50,
+      "planned_run_records": 100,
+      "planned_generation_stages": 190
+    },
+    {
+      "track_id": "core-rules-vs-model-controls",
+      "baseline": "core-rules",
+      "treatment": "model-controls",
+      "description": "Per-model delta overlay ablation testing model-specific controls (gates/model_deltas.json) added on top of standard/core.md without altering the shared core prompt.",
+      "case_ids": [
+        "W1",
+        "W2",
+        "R1",
+        "R2",
+        "C1",
+        "C2",
+        "B1",
+        "S1",
+        "T1",
+        "P1"
+      ],
+      "planned_matched_pairs": 50,
+      "planned_run_records": 100,
+      "planned_generation_stages": 190
+    }
+  ],
+  "limits": [
+    "Constructed probes are diagnostic; they are not a representative sample of user work.",
+    "Ten independent task scenarios (W1-C2 preserved byte-identical from v0.1.0 plus B1, S1, T1, P1 in v0.2.0); models and chain stages are not additional independent scenarios.",
+    "Freeze exact configurations, prompt bundles and input snapshots before execution.",
+    "Reconcile all planned attempts before publishing using scripts/benchmark.py summarize --pilot benchmarks/pilot.json so missing model/case coverage is reported explicitly.",
+    "Never substitute a different model without a new explicitly labelled experiment."
+  ]
+}

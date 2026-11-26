@@ -1,0 +1,25 @@
+# Objective chatbot closing filler — hard error by default.
+# Vale's default text scope ignores fenced code blocks and inline code spans.
+extends: existence
+message: "Remove chatbot closing filler '%s'; end with the concrete decision, status, or next action."
+level: error
+ignorecase: true
+tokens:
+  - 'let me know if you[''’]d like\b'
+  - 'let me know if you would like\b'
+  - 'let me know if you need\b'
+  - 'let me know if you want\b'
+  - 'let me know if you have any (?:other )?questions\b'
+  - 'please let me know if\b'
+  - 'i hope this helps\b'
+  - 'hope this helps\b'
+  - 'hope that helps\b'
+  - 'feel free to reach out\b'
+  - 'feel free to ask\b'
+  - 'feel free to let me know\b'
+  - 'happy to adjust\b'
+  - 'happy to help if\b'
+  - 'i[''’]m happy to (?:adjust|help)\b'
+  - 'i[''’]d be happy to (?:adjust|help)\b'
+  - 'don[''’]t hesitate to (?:reach out|ask)\b'
+  - 'do not hesitate to (?:reach out|ask)\b'

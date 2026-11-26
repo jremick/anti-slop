@@ -1,0 +1,18 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**Decision: Request changes — do not merge.** Green CI masks an auth bypass, production crash/hang, and untested changes.
+
+**Required fixes:**
+- `src/auth_client.ts:20-26`: Remove `@ts-ignore`/`as any`, reject `null` `expiresAt`, and restore `Number.isNaN(expiryMs)` (fixes crash and fail-open auth bypass).
+- `src/retry_worker.py:10,37,42`: Remove `breakpoint()` and replace hardcoded `/Users/dev/keys/staging.pem` with configurable secret loading.
+- `src/retry_worker.py:21-28`: Scope `except` to transient DB timeout errors with logging instead of silently returning `[]`.
+- `tests/test_worker.py:20-37`: Test `process_retry_batch` directly (not a bare mock) and unskip/fix the concurrency test.
+
+**Verification to unblock:**
+- Passing `tsc` + tests for `null`, malformed, expired, and valid `expiresAt`.
+- Passing `pytest` (0 skipped) covering dispatch, key loading, `MAX_ATTEMPTS`, DB timeouts, and concurrency.
+
+STDERR:
+

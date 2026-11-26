@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-v0.6.0",
+  "status": "completed",
+  "standard_version": "0.2.0",
+  "suite": "public-real-work-and-credibility",
+  "cases": [
+    {
+      "case_id": "RW3",
+      "case_version": "0.4.0",
+      "stages": 2,
+      "automated_grader": "benchmarks/graders/grade_rw3.py"
+    },
+    {
+      "case_id": "RW5",
+      "case_version": "0.4.0",
+      "stages": 2
+    },
+    {
+      "case_id": "RW6",
+      "case_version": "0.4.0",
+      "stages": 2
+    },
+    {
+      "case_id": "SE2",
+      "case_version": "0.5.0",
+      "stages": 2
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules-v0.2.0",
+    "model-controls"
+  ],
+  "replicates": 3,
+  "planned_matched_pairs": 48,
+  "planned_run_records": 144,
+  "planned_generation_stages": 288,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules-v0.2.0",
+      "baseline": "baseline",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Primary paired comparison of standard/core.md v0.2.0 against frozen provider-native baseline across three origin: real_work pinned OSS scenarios (RW3, RW5, RW6) and one polyglot engineering-credibility PR audit (SE2) over n = 3 replicates per cell.",
+      "case_ids": [
+        "RW3",
+        "RW5",
+        "RW6",
+        "SE2"
+      ],
+      "planned_matched_pairs": 48,
+      "planned_run_records": 96,
+      "planned_generation_stages": 192
+    },
+    {
+      "track_id": "core-rules-v0.2.0-vs-model-controls",
+      "baseline": "core-rules-v0.2.0",
+      "treatment": "model-controls",
+      "description": "Per-model delta overlay ablation testing model-specific rules from gates/model_deltas.json layered on top of standard/core.md v0.2.0 across RW3, RW5, RW6, and SE2 over n = 3 replicates per cell.",
+      "case_ids": [
+        "RW3",
+        "RW5",
+        "RW6",
+        "SE2"
+      ],
+      "planned_matched_pairs": 48,
+      "planned_run_records": 96,
+      "planned_generation_stages": 192
+    },
+    {
+      "track_id": "baseline-vs-model-controls",
+      "baseline": "baseline",
+      "treatment": "model-controls",
+      "description": "End-to-end comparison of standard/core.md v0.2.0 + per-model delta overlays against provider-native baseline across RW3, RW5, RW6, and SE2 over n = 3 replicates per cell.",
+      "case_ids": [
+        "RW3",
+        "RW5",
+        "RW6",
+        "SE2"
+      ],
+      "planned_matched_pairs": 48,
+      "planned_run_records": 96,
+      "planned_generation_stages": 192
+    }
+  ],
+  "limits": [
+    "Mixed public suite comprising 75% origin: real_work pinned Nov 2026 OSS scenarios (RW3 urllib3, RW5 sqlparse, RW6 tomlkit) and 25% constructed polyglot engineering-credibility audit (SE2); report origin: real_work and origin: constructed outcomes separately rather than pooling into a single real-work claim.",
+    "Replicates (n = 3 per model x case x condition cell), models (4 focus models), and lineage stages (2 stages per run) are not additional independent task scenarios.",
+    "Requires isolated per-run CODEX_HOME and HOME directories (zero personal skills or user configs) and deterministic pre-hash artifact sanitization in scripts/run_benchmark.py before recording SHA-256 hashes.",
+    "Never substitute a different model without a new explicitly labelled experiment."
+  ]
+}

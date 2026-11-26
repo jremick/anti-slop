@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "case_id": "W2",
+  "version": "0.1.0",
+  "origin": "constructed",
+  "domain": "writing",
+  "title": "Carry a changed constraint through a proposal and handoff",
+  "prompt": "Read benchmarks/sources/w2-proposal.md. Write a decision note of at most 160 words covering all fields the source requires. Keep proposals and approvals distinguishable.",
+  "evidence_sources": [
+    {
+      "id": "w2-proposal",
+      "locator": "benchmarks/sources/w2-proposal.md",
+      "sha256": "eebf32df44d2d8e25dee98c3ceceab669bf92e12799cdc0ce661511d91c834b8"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "stage1",
+      "description": "Stage 1 accurately preserves all specified decision-note fields and the pending approval state.",
+      "required": true
+    },
+    {
+      "id": "stage2",
+      "description": "Stage 2 changes the proposed cap to AUD 8,000 without implying sponsor approval or changing the stated duration, count or owner.",
+      "required": true
+    },
+    {
+      "id": "stage3",
+      "description": "Final handoff says AUD 8,000, identifies Alex Chen and the decision sought, and makes pending approval explicit.",
+      "required": true
+    },
+    {
+      "id": "preservation",
+      "description": "No stage invents a start date, production rollout, approval or additional requirement.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Read benchmarks/sources/w2-proposal.md. Write a decision note of at most 160 words covering all fields the source requires. Keep proposals and approvals distinguishable.",
+    "Update the note: the proposed spending cap is now AUD 8,000. Everything else in the source is unchanged. Approval is still pending. Return the revised note.",
+    "Using the latest note, write an at-most-100-word handoff for someone who has not seen the discussion. State the owner, scope, current requested cap, approval state and next decision."
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "case_id": "W3",
+  "version": "0.3.0",
+  "origin": "constructed",
+  "domain": "writing",
+  "title": "Reconcile raw CSV telemetry, errata, support queue, and finance memo against an error-ridden executive slide under strict word caps",
+  "prompt": "Read all 5 files under benchmarks/sources/w3_q3_review/ without modifying or creating any files. Prepare a concise executive Go/No-Go brief for the Atlas Checkout Pilot in at most 160 words. Compute the true steady-state weighted conversion rate from metrics-raw.csv (excluding PARTIAL_OUTAGE weeks W06 and W14 and applying the W11 errata correction in changelog-correction.txt), check both pilot exit criteria in finance-memo.md, explicitly correct all three errors in exec-slide-draft.md (weighted vs unweighted rate, budget approval status and direct vs fully loaded Q3 spend, and open P1 status), and give a clear Go/No-Go recommendation. Reply ONLY with the brief (no conversational preamble, no word-count postscript).",
+  "evidence_sources": [
+    {
+      "id": "w3-metrics-csv",
+      "locator": "benchmarks/sources/w3_q3_review/metrics-raw.csv",
+      "sha256": "ea4efc487a3067b8c2be8c865f020399be7c202c9b321f467ff52372c838a32f"
+    },
+    {
+      "id": "w3-finance-memo",
+      "locator": "benchmarks/sources/w3_q3_review/finance-memo.md",
+      "sha256": "62b6ade0dd1cf659ce9a43529b559c699c6e02da7efa3b23ab751239b3044f26"
+    },
+    {
+      "id": "w3-exec-slide",
+      "locator": "benchmarks/sources/w3_q3_review/exec-slide-draft.md",
+      "sha256": "510893bcaa8cddf2e41d177af4b7bade6773af4e88799a453ad4e48c7e5a178f"
+    },
+    {
+      "id": "w3-support-log",
+      "locator": "benchmarks/sources/w3_q3_review/support-log-summary.md",
+      "sha256": "45e57073a28ff14bef42a28f6f1a01a321e1b78c2db07bffcda5b06de0a90518"
+    },
+    {
+      "id": "w3-changelog-correction",
+      "locator": "benchmarks/sources/w3_q3_review/changelog-correction.txt",
+      "sha256": "530994df85462f6e56d665e060aad159c5818267a8fcbbd1eacd734aa2d5affa"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "exact_weighted_arithmetic",
+      "description": "Stage 1 computes exact steady-state weighted conversion across the 16 OK weeks excluding PARTIAL_OUTAGE rows (W06, W14) with W11 corrected (41 -> 34): 835 / 26,000 = 3.21% (3.2115%), strictly below the 3.50% exit threshold (correcting the slide's 3.64% unweighted 18-week mean).",
+      "required": true
+    },
+    {
+      "id": "all_three_slide_corrections_and_nogo",
+      "description": "Stage 1 recommends NO-GO (or HOLD) and explicitly corrects all three slide errors: (1) 3.21% weighted vs 3.64% unweighted, (2) Q4 $115,000 expansion is unapproved/pending CFO sign-off while approved Q3 spend is $42,000 direct / $48,000 fully loaded (+$6,000 amortized GPU), and (3) 1 open critical P1 incident SUP-4419 (duplicate charges on 3DS retries, 14 orders).",
+      "required": true
+    },
+    {
+      "id": "stage2_conditional_update",
+      "description": "Stage 2 accurately reflects that the CFO declined the $115,000 Q4 expansion and offered a conditional $14,000 4-week extension strictly contingent on closing P1 SUP-4419 and reaching >= 3.50% steady-state weighted conversion (from 3.21% today), without inflating status to approved GO.",
+      "required": true
+    },
+    {
+      "id": "word_caps_and_readonly",
+      "description": "Stage 1 <= 160 lexical words, Stage 2 <= 85 lexical words, zero chatbot openers or word-count postscripts in either stage, and zero files created or modified in the workspace.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Read all 5 files under benchmarks/sources/w3_q3_review/ without modifying or creating any files. Prepare a concise executive Go/No-Go brief for the Atlas Checkout Pilot in at most 160 words. Compute the true steady-state weighted conversion rate from metrics-raw.csv (excluding PARTIAL_OUTAGE weeks W06 and W14 and applying the W11 errata correction in changelog-correction.txt), check both pilot exit criteria in finance-memo.md, explicitly correct all three errors in exec-slide-draft.md (weighted vs unweighted rate, budget approval status and direct vs fully loaded Q3 spend, and open P1 status), and give a clear Go/No-Go recommendation. Reply ONLY with the brief (no conversational preamble, no word-count postscript).",
+    "Update: The CFO formally declined the $115,000 Q4 expansion today and instead offered a conditional $14,000 4-week extension strictly contingent on closing P1 SUP-4419 and achieving >= 3.50% steady-state weighted conversion. Without modifying or creating any files, reply ONLY with a board update of at most 85 words (no preamble, no meta-commentary, no word-count note)."
+  ],
+  "valid_neighbouring_case": "When raw CSV telemetry, errata, support logs, and finance memos confirm that all exit criteria are met with zero open P1s and approved budget, the brief must deliver a direct GO recommendation without fabricating caveats or unnecessary error sections."
+}

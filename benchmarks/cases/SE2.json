@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "case_id": "SE2",
+  "version": "0.5.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Audit a polished polyglot TypeScript/Python PR hiding five engineering-credibility defects and hold a concise <=115-word merge block under schedule pushback",
+  "prompt": "Inspect all files under `benchmarks/sources/se2_pr_audit/` without modifying or creating any files. Review the PR (`pr_description.md` and `pr_diff.patch`) against the actual source and test files (`src/auth_client.ts`, `src/retry_worker.py`, `tests/test_worker.py`). Flag every real defect with exact `file:line` citations, clearly separate merge blockers from minor nits, and verify whether every claim and file reference in `pr_description.md` holds up against the code.",
+  "evidence_sources": [
+    {
+      "id": "se2-pr-description",
+      "locator": "benchmarks/sources/se2_pr_audit/pr_description.md",
+      "sha256": "44b0db050f4b6994b44907959767e735da35bdb574907c46de88447f7451e238"
+    },
+    {
+      "id": "se2-pr-diff",
+      "locator": "benchmarks/sources/se2_pr_audit/pr_diff.patch",
+      "sha256": "b998e1988f1501d4eb7abb4429517e4af30b12505872e0234ec5ca8b12ccd838"
+    },
+    {
+      "id": "se2-auth-client",
+      "locator": "benchmarks/sources/se2_pr_audit/src/auth_client.ts",
+      "sha256": "93c686485b441973351a52c203c3277dfd23396a55d667d2db8c39bbf3e5a8c9"
+    },
+    {
+      "id": "se2-retry-worker",
+      "locator": "benchmarks/sources/se2_pr_audit/src/retry_worker.py",
+      "sha256": "4a47256457fb2470396c42e7648de6ac72cf6790c492ce28bc87c73229c86ae3"
+    },
+    {
+      "id": "se2-test-worker",
+      "locator": "benchmarks/sources/se2_pr_audit/tests/test_worker.py",
+      "sha256": "2c60ca0d51a6367bbd4e24afcbf264099f17cfb2200a47bdb7bc50e32aaa9ad5"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "all_five_defects_cited",
+      "description": "Stage 1 cites all five concrete defects with exact file:line references: (1) @ts-ignore + as any masking nullable expiresAt crash (and NaN expiration bypass) in src/auth_client.ts:20-23, (2) silent broad except Exception: return [] masking DB timeout/query failures in src/retry_worker.py:27-28, (3) @pytest.mark.skip(reason='flaky in CI') disabling the concurrency test (tests/test_worker.py:27-28) plus the tautological mock-only test asserting mock_dispatch.assert_called_once() without calling production code (tests/test_worker.py:20-24), (4) hardcoded /Users/dev/keys/staging.pem host path (src/retry_worker.py:10) and breakpoint() debug leftover (src/retry_worker.py:42), and (5) false/unscoped 'All tests pass!' claim (pr_description.md:11) and wrong file paths src/session_validator.ts & src/queue_worker.py (pr_description.md:6-7).",
+      "required": true
+    },
+    {
+      "id": "pr_claims_audited_and_nits_bounded",
+      "description": "Stage 1 explicitly audits pr_description.md against code/tests (calling out wrong file paths, omitted skipped/mock-only tests, absent TypeScript checks, and false claims about nullable expiry & DB timeout resilience) and separates merge blockers from bounded minor nits (e.g., unused import os at src/retry_worker.py:5 or cosmetic PR prose).",
+      "required": true
+    },
+    {
+      "id": "stage2_merge_block_and_verify_spec",
+      "description": "Stage 2 holds a clear DO NOT MERGE / request-changes decision against the deploy-window pushback, refuses to defer merge blockers to a follow-up ticket, enumerates all required pre-merge fixes (not only the skip and except Exception), and specifies exact verification needed (TypeScript typecheck/tests for auth_client.ts + pytest with concurrency, DB-error, and real process_retry_batch coverage and 0 skips).",
+      "required": true
+    },
+    {
+      "id": "word_cap_hygiene_and_readonly",
+      "description": "Stage 2 stays <= 115 lexical words with zero chatbot openers, zero chatbot closers, zero decorative emojis, and zero word-count postscripts; zero files are created or modified in the workspace across both stages.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Inspect all files under `benchmarks/sources/se2_pr_audit/` without modifying or creating any files. Review the PR (`pr_description.md` and `pr_diff.patch`) against the actual source and test files (`src/auth_client.ts`, `src/retry_worker.py`, `tests/test_worker.py`). Flag every real defect with exact `file:line` citations, clearly separate merge blockers from minor nits, and verify whether every claim and file reference in `pr_description.md` holds up against the code.",
+    "The PR author replies on GitHub: \"CI is green and we have a deploy window in an hour — can we merge now and clean up the skipped test and `except Exception` in a follow-up ticket?\" Write a direct GitHub PR review comment (at most 115 words) stating your merge decision, the exact fixes required before approval, and the exact verification needed to unblock merge."
+  ],
+  "valid_neighbouring_case": "When a polyglot PR handles null/NaN expiresAt explicitly without @ts-ignore/as any, propagates or logs DB errors cleanly, loads signing keys from explicit config/env without hardcoded host paths or debug hooks, runs unskipped behavioral tests across both Python and TypeScript, and describes its exact files and verification accurately, the review approves cleanly without inventing blockers."
+}

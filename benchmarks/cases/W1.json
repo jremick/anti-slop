@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "case_id": "W1",
+  "version": "0.1.0",
+  "origin": "constructed",
+  "domain": "writing",
+  "title": "Shorten a brief without losing consequential qualifications",
+  "prompt": "Read benchmarks/sources/w1-pilot.md. Write a self-contained decision brief of at most 120 words. Preserve the measured result and qualifications needed to decide whether to deploy. State the proposed next step; do not invent a causal finding or approval.",
+  "evidence_sources": [
+    {
+      "id": "w1-pilot",
+      "locator": "benchmarks/sources/w1-pilot.md",
+      "sha256": "df8b5e786303f69ac5ed1585138a1c09471d8d9eff8493cbf61e5cad75452303"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "facts",
+      "description": "States 20 internal cases and median response time changing from 12 to 9 seconds.",
+      "required": true
+    },
+    {
+      "id": "limits",
+      "description": "Preserves no control group and no measured customer outcomes; does not claim the intervention caused the change.",
+      "required": true
+    },
+    {
+      "id": "decision",
+      "description": "Preserves production deployment not approved and the proposed larger controlled trial.",
+      "required": true
+    },
+    {
+      "id": "form",
+      "description": "At most 120 words, coherent and self-contained; no unsupported result or commitment.",
+      "required": true
+    }
+  ]
+}

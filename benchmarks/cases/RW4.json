@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "case_id": "RW4",
+  "version": "0.4.0",
+  "origin": "real_work",
+  "domain": "research",
+  "title": "Reconcile pinned pypa/packaging 26.4 release docs, changelog, source, and open unmerged PRs against an error-ridden migration draft under tight word caps",
+  "prompt": "Review all files in `benchmarks/sources/rw4_packaging_264/` (snapshot date 2026-11-25). Fact-check `07-internal-migration-note-draft.md` against the pinned upstream `pypa/packaging` 26.4 sources (`01`–`06`) and return an authoritative 26.4 upgrade contract in at most 130 words correcting every error in the draft and noting any other breaking or license-validation changes in `02`/`05` relevant to migration.",
+  "upstream_provenance": {
+    "repo": "https://github.com/pypa/packaging",
+    "license": "Apache-2.0 OR BSD-2-Clause",
+    "pinned_commit": "20de131f397a24a2d1723ff90c17f2e5b33d2766",
+    "open_prs_snapshot_date": "2026-11-25"
+  },
+  "evidence_sources": [
+    {
+      "id": "rw4-01-01-pyproject-toml",
+      "locator": "benchmarks/sources/rw4_packaging_264/01-pyproject.toml",
+      "sha256": "ab5af2143f09deb799107957c233c15313d116ec21ae6bc3ab8bd1c40d7159e7"
+    },
+    {
+      "id": "rw4-02-02-changelog-26-2-to-26-4-rst",
+      "locator": "benchmarks/sources/rw4_packaging_264/02-changelog-26.2-to-26.4.rst",
+      "sha256": "505e8c9385302b58dacbacb61449cccb4585b3a0e964e8d3913f8c92eb062b1c"
+    },
+    {
+      "id": "rw4-03-03-docs-ranges-rst",
+      "locator": "benchmarks/sources/rw4_packaging_264/03-docs-ranges.rst",
+      "sha256": "db04ec55c1e046da735003c66859b889cc59440c0714b48bfdde51aec303b347"
+    },
+    {
+      "id": "rw4-04-04-docs-markers-rst",
+      "locator": "benchmarks/sources/rw4_packaging_264/04-docs-markers.rst",
+      "sha256": "8742015ee0d5298983ade7731dae119dd51094399c7641d8108c06d57ab4a2ad"
+    },
+    {
+      "id": "rw4-05-05-licenses-init-py",
+      "locator": "benchmarks/sources/rw4_packaging_264/05-licenses-init.py",
+      "sha256": "e0184dcd384af0043325511a6871eabf6d49ce92d74fa90da678e28456373cb0"
+    },
+    {
+      "id": "rw4-06-06-open-unmerged-prs-nov2026-md",
+      "locator": "benchmarks/sources/rw4_packaging_264/06-open-unmerged-prs-nov2026.md",
+      "sha256": "a9b7c7a66247a9edebaa8aee0e6ad835a3a27c3eb7f032c3c138ff8489e09a36"
+    },
+    {
+      "id": "rw4-07-07-internal-migration-note-draft-md",
+      "locator": "benchmarks/sources/rw4_packaging_264/07-internal-migration-note-draft.md",
+      "sha256": "8f6a1bb5a7d911d20ca4f1e52d2331ac20ea215e77149e1af4db42b5e550c5c8"
+    },
+    {
+      "id": "rw4-08-LICENSE",
+      "locator": "benchmarks/sources/rw4_packaging_264/LICENSE",
+      "sha256": "cad1ef5bd340d73e074ba614d26f7deaca5c7940c3d8c34852e65c4909686c48"
+    },
+    {
+      "id": "rw4-09-LICENSE-APACHE",
+      "locator": "benchmarks/sources/rw4_packaging_264/LICENSE.APACHE",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+    },
+    {
+      "id": "rw4-10-LICENSE-BSD",
+      "locator": "benchmarks/sources/rw4_packaging_264/LICENSE.BSD",
+      "sha256": "b70e7e9b742f1cc6f948b34c16aa39ffece94196364bc88ff0d2180f0028fac5"
+    },
+    {
+      "id": "rw4-11-UPSTREAM-json",
+      "locator": "benchmarks/sources/rw4_packaging_264/UPSTREAM.json",
+      "sha256": "a483dc2059cb1fe1bfd117b395a30d5ed5def09e331ba3ca60149017534a7c7f"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "exact_26_4_contract_and_corrections",
+      "description": "Stage 1 corrects all factual errors in 07-internal-migration-note-draft.md with exact upstream facts: Python >=3.10 floor (3.9 dropped in #1354), pylock/direct_url __slots__ still loads 26.3 pickles (#1366/#1548), Version.__replace__() raises TypeError on unknown kwargs (#1378), VersionRange supports copy/pickle (#1504), LicenseRef- rejects non-ASCII (#1481), and notes migration-relevant license/metadata validation changes in 02/05 (first-spelling LicenseRef- case normalization #1412 and/or Windows drive-relative License-File rejection #1382).",
+      "required": true
+    },
+    {
+      "id": "unmerged_prs_separated",
+      "description": "Stage 1 explicitly flags open unmerged PRs #1583 (Marker backslash serialization, #1399) and #1337 (sdist/wheel path-separator validation) — and optionally #1585 — as OPEN / unmerged and NOT in 26.4.",
+      "required": true
+    },
+    {
+      "id": "stage2_service_split",
+      "description": "Stage 2 cleanly separates Service A (blocked from 26.4 until off Python 3.9) and Service B (26.4 unblocks VersionRange pickling #1504, but Marker backslash round-trip #1399 remains blocked/unmerged in open PR #1583).",
+      "required": true
+    },
+    {
+      "id": "word_caps_and_readonly",
+      "description": "Stage 1 <= 130 lexical words, Stage 2 <= 65 lexical words, zero chatbot openers or word-count postscripts in either stage, and zero files created or modified in the workspace.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Review all files in `benchmarks/sources/rw4_packaging_264/` (snapshot date 2026-11-25). Fact-check `07-internal-migration-note-draft.md` against the pinned upstream `pypa/packaging` 26.4 sources (`01`–`06`) and return an authoritative 26.4 upgrade contract in at most 130 words correcting every error in the draft and noting any other breaking or license-validation changes in `02`/`05` relevant to migration.",
+    "Update: Service A is stuck on Python 3.9 until Q1; Service B runs Python 3.12 and needs both `VersionRange` pickling and guaranteed `Marker` backslash round-trip safety (`#1399`) before upgrading. Write a Slack-ready engineering handoff of at most 65 words stating what 26.4 unblocks vs. what remains blocked for Service A and Service B."
+  ],
+  "valid_neighbouring_case": "When a migration note accurately reflects all upstream changelog entries and cites only merged PRs, the brief confirms upgrade readiness concisely without inventing conflicts."
+}

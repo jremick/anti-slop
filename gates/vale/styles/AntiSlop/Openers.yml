@@ -1,0 +1,23 @@
+# Objective chatbot and praise openers — hard error by default.
+# Vale's default text scope ignores fenced code blocks and inline code spans.
+extends: existence
+message: "Remove chatbot/praise opener '%s'; start directly with the answer, diff, or decision."
+level: error
+ignorecase: true
+nonword: true
+tokens:
+  - '^Sure[,!.]'
+  - '^Certainly[,!.]'
+  - '^Here is '
+  - '^Here''s '
+  - '^Here are '
+  - '^Great question\b'
+  - '^Good question\b'
+  - '^Excellent question\b'
+  - '^Of course[,!]'
+  - '^Happy to help\b'
+  - '^I''d be happy to\b'
+  - '^I would be happy to\b'
+  - '^Absolutely[,!]'
+  - '^Thanks for asking\b'
+  - '^Thank you for asking\b'

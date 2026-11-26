@@ -1,0 +1,12 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "b8ee705f-aab2-4dcd-9947-c04ec608a22b", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 323302, "cost_usd": null}
+RC: 0
+STDOUT:
+**NO-GO.** Block [05-draft-release-announcement.md](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/05-draft-release-announcement.md): `0.15.2..0.15.3` has **43 commits** ([01](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/01-git-log-0.15.2-to-0.15.3.txt)) and **25 changelog entries** (6 Changed, 19 Fixed; [02b](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/02b-changelog-0.15.1-to-0.15.3.md)).
+
+**Draft errors:** False 18-commit and zero behavior/exception-change claims. Unshipped open PRs ([03](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/03-open-prs-nov25-2026.md)): `#721/#720` (strict UTF-8 `UnicodeDecodeError`), `#706` (`dumps(..., multiline=True)`), `#635` (out-of-order deletion `IndexError`). Misattributes `#664` and `#325/#627` to `0.15.2`/`0.15.1`; PR `#719` ([02](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/02-pr719-release-diff.diff)) moved both into `0.15.3`, where they actually shipped.
+
+**Real `0.15.3` changes:** Exceptions—`ValueError` on forbidden comment control chars (`#705`), datetime strings in `date()` (`#673`), and non-table AoT assignments pre-mutation (`#712`); wrong-length extended AoT slices raise pre-mutation (`#631`); max-depth table assembly raises `ParseError` not `RecursionError` (`#714`). Behavior—`Array.sort()` reorders serialized output (`#644`), recursive `sort_keys` (`#614`), `round(Float)` returns `Integer` (`#695`), sub-minute offsets serialize as UTC (`#701`), `register_encoder()` kwarg filtering (`#698`), optional `setdefault()` default (`#710`), local `astimezone()` (`#651`), copied `Trivia` (`#683`).
+
+STDERR:
+

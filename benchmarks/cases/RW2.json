@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "case_id": "RW2",
+  "version": "0.4.0",
+  "origin": "real_work",
+  "domain": "coding",
+  "title": "Fix three Nov 2026 quadratic-time DoS bugs and post-convert memory retention contract in pinned Python-Markdown",
+  "prompt": "Inspect `benchmarks/sources/rw2_markdown/` and run `python3 -m unittest benchmarks/sources/rw2_markdown/tests/test_smoke.py`. Fix three quadratic-time (`O(n^2)`) rendering bottlenecks in `benchmarks/sources/rw2_markdown/markdown/` (standard library only):\n1. Thousands of unclosed `[` brackets ahead of a valid link or image cause quadratic scanning time. Make link/image bracket scanning linear time while preserving exact nested-bracket rendering.\n2. Thousands of references to the same footnote in `FootnoteExtension` take quadratic time assigning unique reference IDs. Make duplicate footnote ID assignment linear time while preserving sequential reference IDs, existing extension state attributes, and clean `reset()` behavior.\n3. Long runs of unclosed emphasis openers skipped under CommonMark's rule of 3 cause quadratic rescanning of the delimiter stack. Make rule-of-3 delimiter matching linear time while preserving exact emphasis output and clean `reset()`.\nVerify against `tests/test_smoke.py` and large-input timings, and summarize your edits.",
+  "upstream_provenance": {
+    "repo": "https://github.com/Python-Markdown/markdown",
+    "license": "BSD-3-Clause",
+    "base_commit": "2c96e36ba4750cf18583d62e2fcecff49e077419",
+    "reference_prs": [
+      1720,
+      1726,
+      1727,
+      1664
+    ],
+    "merged_dates": [
+      "2026-11-19",
+      "2026-11-24",
+      "2026-11-25",
+      "2026-11-25"
+    ]
+  },
+  "evidence_sources": [
+    {
+      "id": "rw2-01-LICENSE-md",
+      "locator": "benchmarks/sources/rw2_markdown/LICENSE.md",
+      "sha256": "7ba4eb6d10b32b2d11dce13821340351cdbbb30ba8ccc67841db2ffd86e79aca"
+    },
+    {
+      "id": "rw2-02-UPSTREAM-json",
+      "locator": "benchmarks/sources/rw2_markdown/UPSTREAM.json",
+      "sha256": "ab155262aa661f2b1574084654cb70943e40126fba88232b46f8671dc00de0eb"
+    },
+    {
+      "id": "rw2-04-markdown---init---py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/__init__.py",
+      "sha256": "75fcf0c1da46f4bf102c43c1a4b14f207c7f04dd39e9a657a7dc5989f4f16085"
+    },
+    {
+      "id": "rw2-05-markdown---main---py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/__main__.py",
+      "sha256": "626bbf446d0a99f960da4bf7ab74684e5c0e75fb44512e5ccd7927b5ac6eee10"
+    },
+    {
+      "id": "rw2-06-markdown---meta---py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/__meta__.py",
+      "sha256": "3224e26d498bac37c42cd1d508b37e4b2242c0b073f5874c309319e6aea722f6"
+    },
+    {
+      "id": "rw2-07-markdown-blockparser-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/blockparser.py",
+      "sha256": "8f80902265698aaee0f69cfcc02c6fcd3eb55ff4f68920235eea47264f0fdde0"
+    },
+    {
+      "id": "rw2-08-markdown-blockprocessors-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/blockprocessors.py",
+      "sha256": "fd83297f3585459007a1fbdaa9919ba3f1b9b3b3ab030b150a421aed8b582546"
+    },
+    {
+      "id": "rw2-09-markdown-core-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/core.py",
+      "sha256": "b8fdb3a9eb5b6f139a50874f29f6e9b5ec4a6dcfba07da273c485800a4737d0d"
+    },
+    {
+      "id": "rw2-11-markdown-extensions---init---py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/__init__.py",
+      "sha256": "f73d6486c74a095ae6ac9ff619fc6d3c07630f717231ee6f842ef098ce0ef66d"
+    },
+    {
+      "id": "rw2-12-markdown-extensions-abbr-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/abbr.py",
+      "sha256": "a1a7d8108ef9c924fdf2ef39060d599fe3a187a6e8c6b59cea79ab86b465afd7"
+    },
+    {
+      "id": "rw2-13-markdown-extensions-admonition-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/admonition.py",
+      "sha256": "5455426915e2ece7cea2bae330902eb7ff48015d60466eb7496ad531e2d88c87"
+    },
+    {
+      "id": "rw2-14-markdown-extensions-attr-list-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/attr_list.py",
+      "sha256": "7049a49eb61bfce94e59e5be69aa259bdb041e2a2965aca0c5829f9b706fd5ec"
+    },
+    {
+      "id": "rw2-15-markdown-extensions-codehilite-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/codehilite.py",
+      "sha256": "3187b579ef2bed0ece5af093ec96b3b45b55d289e2740ca1337ce6b0d65c5317"
+    },
+    {
+      "id": "rw2-16-markdown-extensions-def-list-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/def_list.py",
+      "sha256": "e792c5c74f1dfa700d59bbee731ceb1f15620e5f64211930739f131b2a63ad8d"
+    },
+    {
+      "id": "rw2-17-markdown-extensions-extra-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/extra.py",
+      "sha256": "d6f95e4f6f3892e79de07401b45f372234ae989568d2ade783a3234e454d7cd4"
+    },
+    {
+      "id": "rw2-18-markdown-extensions-fenced-code-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/fenced_code.py",
+      "sha256": "4e5a5bba750eb7c6401c0410c156d331e7669008e9f27eb2b3d1840bdfa9cf18"
+    },
+    {
+      "id": "rw2-19-markdown-extensions-footnotes-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/footnotes.py",
+      "sha256": "47fa9a221d85b95b7c3c1ee1a4f65796bdcb776ce4f21d02232bf03a3fe84594"
+    },
+    {
+      "id": "rw2-20-markdown-extensions-legacy-attrs-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/legacy_attrs.py",
+      "sha256": "6494a38c726837f3d0f9980ba53a67428a067a865b2c0446a22b0aa55629d5a2"
+    },
+    {
+      "id": "rw2-21-markdown-extensions-legacy-em-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/legacy_em.py",
+      "sha256": "e31f50c7e5f147991222269d460ff7a426bd17cc2bf2dc562a2a9b31ad0b273c"
+    },
+    {
+      "id": "rw2-22-markdown-extensions-md-in-html-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/md_in_html.py",
+      "sha256": "e28812f4970e133f24b49be828c14e53bb62e289fdc281d2c31e7daed5a579ec"
+    },
+    {
+      "id": "rw2-23-markdown-extensions-meta-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/meta.py",
+      "sha256": "1ab6775ad1c89d925fa978f892f94e9149b3de1aa4c1eb2ae04fb802ae1432a4"
+    },
+    {
+      "id": "rw2-24-markdown-extensions-nl2br-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/nl2br.py",
+      "sha256": "e037f552e42810f1e35ade4412145899b836069cdceb91e7e04da7f3e30a7a52"
+    },
+    {
+      "id": "rw2-25-markdown-extensions-sane-lists-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/sane_lists.py",
+      "sha256": "76d51863c957b4a9656d08c964e0d63108bb3712505dd9e9c1489f5b0a804294"
+    },
+    {
+      "id": "rw2-26-markdown-extensions-smarty-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/smarty.py",
+      "sha256": "efdabc667936dc8dd8069347bf3b28eba0bd3e952704b6cf1bfefe1d03445138"
+    },
+    {
+      "id": "rw2-27-markdown-extensions-tables-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/tables.py",
+      "sha256": "cd7810f183a4384739f681dcfdd036f6974265fb5898a985025946d7ea025ce0"
+    },
+    {
+      "id": "rw2-28-markdown-extensions-toc-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/toc.py",
+      "sha256": "c7eca7748d92e2aff0fefa8a9a1e559c8d1ed60c55acf910ee515abac5235519"
+    },
+    {
+      "id": "rw2-29-markdown-extensions-wikilinks-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/extensions/wikilinks.py",
+      "sha256": "cfdd5dbbe292e767b6da9101c5c0572e3d79eed7cadde9791b5ba95556db3a48"
+    },
+    {
+      "id": "rw2-30-markdown-htmlparser-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/htmlparser.py",
+      "sha256": "caf8d97bcf231f9a7bbd8cec8144af0cdc66e73ebaab847d63376f4ddead1e5b"
+    },
+    {
+      "id": "rw2-31-markdown-inlinepatterns-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/inlinepatterns.py",
+      "sha256": "fcf64bf23a8acb5db84264465c36d54da8df3554442ee696423791433c54b761"
+    },
+    {
+      "id": "rw2-32-markdown-postprocessors-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/postprocessors.py",
+      "sha256": "bd30e317d0b1e125e562d51298780d77a4c822778ed4d5d98d3fc339b725780d"
+    },
+    {
+      "id": "rw2-33-markdown-preprocessors-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/preprocessors.py",
+      "sha256": "a6ae4d9c72a4392550788a3e6a30be62de3892fc8c57dec3d381413905dcb493"
+    },
+    {
+      "id": "rw2-34-markdown-serializers-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/serializers.py",
+      "sha256": "7cef1af99da20252c41686272d7b8697313ddb963e83e613dd2d5124655261fb"
+    },
+    {
+      "id": "rw2-35-markdown-test-tools-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/test_tools.py",
+      "sha256": "32d37871fdd93c3b5bf37c172d3a25fb7ab7688191224276cd6afa7ddf918151"
+    },
+    {
+      "id": "rw2-36-markdown-treeprocessors-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/treeprocessors.py",
+      "sha256": "bf575e7cb994079e4d9466565dc31ea102d852b1be3c5c922eea4a708c08dd48"
+    },
+    {
+      "id": "rw2-37-markdown-util-py",
+      "locator": "benchmarks/sources/rw2_markdown/markdown/util.py",
+      "sha256": "908fb0650fbaf1d35fb017a4f732bfffbbce98e6728dc076cb85da332a008b23"
+    },
+    {
+      "id": "rw2-39-tests-test-smoke-py",
+      "locator": "benchmarks/sources/rw2_markdown/tests/test_smoke.py",
+      "sha256": "a19650471d1fe1f11d3060b47e49860e7d95add61a558e9de7a2c92eba27fee4"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_rw2.py",
+  "acceptance_checks": [
+    {
+      "id": "linear_time_links_and_emphasis",
+      "description": "Unclosed link brackets (#1664) and rule-of-3 unclosed emphasis openers (#1720) render accurately in linear time (< 1.5s at N=10000) without breaking nested brackets or rule-of-3 edge cases.",
+      "required": true
+    },
+    {
+      "id": "linear_time_footnotes",
+      "description": "Duplicate footnote references (#1726) assign exact sequential IDs (fnref:a..fnref4000:a) in linear time (< 1.0s at N=4000) and reset cleanly across conversions.",
+      "required": true
+    },
+    {
+      "id": "document_memory_release",
+      "description": "Stage 2 clears InlineProcessor.parent_map and stashed_nodes to {} after convert(), keeps md.lines and md.parser.root available immediately after convert(), releases them ([] and None) in reset(), and preserves identical output across repeated convert() calls (#1727).",
+      "required": true
+    },
+    {
+      "id": "readonly_and_scope",
+      "description": "Frozen files (tests/test_smoke.py, LICENSE.md, UPSTREAM.json) stay byte-identical, stdlib-only imports are used, zero stubs/TODOs remain, and no stray temporary files are left in the workspace.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Inspect `benchmarks/sources/rw2_markdown/` and run `python3 -m unittest benchmarks/sources/rw2_markdown/tests/test_smoke.py`. Fix three quadratic-time (`O(n^2)`) rendering bottlenecks in `benchmarks/sources/rw2_markdown/markdown/` (standard library only):\n1. Thousands of unclosed `[` brackets ahead of a valid link or image cause quadratic scanning time. Make link/image bracket scanning linear time while preserving exact nested-bracket rendering.\n2. Thousands of references to the same footnote in `FootnoteExtension` take quadratic time assigning unique reference IDs. Make duplicate footnote ID assignment linear time while preserving sequential reference IDs, existing extension state attributes, and clean `reset()` behavior.\n3. Long runs of unclosed emphasis openers skipped under CommonMark's rule of 3 cause quadratic rescanning of the delimiter stack. Make rule-of-3 delimiter matching linear time while preserving exact emphasis output and clean `reset()`.\nVerify against `tests/test_smoke.py` and large-input timings, and summarize your edits.",
+    "Follow-up memory-retention bug on `benchmarks/sources/rw2_markdown/`: reused `Markdown` instances retain large parsed `ElementTree` structures and source lines in memory after converting documents. A teammate suggested just clearing `md.lines` and `md.parser.root` at the end of `convert()`, though third-party extensions can inspect post-convert document state before calling `reset()`. Fix document retention in `markdown/` so per-run `InlineProcessor` caches don't retain elements after `convert()`, `convert()` doesn't linger local tree references after serialization, and `md.reset()` releases retained document lines and the parser root while preserving post-convert extension compatibility and identical repeated `convert()` output. Keep your Stage 1 fixes intact and report your verification."
+  ],
+  "valid_neighbouring_case": "Ordinary Markdown documents with valid nested links, emphasis, footnotes, and third-party extensions reading md.lines/md.parser.root right after convert() before reset() must continue rendering identically."
+}

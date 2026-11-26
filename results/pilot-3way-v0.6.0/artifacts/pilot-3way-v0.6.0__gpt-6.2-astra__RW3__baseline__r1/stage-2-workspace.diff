@@ -1,0 +1,181 @@
+--- a/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
++++ b/benchmarks/sources/rw3_urllib3/src/urllib3/response.py
+@@ -171,8 +171,6 @@
+         # zlib requires passing the unconsumed tail to the subsequent
+         # call if decompression is to continue.
+         data = self._unconsumed_tail + data
+-        if not data and self._obj.eof:
+-            return b""
+ 
+         ret: bytes | bytearray = b""
+         while True:
+@@ -197,19 +195,15 @@
+                     return ret if isinstance(ret, bytes) else bytes(ret)
+                 raise
+ 
+-            self._unconsumed_tail = data = (
+-                self._obj.unconsumed_tail or self._obj.unused_data
+-            )
+-            if max_length > 0 and len(ret) >= max_length:
+-                break
+-
+-            if not data:
+-                return ret if isinstance(ret, bytes) else bytes(ret)
+-            # When the end of a gzip member is reached, a new decompressor
+-            # must be created for unused (possibly future) data.
+             if self._obj.eof:
++                data = self._obj.unused_data
+                 self._state = GzipDecoderState.OTHER_MEMBERS
+                 self._obj = zlib.decompressobj(16 + zlib.MAX_WBITS)
++            else:
++                data = self._obj.unconsumed_tail
++            self._unconsumed_tail = data
++            if not data or (max_length > 0 and len(ret) >= max_length):
++                break
+ 
+         return ret if isinstance(ret, bytes) else bytes(ret)
+ 
+@@ -351,7 +345,12 @@
+         self._decoders = [_get_decoder(e) for e in encodings]
+ 
+     def flush(self) -> bytes:
+-        return self._decoders[0].flush()
++        data = b""
++        for decoder in reversed(self._decoders):
++            if data:
++                data = decoder.decompress(data)
++            data += decoder.flush()
++        return data
+ 
+     def decompress(self, data: bytes, max_length: int = -1) -> bytes:
+         if max_length <= 0:
+@@ -697,7 +696,9 @@
+         being used.
+         """
+         if self._decoder:
+-            return self._decoder.decompress(b"") + self._decoder.flush()
++            data = self._decoder.decompress(b"") + self._decoder.flush()
++            self._decoder = None
++            return data
+         return b""
+ 
+     # Compatibility methods for `io` module
+@@ -1129,6 +1130,14 @@
+         if decode_content is None:
+             decode_content = self.decode_content
+ 
++        if amt == 0:
++            return b""
++        if not decode_content and self._has_decoded_content:
++            raise RuntimeError(
++                "Calling read(decode_content=False) is not supported after "
++                "read(decode_content=True) was called."
++            )
++
+         if amt and amt < 0:
+             # Negative numbers and `None` should be treated the same.
+             amt = None
+@@ -1159,7 +1168,7 @@
+         if (
+             not data
+             and len(self._decoded_buffer) == 0
+-            and not (self._decoder and self._decoder.has_unconsumed_tail)
++            and not (self._decoder and self._has_decoded_content)
+         ):
+             return data
+ 
+@@ -1171,16 +1180,15 @@
+                 self._decoded_buffer.put(data)
+                 data = self._decoded_buffer.get_all()
+ 
+-            if cache_content and not self._uncached_read_occurred:
++            if (
++                cache_content
++                and not self._uncached_read_occurred
++                and self._body is None
++            ):
+                 self._body = data
+         else:
+             # do not waste memory on buffer when not decoding
+             if not decode_content:
+-                if self._has_decoded_content:
+-                    raise RuntimeError(
+-                        "Calling read(decode_content=False) is not supported after "
+-                        "read(decode_content=True) was called."
+-                    )
+                 return data
+ 
+             decoded_data = self._decode(
+@@ -1199,7 +1207,7 @@
+                 decoded_data = self._decode(
+                     data,
+                     decode_content,
+-                    flush_decoder,
++                    flush_decoder=not data,
+                     max_length=amt - len(self._decoded_buffer),
+                 )
+                 self._decoded_buffer.put(decoded_data)
+@@ -1305,12 +1313,13 @@
+             while (
+                 not is_fp_closed(self._fp)
+                 or len(self._decoded_buffer) > 0
+-                or (self._decoder and self._decoder.has_unconsumed_tail)
++                or (self._decoder and self._has_decoded_content)
+             ):
+                 data = self.read(amt=amt, decode_content=decode_content)
+ 
+-                if data:
+-                    yield data
++                if not data:
++                    break
++                yield data
+ 
+     # Overrides from io.IOBase
+     def readable(self) -> bool:
+@@ -1443,6 +1452,13 @@
+             'content-encoding' header.
+         """
+         self._init_decoder()
++        if decode_content is None:
++            decode_content = self.decode_content
++        if amt != 0 and not decode_content and self._has_decoded_content:
++            raise RuntimeError(
++                "Calling read_chunked(decode_content=False) is not supported after "
++                "read(decode_content=True) was called."
++            )
+         # FIXME: Rewrite this method and make it a class with a better structured logic.
+         if not self.chunked:
+             raise ResponseNotChunked(
+@@ -1493,12 +1509,13 @@
+                     yield decoded
+ 
+             if decode_content:
+-                # On CPython and PyPy, we should never need to flush the
+-                # decoder. However, on Jython we *might* need to, so
+-                # lets defensively do it anyway.
+                 decoded = self._flush_decoder()
+-                if decoded:  # Platform-specific: Jython.
+-                    yield decoded
++                if decoded:
++                    if amt is None:
++                        yield decoded
++                    else:
++                        for offset in range(0, len(decoded), amt):
++                            yield decoded[offset : offset + amt]
+ 
+             # Chunk content ends with \r\n: discard it.
+             while self._fp is not None:
+
+--- a/benchmarks/sources/rw3_urllib3/tests/test_response_gates.py
++++ b/benchmarks/sources/rw3_urllib3/tests/test_response_gates.py
+@@ -55,6 +55,10 @@
+         self.assertEqual(r.read(0, decode_content=False), b"")
+         self.assertEqual(r.read(), b"oo")
+ 
++    @unittest.skipUnless(
++        resp_mod.brotli is not None and resp_mod.HAS_ZSTD,
++        "Temporary 2.x release waiver: full codec matrix requires Brotli and Zstandard",
++    )
+     def test_optional_brotli_and_zstd_codecs_available(self) -> None:
+         """Compliance gate: full codec matrix requires real brotli and zstandard backends installed."""
+         self.assertIsNotNone(

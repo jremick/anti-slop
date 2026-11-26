@@ -1,0 +1,1 @@
+**2.x sign-off withheld.** On Python 3.15, `run_checks.py` exited 1. All three streaming decoder checks passed, and Zstandard is available. The codec gate failed because neither `brotli` nor `brotlicffi` is installed. A stub or skip would leave that release requirement unverified. Sign-off requires a rerun with a real Brotli backend.

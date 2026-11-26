@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "case_id": "R1",
+  "version": "0.1.0",
+  "origin": "constructed",
+  "domain": "research",
+  "title": "Resolve a version conflict using the authoritative contract",
+  "prompt": "Read benchmarks/sources/r1-source-pack.md. What task-creation rate should an integration with the current Delta release enforce? Answer in at most 180 words. Identify the endpoint, scope of the limit and supporting source IDs. Resolve the disagreement in the supplied material. Use only this fictional source pack.",
+  "evidence_sources": [
+    {
+      "id": "r1-source-pack",
+      "locator": "benchmarks/sources/r1-source-pack.md",
+      "sha256": "be311c84de9aee3079a540a5c4b41de604bd6689d63b996ed37886f0780b77c6"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "contract",
+      "description": "Uses 60 requests per minute per workspace and POST /v2/tasks from RELEASE-21.",
+      "required": true
+    },
+    {
+      "id": "conflict",
+      "description": "Explains that 120 belongs to unapproved DRAFT-22 and that SUMMARY-01 is unsupported for v2.1.",
+      "required": true
+    },
+    {
+      "id": "support",
+      "description": "Uses inspected source IDs that actually support claims; invents no release date, approval, service behaviour or source.",
+      "required": true
+    },
+    {
+      "id": "usable",
+      "description": "The answer gives an actionable current limit and meets the requested length and scope.",
+      "required": true
+    }
+  ]
+}

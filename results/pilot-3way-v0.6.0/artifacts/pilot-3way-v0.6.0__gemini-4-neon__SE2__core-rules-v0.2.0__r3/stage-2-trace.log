@@ -1,0 +1,15 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**Changes requested — cannot approve for this deploy window.** Green CI only runs one happy-path test and a mock-only test while skipping another; merging now ships an auth bypass and production hangs/crashes.
+
+**Required fixes:**
+- `src/auth_client.ts`: remove `@ts-ignore`/`as any`, return `false` on `null` `expiresAt`, and restore `Number.isNaN(expiryMs)`.
+- `src/retry_worker.py`: remove `breakpoint()`, replace `/Users/dev/keys/staging.pem` with configurable key loading, and catch only specific transient DB errors with logging.
+- `tests/test_worker.py`: unskip the concurrency test and test `process_retry_batch` instead of a standalone mock.
+
+**Verification to unblock:** `tsc` passes; auth tests cover null, malformed, expired, and valid tokens; `pytest` passes with 0 skipped tests covering dispatch, `MAX_ATTEMPTS`, key loading, and DB errors.
+
+STDERR:
+

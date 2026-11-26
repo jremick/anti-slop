@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**No — requesting changes; cannot merge for this deploy window.** Green CI is misleading: `src/auth_client.ts` is untested, one worker test is skipped, and the new test only calls a mock.
+
+Required fixes:
+- `src/auth_client.ts:20-26`: Remove `@ts-ignore`/`as any`, return `false` on `null` `expiresAt`, and restore `Number.isNaN(expiryMs)` to fix the auth bypass.
+- `src/retry_worker.py:10,27,42`: Remove `breakpoint()`, replace hardcoded `/Users/dev/keys/staging.pem` with config/injection, and handle/log specific DB timeouts instead of `except Exception`.
+- `tests/test_worker.py:20-27`: Unskip `test_concurrent_claim_prevents_double_delivery` and test `process_retry_batch` directly.
+
+Verification to unblock:
+- Clean `tsc` and unit tests covering null, malformed, and expired tokens.
+- `pytest` (0 skips) covering `process_retry_batch`, key loading, and DB errors.
+
+STDERR:
+

@@ -1,0 +1,6 @@
+{
+  "upstream_repo": "https://github.com/urllib3/urllib3",
+  "license": "MIT",
+  "pinned_base_commit": "c5347bbd39203d68d7b0e3ffb83ced3e3b4b9109",
+  "snapshot_scope": "src/urllib3 package source (plus pinned build-time _version.py) and LICENSE.txt at base commit"
+}

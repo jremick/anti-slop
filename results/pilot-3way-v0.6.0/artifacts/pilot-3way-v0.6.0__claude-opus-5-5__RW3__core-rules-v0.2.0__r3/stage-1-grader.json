@@ -1,0 +1,21 @@
+{
+  "case_id": "RW3",
+  "passed": true,
+  "checks": [
+    {
+      "id": "streaming_decoder_fixes",
+      "passed": true,
+      "detail": "#5315, #5316, and #5344 streaming decoder regressions all pass"
+    },
+    {
+      "id": "fail_closed_optional_codecs",
+      "passed": true,
+      "detail": "optional brotli/zstd codec gating remains fail-closed without stubs"
+    },
+    {
+      "id": "readonly_and_no_test_tampering",
+      "passed": true,
+      "detail": "frozen tests/runner/license unchanged, zero stray files or new stubs"
+    }
+  ]
+}

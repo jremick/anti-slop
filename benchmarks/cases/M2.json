@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "case_id": "M2",
+  "version": "0.3.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Fix multi-file concurrent jobqueue state-machine, lease fencing, and metrics bugs, then add cancellation and remove deprecated flag",
+  "prompt": "Production incidents surfaced reliability, concurrency, and accounting failures across the 8-file package under benchmarks/sources/m2_jobqueue/ even though tests/test_basic.py passes. Audit the entire package and fix all defects in place (standard library only), leaving tests/test_basic.py completely unmodified, so the full queue contract holds: equal-priority jobs claim FIFO without crashing; delayed RETRY_WAIT jobs (`available_at > now`) stay scheduled without blocking ready lower-priority jobs; concurrent submit, claim, complete, fail, and metrics operations are thread-safe (zero duplicate claims, at most one winner per contending `dedupe_key`, exact metrics with zero double-counting); `dedupe_key` blocks only `QUEUED`, `RUNNING`, `RETRY_WAIT`, and `SUCCEEDED` jobs and is released once a job reaches `DEAD_LETTER`; expired `RUNNING` leases (`now >= lease_expires_at`) are automatically reclaimed during `claim_next` and via `reclaim_expired` (requeueing to `QUEUED` and incrementing `expired_requeued` once when `attempts < max_attempts`, or moving to `DEAD_LETTER` and incrementing `dead_lettered` once when `attempts >= max_attempts`), while stale or mismatched `ack`/`nack` raise `LeaseExpiredError`; failed jobs run at most `max_attempts` total attempts; `Worker.run_once` routes handler exceptions to `scheduler.fail` cleanly (never leaving jobs stranded in `RUNNING`) and returns `True` whenever a job was claimed; and invalid numeric arguments (`max_attempts` not int >= 1 or bool, `priority` bool or non-int, `lease_ttl <= 0`, `retry_delay < 0`) raise `ValueError`. Keep `allow_duplicate_running` signature-compatible in Stage 1. Verify against tests/test_basic.py plus targeted concurrency/edge checks and report exact results.",
+  "evidence_sources": [
+    {
+      "id": "m2-init",
+      "locator": "benchmarks/sources/m2_jobqueue/__init__.py",
+      "sha256": "ec21802da29b25a20ff81c2f07209dc4892581b30b03f3b54af8297e14a1a863"
+    },
+    {
+      "id": "m2-errors",
+      "locator": "benchmarks/sources/m2_jobqueue/errors.py",
+      "sha256": "52de095adce9b2f2084caedd04393c2d36f52876aaa09d1b1b39c27e2b6a6d95"
+    },
+    {
+      "id": "m2-metrics",
+      "locator": "benchmarks/sources/m2_jobqueue/metrics.py",
+      "sha256": "2ac32c4cdd76fea12e5ed449255636e56df30f94da0dccb4599d284bc22dfe5e"
+    },
+    {
+      "id": "m2-models",
+      "locator": "benchmarks/sources/m2_jobqueue/models.py",
+      "sha256": "b508dd8c946237a863fe96b4d56219c67aa1c7b573344a282a0feaef13354442"
+    },
+    {
+      "id": "m2-scheduler",
+      "locator": "benchmarks/sources/m2_jobqueue/scheduler.py",
+      "sha256": "e2b04bc1aa272f0845df019d26adf152a77f99cf773973dad561f6cccae3f12d"
+    },
+    {
+      "id": "m2-store",
+      "locator": "benchmarks/sources/m2_jobqueue/store.py",
+      "sha256": "9a4d2a5f991750cb9d726720603c01b6a83007b64ba610248157ae6ae4675c05"
+    },
+    {
+      "id": "m2-worker",
+      "locator": "benchmarks/sources/m2_jobqueue/worker.py",
+      "sha256": "4efbba3d07495723615b549558c95c262937ccabefba9343486cdd2793a833fb"
+    },
+    {
+      "id": "m2-test-basic",
+      "locator": "benchmarks/sources/m2_jobqueue/tests/test_basic.py",
+      "sha256": "d7835d5369b09a0e19f527e88bb9bd23a125518fae78eb5b1332517b30155ea6"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_m2.py",
+  "acceptance_checks": [
+    {
+      "id": "state_machine_and_metrics",
+      "description": "Priority ties preserve FIFO, delayed RETRY_WAIT jobs do not block ready jobs, max_attempts has no off-by-one, dedupe_key releases on DEAD_LETTER and CANCELLED, lease expiry reclaims/dead-letters with fencing, Worker catches handler exceptions cleanly, metrics are exact, and Stage 2 cancel(job_id) transitions only QUEUED/RETRY_WAIT jobs.",
+      "required": true
+    },
+    {
+      "id": "concurrency_safety",
+      "description": "Multi-threaded barrier tests confirm zero duplicate claims, zero lost jobs, exact dedupe contention winners, and synchronized metrics under concurrency.",
+      "required": true
+    },
+    {
+      "id": "subtractive_removal",
+      "description": "Stage 2 completely removes allow_duplicate_running from InMemoryJobStore.claim_next, JobScheduler.claim, and Worker.run_once (TypeError on old kwarg, zero **kwargs shims, zero AST references).",
+      "required": true
+    },
+    {
+      "id": "readonly_and_scope",
+      "description": "tests/test_basic.py remains byte-identical (SHA-256 unchanged), all modules stay stdlib-only, and zero stubs or TODO placeholders are added.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Production incidents surfaced reliability, concurrency, and accounting failures across the 8-file package under benchmarks/sources/m2_jobqueue/ even though tests/test_basic.py passes. Audit the entire package and fix all defects in place (standard library only), leaving tests/test_basic.py completely unmodified, so the full queue contract holds: equal-priority jobs claim FIFO without crashing; delayed RETRY_WAIT jobs (`available_at > now`) stay scheduled without blocking ready lower-priority jobs; concurrent submit, claim, complete, fail, and metrics operations are thread-safe (zero duplicate claims, at most one winner per contending `dedupe_key`, exact metrics with zero double-counting); `dedupe_key` blocks only `QUEUED`, `RUNNING`, `RETRY_WAIT`, and `SUCCEEDED` jobs and is released once a job reaches `DEAD_LETTER`; expired `RUNNING` leases (`now >= lease_expires_at`) are automatically reclaimed during `claim_next` and via `reclaim_expired` (requeueing to `QUEUED` and incrementing `expired_requeued` once when `attempts < max_attempts`, or moving to `DEAD_LETTER` and incrementing `dead_lettered` once when `attempts >= max_attempts`), while stale or mismatched `ack`/`nack` raise `LeaseExpiredError`; failed jobs run at most `max_attempts` total attempts; `Worker.run_once` routes handler exceptions to `scheduler.fail` cleanly (never leaving jobs stranded in `RUNNING`) and returns `True` whenever a job was claimed; and invalid numeric arguments (`max_attempts` not int >= 1 or bool, `priority` bool or non-int, `lease_ttl <= 0`, `retry_delay < 0`) raise `ValueError`. Keep `allow_duplicate_running` signature-compatible in Stage 1. Verify against tests/test_basic.py plus targeted concurrency/edge checks and report exact results.",
+    "Now complete Stage 2 inside benchmarks/sources/m2_jobqueue/ (leaving tests/test_basic.py completely unmodified): (1) Add thread-safe `cancel(job_id: str) -> bool` to both `InMemoryJobStore` and `JobScheduler`. If the job exists and is currently in `QUEUED` or `RETRY_WAIT`, transition it to `JobStatus.CANCELLED`, increment `metrics.cancelled` by 1, release its `dedupe_key` so a new job with the same key can be submitted, guarantee `claim_next` never hands out cancelled jobs, and return `True`. If the job does not exist or is in `RUNNING`, `SUCCEEDED`, `DEAD_LETTER`, or `CANCELLED`, leave state and metrics unchanged and return `False`. (2) Completely remove the deprecated `allow_duplicate_running` keyword parameter and all references across the package (no `**kwargs` shim or compatibility alias anywhere in `m2_jobqueue`). Verify tests/test_basic.py plus cancellation and concurrency tests and report exact results."
+  ],
+  "valid_neighbouring_case": "Using a single re-entrant lock (`threading.RLock`) inside InMemoryJobStore plus a lazy-deletion heap that skips stale/cancelled entries during `claim_next`, while removing `allow_duplicate_running` cleanly and keeping `tests/test_basic.py` untouched, must pass the grader."
+}

@@ -1,0 +1,67 @@
+{
+  "template_notice": "VALIDATED SYNTHETIC TEMPLATE. No model was run. condition_source and evidence temporarily point to immutable fixture benchmarks/sources/w1-pilot.md only so scripts/check.py can validate this template via validate_run(). Replace all placeholder values, condition_source, evidence, notes, and digests with real frozen experiment artifacts before saving a JSONL result. For multi-stage lineage cases (e.g., W2, R2, C2), completed runs must also include stage_artifacts covering stages 1..N. synthetic=true marks this example as demonstration data.",
+  "schema_version": 1,
+  "run_id": "REPLACE_WITH_UNIQUE_RUN_ID",
+  "experiment_id": "pilot-v0.2.0",
+  "case_id": "W1",
+  "case_version": "0.1.0",
+  "case_revision": "f68c0a959d7e7b6e13966bba24823854772130419bfc7461bfea2a978fcea345",
+  "condition": "baseline",
+  "condition_source": "benchmarks/sources/w1-pilot.md",
+  "condition_revision": "df8b5e786303f69ac5ed1585138a1c09471d8d9eff8493cbf61e5cad75452303",
+  "model": {
+    "provider": "openai",
+    "id": "gpt-6.2-astra",
+    "version": "REPLACE_WITH_OBSERVED_MODEL_VERSION_OR_EXPLICIT_UNAVAILABLE_METADATA",
+    "reasoning": "REPLACE_WITH_ACTUAL_REASONING_SETTING"
+  },
+  "environment": {
+    "harness": "REPLACE_WITH_NATIVE_HARNESS_OR_MANUAL_SURFACE",
+    "version": "REPLACE_WITH_HARNESS_VERSION",
+    "tools_id": "REPLACE_WITH_FROZEN_TOOL_CONFIGURATION_ID",
+    "source_snapshot_id": "REPLACE_WITH_FROZEN_SOURCE_SNAPSHOT_ID",
+    "budget_id": "REPLACE_WITH_FROZEN_TIME_TOKEN_BUDGET_ID",
+    "baseline_id": "REPLACE_WITH_FROZEN_BASELINE_CONFIGURATION_ID"
+  },
+  "replicate": 1,
+  "synthetic": true,
+  "status": "blocked",
+  "notes": "TEMPLATE EXAMPLE ONLY — no model was executed. Replace this note and evidence with actual blocker logs before recording a real blocked, failed, or timed-out attempt.",
+  "evidence": [
+    "benchmarks/sources/w1-pilot.md"
+  ],
+  "checks": [
+    {
+      "id": "facts",
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "limits",
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "decision",
+      "status": "not_run",
+      "evidence": []
+    },
+    {
+      "id": "form",
+      "status": "not_run",
+      "evidence": []
+    }
+  ],
+  "material_defects": [],
+  "output_artifact": null,
+  "artifact_hashes": {
+    "benchmarks/sources/w1-pilot.md": "df8b5e786303f69ac5ed1585138a1c09471d8d9eff8493cbf61e5cad75452303"
+  },
+  "metrics": {
+    "cost_usd": null,
+    "review_minutes": null,
+    "repair_minutes": null,
+    "total_tokens": null,
+    "repair_capped": false
+  }
+}

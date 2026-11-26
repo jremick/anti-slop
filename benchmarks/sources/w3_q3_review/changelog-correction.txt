@@ -1,0 +1,13 @@
+ANALYTICS ERRATA LOG — ATLAS CHECKOUT PILOT
+Issued: 2026-11-23
+Applies to: metrics-raw.csv
+
+Correction #1 (W11 — 2026-09-14):
+Duplicate payment-confirmed webhook events were ingested twice during the W11 backfill.
+Replace W11 conversions = 41 with corrected W11 conversions = 34.
+W11 sessions (1650) and all other weekly rows remain accurate.
+
+Note on outage rows:
+W06 (2026-08-10) and W14 (2026-10-05) are marked PARTIAL_OUTAGE due to storefront CDN
+degradation that dropped anonymous browse traffic while preserving checkout retries;
+exclude both rows when computing steady-state conversion metrics.

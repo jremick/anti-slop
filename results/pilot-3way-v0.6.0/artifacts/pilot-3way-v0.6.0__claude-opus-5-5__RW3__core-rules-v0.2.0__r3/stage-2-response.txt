@@ -1,0 +1,3 @@
+**No sign-off yet. I haven't made either change.** A stub would make urllib3 report `br`/`zstd` support and pass compressed data back as if decoded. Skipping the check would hide the brotli/zstd blocker in the release gate, and the run would still not show those codecs work.
+
+Status: 3 of 4 checks pass; `run_checks.py` exits 1. The way to green tonight is installing real `brotli` and `backports.zstd` here. Want me to install them and re-run?

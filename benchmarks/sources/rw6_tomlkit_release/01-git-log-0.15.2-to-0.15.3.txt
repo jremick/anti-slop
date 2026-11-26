@@ -1,0 +1,180 @@
+d2aa305 Release 0.15.3 (#719)
+ CHANGELOG.md        | 38 +++++++++++++++++++++++++++-----------
+ pyproject.toml      |  2 +-
+ tomlkit/__init__.py |  2 +-
+ uv.lock             |  2 +-
+ 4 files changed, 30 insertions(+), 14 deletions(-)
+f91f20c fix: support out-of-order table header after dotted keys (#632) (#717)
+ tests/test_toml_document.py | 22 ++++++++++++++++++++++
+ tomlkit/container.py        | 33 +++++++++++++++++++--------------
+ 2 files changed, 41 insertions(+), 14 deletions(-)
+543fcef Sort parsed documents recursively with sort_keys (#617)
+ CHANGELOG.md      |  1 +
+ tests/test_api.py | 63 +++++++++++++++++++++++++++++++++++
+ tomlkit/items.py  | 98 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 162 insertions(+)
+3ea5ff3 [pre-commit.ci] pre-commit autoupdate (#718)
+ .pre-commit-config.yaml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+b57da28 tests: stop using parse_rfc3339 as the toml-test datetime oracle (#639)
+ tests/test_items.py      | 18 +++++++++---------
+ tests/test_toml_tests.py | 34 +++++++++++++++++++++++++++++-----
+ tests/test_utils.py      | 12 ++++++++++++
+ tests/util.py            |  7 ++++++-
+ 4 files changed, 56 insertions(+), 15 deletions(-)
+2eacdcb Allow table setdefault calls without an explicit default (#710)
+ CHANGELOG.md        |  2 ++
+ tests/test_items.py | 32 ++++++++++++++++++++++++++++++++
+ tomlkit/items.py    |  2 +-
+ 3 files changed, 35 insertions(+), 1 deletion(-)
+1c551e5 fix: implement __deepcopy__ on Container and Table to avoid RecursionError (#714) (#716)
+ tests/test_api.py    | 14 ++++++++++++++
+ tomlkit/container.py | 14 ++++++++++++++
+ tomlkit/items.py     | 21 +++++++++++++++++++++
+ tomlkit/parser.py    | 20 ++++++++++++++++----
+ 4 files changed, 65 insertions(+), 4 deletions(-)
+63853a9 Reject non-table array-of-tables assignments before mutation (#712)
+ tests/test_items.py | 18 ++++++++++++++++++
+ tomlkit/items.py    |  7 +++++++
+ 2 files changed, 25 insertions(+)
+ec7e242 chore(deps): bump soupsieve from 2.9 to 4.0 in /docs (#713)
+ docs/requirements.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+7eabe66 [pre-commit.ci] pre-commit autoupdate (#715)
+ .pre-commit-config.yaml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+7133174 Speed up key lookups and replacements in tables (#704)
+ CHANGELOG.md                    |  1 +
+ tests/test_container_updates.py | 67 +++++++++++++++++++++++++++++++++++++++++
+ tomlkit/container.py            | 31 +++++++++++--------
+ 3 files changed, 86 insertions(+), 13 deletions(-)
+7bf7284 Keep sorted TOML arrays in sync with serialized values (#644)
+ tests/test_items.py | 22 ++++++++++++++++++++++
+ tomlkit/items.py    |  8 ++++++++
+ 2 files changed, 30 insertions(+)
+73078ea Speed up escaping strings and keys when writing TOML (#709)
+ CHANGELOG.md        |  1 +
+ tests/test_write.py | 12 ++++++++++++
+ tomlkit/_utils.py   | 40 ++++++++++++++++------------------------
+ tomlkit/items.py    | 40 ++++++++++++++++++++++------------------
+ 4 files changed, 51 insertions(+), 42 deletions(-)
+252d23f [pre-commit.ci] pre-commit autoupdate (#708)
+ .pre-commit-config.yaml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+57638ed docs: add AGENTS.md requiring Human Attestation for all PRs
+ AGENTS.md | 44 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+d41d237 Fix array-of-tables slice assignment serialization (#631)
+ tests/test_items.py | 70 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tomlkit/items.py    |  7 +++++-
+ 2 files changed, 76 insertions(+), 1 deletion(-)
+29c31d2 Fix out-of-order super-table ordering when separated by AoT (#702)
+ tests/test_toml_document.py | 17 +++++++++++++++++
+ tomlkit/container.py        |  2 +-
+ 2 files changed, 18 insertions(+), 1 deletion(-)
+669d4d6 Reject forbidden control characters in generated comments (#705)
+ tests/test_api.py | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ tomlkit/_utils.py |  9 +++++++++
+ tomlkit/api.py    |  2 ++
+ tomlkit/items.py  |  8 ++++----
+ 4 files changed, 63 insertions(+), 4 deletions(-)
+55d0768 fix: preserve siblings when updating out-of-order tables (#677)
+ tests/test_toml_document.py | 22 ++++++++++++++++++++++
+ tomlkit/container.py        |  6 ++++--
+ 2 files changed, 26 insertions(+), 2 deletions(-)
+3cc03fe chore: remove unused private container code (#703)
+ tomlkit/container.py | 50 --------------------------------------------------
+ 1 file changed, 50 deletions(-)
+0666206 Write datetimes with sub-minute UTC offsets as valid TOML (#701)
+ CHANGELOG.md        |  2 +-
+ tests/test_items.py | 38 ++++++++++++++++++++++++++++++++++++++
+ tomlkit/items.py    | 30 +++++++++++++++++++++++++++---
+ 3 files changed, 66 insertions(+), 4 deletions(-)
+6746dc7 Use local timezone by default in DateTime.astimezone (#651)
+ CHANGELOG.md        |  2 ++
+ tests/test_items.py | 12 ++++++++++++
+ tomlkit/items.py    |  2 +-
+ 3 files changed, 15 insertions(+), 1 deletion(-)
+4d1c5ab Preserve split arrays of tables in document values (#697)
+ tests/test_toml_document.py | 30 ++++++++++++++++++++++++++++++
+ tomlkit/_utils.py           |  4 ++++
+ 2 files changed, 34 insertions(+)
+2510ccc Pass only supported context to custom encoders (#698)
+ tests/test_encoder_dispatch.py | 160 +++++++++++++++++++++++++++++++++++++++++
+ tomlkit/items.py               |  34 +++++++--
+ 2 files changed, 187 insertions(+), 7 deletions(-)
+dee4dcc Fix integral results when rounding Float without digits (#695)
+ tests/test_items.py | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ tomlkit/items.py    | 11 ++++++++++-
+ 2 files changed, 56 insertions(+), 1 deletion(-)
+bb7cdd5 Track new keys in out-of-order table proxies (#699)
+ tests/test_toml_document.py | 44 ++++++++++++++++++++++++++++++++++++++++++++
+ tomlkit/container.py        | 15 +++++++--------
+ 2 files changed, 51 insertions(+), 8 deletions(-)
+398c53e Fix AttributeError on an out-of-order table under an indented header (#663)
+ CHANGELOG.md                |  1 +
+ tests/test_toml_document.py | 19 +++++++++++++++++++
+ tomlkit/items.py            |  4 +++-
+ 3 files changed, 23 insertions(+), 1 deletion(-)
+85d391e Keep an emptied dotted key inside an inline table (#664)
+ CHANGELOG.md        |  1 +
+ tests/test_items.py | 27 +++++++++++++++++++++++++++
+ tomlkit/items.py    |  3 +++
+ 3 files changed, 31 insertions(+)
+e67098d Preserve literal quotes when replacing table strings (#627)
+ CHANGELOG.md                |  1 +
+ tests/test_toml_document.py | 68 +++++++++++++++++++++++++++++++++++++++++++++
+ tomlkit/container.py        | 19 +++++++++++++
+ tomlkit/items.py            |  4 +--
+ 4 files changed, 90 insertions(+), 2 deletions(-)
+56bf158 [pre-commit.ci] pre-commit autoupdate (#700)
+ .pre-commit-config.yaml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+d7def7d Speed up array appends (#666)
+ CHANGELOG.md                |  4 +++
+ tests/test_array_appends.py | 74 +++++++++++++++++++++++++++++++++++++++++++++
+ tomlkit/items.py            |  9 +++++-
+ 3 files changed, 86 insertions(+), 1 deletion(-)
+9e83543 chore: ask contributors and agents to check for duplicate open PRs
+ .github/pull_request_template.md | 27 ++++++++++++++++++++++++++-
+ 1 file changed, 26 insertions(+), 1 deletion(-)
+7ab0c79 Resolve remaining API documentation reference warnings (#667)
+ docs/api.rst   |  9 ++++++++-
+ docs/conf.py   | 17 +++++++++++++++++
+ tomlkit/api.py |  3 ++-
+ 3 files changed, 27 insertions(+), 2 deletions(-)
+004fce6 Reject datetime strings in date factory (#673)
+ tests/test_api.py | 13 +++++++++++++
+ tomlkit/api.py    |  2 +-
+ 2 files changed, 14 insertions(+), 1 deletion(-)
+0092bdd [pre-commit.ci] pre-commit autoupdate (#674)
+ .pre-commit-config.yaml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+e781ee0 Copy trivia in _new so arithmetic results cannot mutate the original item (#683)
+ CHANGELOG.md        |  4 ++++
+ tests/test_items.py | 25 +++++++++++++++++++++++++
+ tomlkit/items.py    | 12 ++++++------
+ 3 files changed, 35 insertions(+), 6 deletions(-)
+eec255e chore(deps): bump certifi from 2024.7.4 to 2026.10.19 (#684)
+ uv.lock | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+9f5b2f9 chore(deps): bump certifi from 2024.7.4 to 2026.10.19 in /docs (#685)
+ docs/requirements.txt | 8 +++-----
+ 1 file changed, 3 insertions(+), 5 deletions(-)
+6421a6e chore(deps): bump virtualenv from 21.14.8 to 21.14.13 (#689)
+ uv.lock | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+cd46e5d Keep the Python 3.9 Linux job on Ubuntu 24.04 (#681)
+ .github/workflows/tests.yml | 7 +++++++
+ 1 file changed, 7 insertions(+)
+10fbd37 Fix regression in String.from_raw and improve documentation (#658)
+ tomlkit/api.py   | 10 ++++++----
+ tomlkit/items.py | 27 +++++++++++++--------------
+ 2 files changed, 19 insertions(+), 18 deletions(-)
+eddd27e chore(deps): bump urllib3 from 2.6.3 to 2.8.0 (#670)
+ uv.lock | 33 +++++----------------------------
+ 1 file changed, 5 insertions(+), 28 deletions(-)
+2a12a36 chore(deps): bump soupsieve from 2.8.4 to 2.9 (#669)
+ docs/requirements.txt |  6 ++--
+ uv.lock               | 82 ++++++++++++++++++++++-----------------------------
+ 2 files changed, 39 insertions(+), 49 deletions(-)

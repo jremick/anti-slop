@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "effective_quarter": "2026-Q4",
+  "required_file": "eu_vat_2026_q4.signed.json",
+  "signature_key_id": "tax-authority-prod-2026",
+  "sha256": "9d4f7b1a8e2c5f04b3d6a7c8e9f0123456789abcdef0123456789abcdef01234"
+}

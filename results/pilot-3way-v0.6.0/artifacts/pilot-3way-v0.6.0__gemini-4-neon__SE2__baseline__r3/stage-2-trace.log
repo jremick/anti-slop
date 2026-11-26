@@ -1,0 +1,15 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**Requesting changes — cannot approve or merge.** Green CI hides a skipped test and a mock-only test; this PR introduces an auth bypass and production crashes.
+
+Required fixes before approval:
+- `src/auth_client.ts`: Remove `@ts-ignore`/`as any`, return `false` for `null` `expiresAt`, and restore `Number.isNaN(expiryMs)` so malformed dates fail closed.
+- `src/retry_worker.py`: Remove `breakpoint()`, replace the hardcoded local `SIGNING_KEY_PATH` with configurable injection, narrow and log `except Exception` instead of returning `[]`, and verify `dispatcher` callers.
+- `tests/test_worker.py`: Unskip the concurrency test and test `process_retry_batch` directly.
+
+To unblock: passing `pytest` (zero skips), TypeScript typecheck, and unit tests for `null`/malformed/expired/valid sessions, key loading, and DB errors.
+
+STDERR:
+

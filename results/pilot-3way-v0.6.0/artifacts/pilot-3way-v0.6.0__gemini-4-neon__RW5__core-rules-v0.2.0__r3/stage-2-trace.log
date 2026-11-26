@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Hey Devon — we can't close this as not affected: `GHSA-3496-9g83-7v6x` only escapes `\` and `"` in `OutputPHPFilter` ([output.py:120](file://<TMP_WORKSPACE>/benchmarks/sources/rw5_sqlparse/sqlparse/filters/output.py#L120)), leaving `$` active inside PHP double-quoted strings.
+
+Escaping `$` before `\` defeats the fix because the next `.replace('\\', '\\\\')` escapes the backslash we just added:
+- `SELECT '$name'` → `\$name` → `\\$name` (PHP reads literal `\` + interpolated `$name`)
+- `SELECT '\$name'` → `\\$name` → `\\\\$name` (two literal `\` + interpolated `$name`)
+
+Escaping `\` first (`.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$')`) fixes both: `'$name'` → `'\$name'` and `'\$name'` → `'\\\$name'`.
+
+Don't add `$` escaping to `OutputPythonFilter`: Python single-quoted strings never interpolate `$`, and emitting `\$` raises `SyntaxWarning: invalid escape sequence '\$'` while corrupting the SQL with a literal backslash.
+
+STDERR:
+

@@ -1,0 +1,10 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**Stakeholder Update — `tomlkit` 0.15.3 Release Notes**
+
+Maintainers accepted the audit, pulled the inaccurate draft, and will publish corrected `0.15.3` notes today (43 commits; 25 changelog entries: 6 Changed, 19 Fixed). The corrected notes disclose real exception and behavior changes (including new `ValueError`/`ParseError` checks `#705`/`#673`/`#712`/`#631`/`#714` and serialization/type updates `#644`/`#614`/`#695`) and `0.15.3` attribution for `#664` and `#325`/`#627`. Unmerged PRs (`#721`/`#720` strict UTF-8, `#706` `multiline=True`, `#635`) are deferred to `0.15.4`.
+
+STDERR:
+

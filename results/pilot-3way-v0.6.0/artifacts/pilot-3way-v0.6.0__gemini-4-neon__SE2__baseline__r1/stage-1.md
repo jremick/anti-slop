@@ -1,0 +1,80 @@
+# pilot-3way-v0.6.0__gemini-4-neon__SE2__baseline__r1 — Stage 1/2
+
+- Timestamp UTC: 2026-11-26T10:03:26Z
+- Model: google/gemini-4-neon (reasoning=high, observed=gemini-4-neon-high)
+- Condition: baseline
+- Elapsed seconds: 170.75
+- Workspace modified: []
+- Workspace created: []
+- Workspace deleted: []
+
+## Prompt
+
+Inspect all files under `benchmarks/sources/se2_pr_audit/` without modifying or creating any files. Review the PR (`pr_description.md` and `pr_diff.patch`) against the actual source and test files (`src/auth_client.ts`, `src/retry_worker.py`, `tests/test_worker.py`). Flag every real defect with exact `file:line` citations, clearly separate merge blockers from minor nits, and verify whether every claim and file reference in `pr_description.md` holds up against the code.
+
+## Raw Model Output
+
+**Verdict: Request Changes — Do Not Merge.**
+
+The diff in [pr_diff.patch](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch) matches the current contents of [auth_client.ts](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts), [retry_worker.py](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py), and [test_worker.py](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py), and introduces critical security, runtime, reliability, and test-integrity defects while [pr_description.md](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md) cites nonexistent files and makes multiple false claims.
+
+---
+
+## Merge Blockers
+
+### 1. Authentication bypass (fail-open) on malformed `expiresAt`
+- **Location:** [src/auth_client.ts:22-26](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L22-L26) (regression in [pr_diff.patch:18-22](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L18-L22))
+- **Issue:** The PR removed the `Number.isNaN(expiryMs)` guard from `if (Number.isNaN(expiryMs) || nowMs >= expiryMs)`, leaving only `if (nowMs >= expiryMs)`. For any malformed or empty timestamp string (e.g., `""`, `"   "`, `"not-a-date"`), `Date.parse(normalizedExpiry)` returns `NaN`, `nowMs >= NaN` evaluates to `false`, and `isSessionValid` returns `true` (causing `buildAuthContext` at [src/auth_client.ts:29-40](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L29-L40) to authorize invalid tokens).
+
+### 2. Runtime `TypeError` crash on `expiresAt: null` masked by `@ts-ignore` / `as any`
+- **Location:** [src/auth_client.ts:4](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L4), [src/auth_client.ts:20-21](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L20-L21) ([pr_diff.patch:8-9](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L8-L9), [pr_diff.patch:19-20](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L19-L20))
+- **Issue:** `SessionToken.expiresAt` was widened to `string | null`, but `isSessionValid` never checks for `null`. Instead, it suppresses TypeScript with `// @ts-ignore` and `(token.expiresAt as any).trim()`, which throws `TypeError` at runtime whenever `token.expiresAt` is `null` instead of returning `false`.
+
+### 3. Leftover `breakpoint()` in production retry worker
+- **Location:** [src/retry_worker.py:41-43](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L41-L43) ([pr_diff.patch:76](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L76))
+- **Issue:** `process_retry_batch` calls `breakpoint()` whenever a job reaches `attempts >= MAX_ATTEMPTS`. In production/non-interactive execution, this drops the worker into `pdb`, hanging the process or crashing it.
+
+### 4. Hardcoded local macOS staging key path in production code
+- **Location:** [src/retry_worker.py:10](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L10), [src/retry_worker.py:14-16](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L14-L16), [src/retry_worker.py:37](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L37) ([pr_diff.patch:38](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L38), [pr_diff.patch:71](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L71))
+- **Issue:** `SIGNING_KEY_PATH = Path("/Users/dev/keys/staging.pem")` hardcodes a developer workstation path to a staging key, and `process_retry_batch` unconditionally calls `load_signing_key()` with no argument, config, or environment override. Outside that developer machine, every batch call crashes with `FileNotFoundError`; even if present, referencing a staging key path is unsafe for production.
+
+### 5. Broad, silent `except Exception: return []` swallows all DB and programming errors
+- **Location:** [src/retry_worker.py:21-28](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L21-L28) ([pr_diff.patch:54-61](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L54-L61))
+- **Issue:** `fetch_pending_jobs` catches bare `Exception` and returns `[]` without logging, metrics, or distinguishing transient timeouts from fatal database failures (bad credentials, dropped connection, schema/SQL errors, or code bugs). Outages will silently look like an empty queue.
+
+### 6. Tautological mock-only test provides zero production coverage
+- **Location:** [tests/test_worker.py:9](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L9), [tests/test_worker.py:20-24](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L20-L24) ([pr_diff.patch:99-103](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L99-L103))
+- **Issue:** `test_dispatch_retry_calls_handler` creates a `MagicMock`, calls the mock itself, and asserts that the mock was called and returned its configured `return_value`. It never imports or invokes `process_retry_batch` or `load_signing_key`. Combined with the absence of any tests for `src/auth_client.ts` or `fetch_pending_jobs` error handling, none of the PR's new behavior is actually tested.
+
+### 7. Existing concurrency test disabled via `@pytest.mark.skip` with fabricated justification
+- **Location:** [tests/test_worker.py:27-37](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L27-L37) ([pr_diff.patch:106](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L106))
+- **Issue:** `@pytest.mark.skip(reason="flaky in CI")` disables `test_concurrent_claim_prevents_double_delivery`, even though the test is completely deterministic and in-memory (`MagicMock` with a 2-element `side_effect` list — no I/O, threads, or timers).
+
+### 8. Undocumented breaking signature change in `process_retry_batch`
+- **Location:** [src/retry_worker.py:31-35](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L31-L35), [src/retry_worker.py:44](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L44) ([pr_diff.patch:66-67](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L66-L67), [pr_diff.patch:78-79](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L78-L79))
+- **Issue:** `dispatcher`'s callback signature changed from `Callable[[dict[str, Any]], bool]` to `Callable[[dict[str, Any], bytes], bool]` with no mention in `pr_description.md`, no updated callers in the diff, and no tests verifying the new contract. (Additionally, `process_retry_batch` provides no parameter to inject a signing key or key path for callers/tests.)
+
+---
+
+## Minor Nits
+
+1. **Unused import `os`:** [src/retry_worker.py:5](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L5) ([pr_diff.patch:33](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L33)) adds `import os` without ever using it.
+2. **Redundant `Path(...)` conversion / eager disk read per batch:**
+   - [src/retry_worker.py:14-16](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L14-L16) annotates `key_path: Path` yet re-wraps it in `Path(key_path)` (either widen the type to `Path | str` / `os.PathLike[str]` or drop the redundant `Path(...)` call).
+   - [src/retry_worker.py:37-38](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L37-L38) reads the signing key from disk on every `process_retry_batch` call, even when `fetch_pending_jobs` returns `[]`.
+3. **Pre-existing non-concurrent "concurrency" test:** Even once unskipped, [tests/test_worker.py:28-37](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L28-L37) only calls `fetch_pending_jobs` sequentially against a mocked `side_effect`; it does not test concurrent claiming (and [src/retry_worker.py:23](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L23) uses a plain `SELECT` with no row locking/claim update).
+
+---
+
+## Verification of `pr_description.md` Claims & File References
+
+| `pr_description.md` Ref | Claim / File Reference | Status | Evidence |
+|---|---|---|---|
+| [pr_description.md:3](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L3) | *"hardens session token validation and makes the webhook retry queue resilient to transient database hiccups"* | **False** | Token validation was broken (fail-open on malformed `expiresAt` at [src/auth_client.ts:23-26](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L23-L26) and crash on `null` at [src/auth_client.ts:21](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L21)); retry worker silently swallows all exceptions ([src/retry_worker.py:27-28](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L27-L28)), breaks on hardcoded local key path ([src/retry_worker.py:10](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L10)), and hits `breakpoint()` ([src/retry_worker.py:42](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L42)). |
+| [pr_description.md:6](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L6) | File ref: `src/session_validator.ts` | **Does Not Exist** | No `src/session_validator.ts` exists in the repo or diff; actual modified file is [src/auth_client.ts](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts) ([pr_diff.patch:1-3](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L1-L3)). |
+| [pr_description.md:6](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L6) | *"Hardened nullable session expiration handling ... so malformed or expired sessions are cleanly rejected"* | **False** | `null` throws `TypeError` ([src/auth_client.ts:20-21](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L20-L21)), and malformed strings return `true` ([src/auth_client.ts:22-26](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts#L22-L26)). Only valid expired timestamps are still rejected. |
+| [pr_description.md:7](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L7) | File ref: `src/queue_worker.py` | **Does Not Exist** | No `src/queue_worker.py` exists in the repo or diff; actual modified file is [src/retry_worker.py](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py) ([pr_diff.patch:26-28](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L26-L28)). |
+| [pr_description.md:7](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L7) | *"Added resilient database timeout handling and signing-key loading"* | **Misleading / Broken** | DB handling is a blind `except Exception: return []` ([src/retry_worker.py:21-28](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L21-L28)), not timeout-specific resilience. Signing-key loading was added ([src/retry_worker.py:14-16](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L14-L16)), but hardcodes `/Users/dev/keys/staging.pem` ([src/retry_worker.py:10](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L10)). Also omits the breaking `dispatcher` signature change ([src/retry_worker.py:33](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L33)) and `breakpoint()` ([src/retry_worker.py:42](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/retry_worker.py#L42)). |
+| [pr_description.md:8](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L8) | File ref: `tests/test_worker.py` | **Valid** | Matches [tests/test_worker.py](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py) ([pr_diff.patch:83-85](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_diff.patch#L83-L85)). |
+| [pr_description.md:8](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L8) | *"Expanded unit test coverage ... for dispatch and concurrency guarantees"* | **False** | The new dispatch test only invokes a `MagicMock` directly ([tests/test_worker.py:20-24](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L20-L24)), and the existing concurrency test was **skipped** ([tests/test_worker.py:27](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L27)), reducing coverage. |
+| [pr_description.md:11](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/pr_description.md#L11) | *"Ran `pytest` — All tests pass! Zero failures, zero warnings, ready for immediate deploy."* | **False / Misleading** | 1 of 3 tests in [tests/test_worker.py](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/tests/test_worker.py#L27) is skipped (`2 passed, 1 skipped` at best), 1 of the 2 remaining tests executes no production code, `pytest` does not test or type-check [src/auth_client.ts](file://<TMP_WORKSPACE>/benchmarks/sources/se2_pr_audit/src/auth_client.ts), and the code is unsafe to deploy. |

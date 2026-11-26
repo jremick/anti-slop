@@ -1,0 +1,10 @@
+# Decision-document structural check for ADRs and RFCs.
+# Defaults to `warning`; opt in to `error` per folder in gates/vale/.vale.ini once calibrated.
+# Expects four decision fields: Decision, Rejected Alternatives, Failure Mode, Falsification Condition.
+extends: occurrence
+message: "ADR/RFC should declare all four decision fields: Decision, Rejected Alternatives, Failure Mode, and Falsification Condition."
+level: warning
+scope: raw
+ignorecase: true
+min: 4
+token: '(?m)^(?:#{1,3}\s+|\*\*)?(?:Decision|Rejected Alternatives?|Failure Modes?|Falsification Conditions?)(?:\*\*)?\s*:?'

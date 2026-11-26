@@ -1,0 +1,134 @@
+{
+  "schema_version": 1,
+  "case_id": "RW1",
+  "version": "0.4.0",
+  "origin": "real_work",
+  "domain": "coding",
+  "title": "Fix three Nov 2026 upstream parser, deepcopy, and atomic AoT bugs in pinned python-poetry/tomlkit",
+  "prompt": "Inspect `benchmarks/sources/rw1_tomlkit/` and run `python3 -m unittest benchmarks/sources/rw1_tomlkit/tests/test_smoke.py`. Fix two upstream bug reports in `benchmarks/sources/rw1_tomlkit/tomlkit/` (standard library only):\n1. Valid TOML where an out-of-order table header extends an implicit super-table previously formed by multiple dotted keys (which stdlib `tomllib` accepts) is rejected as a duplicate key. Ensure valid out-of-order extensions parse and round-trip verbatim via `as_string()` while keeping genuine concrete-table redefinitions rejected.\n2. Parsing a valid document containing a dotted key at `Parser.MAX_NESTING_DEPTH` followed by another key under the same leading prefix (at document root or inside a table) fails with `RecursionError`, and `copy.deepcopy()` on deep `Container`, `Table`, and `InlineTable` trees hits recursion limits. An issue commenter suggested lowering `Parser.MAX_NESTING_DEPTH` from 100 to 50 or bumping `sys.setrecursionlimit()` as a quick workaround — investigate the real root cause in `tomlkit/` and fix it cleanly, ensuring table-assembly errors during parsing surface as `ParseError`.\nVerify your changes against `tests/test_smoke.py` and targeted checks, and summarize your edits.",
+  "upstream_provenance": {
+    "repo": "https://github.com/python-poetry/tomlkit",
+    "license": "MIT",
+    "base_commit": "7bf7284dbd622557d9909f8fee017a4cb169a139",
+    "reference_prs": [
+      717,
+      716,
+      712
+    ],
+    "merged_dates": [
+      "2026-11-24",
+      "2026-11-22",
+      "2026-11-22"
+    ]
+  },
+  "evidence_sources": [
+    {
+      "id": "rw1-01-LICENSE",
+      "locator": "benchmarks/sources/rw1_tomlkit/LICENSE",
+      "sha256": "f2f9b460ba719da6626add264d3782f275a4ff7aab677beda08b330911e23adb"
+    },
+    {
+      "id": "rw1-02-UPSTREAM-json",
+      "locator": "benchmarks/sources/rw1_tomlkit/UPSTREAM.json",
+      "sha256": "20a7d3f241116d21455a1f33e04eb6b1b750ce2ece239c59a3f5d873967fd703"
+    },
+    {
+      "id": "rw1-03-pyproject-toml",
+      "locator": "benchmarks/sources/rw1_tomlkit/pyproject.toml",
+      "sha256": "6c661a9f6c585bcd14bef624b89ebf5d0790d637feac5f81e3c582b22ab9458b"
+    },
+    {
+      "id": "rw1-05-tests-test-smoke-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tests/test_smoke.py",
+      "sha256": "c4a82104e89efdd8106d18482852099488121149edcf8733662561d5359c8772"
+    },
+    {
+      "id": "rw1-07-tomlkit---init---py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/__init__.py",
+      "sha256": "2a4876d4ff9d0050d76808f1cc06a6be09228127abf5b99c5ce6bdb307d7ed7d"
+    },
+    {
+      "id": "rw1-08-tomlkit--compat-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/_compat.py",
+      "sha256": "7a1521d5d7466e4e9f65cfd586de32fa6c87abef5c20ad14558063efd5c790e4"
+    },
+    {
+      "id": "rw1-09-tomlkit--types-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/_types.py",
+      "sha256": "0611c08906a898981bfcd5511e777c50c656e9940ca4c20bddf7ddeae2486853"
+    },
+    {
+      "id": "rw1-10-tomlkit--utils-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/_utils.py",
+      "sha256": "69bc608004a59493d3c72eaf3d3c9db56137fe2a7a3a1d64a166b676463afdc5"
+    },
+    {
+      "id": "rw1-11-tomlkit-api-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/api.py",
+      "sha256": "6f735c929a1294e947b58b0dad467182bc337312f4f5d1999b9bef4f42fc9937"
+    },
+    {
+      "id": "rw1-12-tomlkit-container-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/container.py",
+      "sha256": "274497db9b4be5d1f92fc0272eef7188079eca3b4eebe09a2e2922fdc5988497"
+    },
+    {
+      "id": "rw1-13-tomlkit-exceptions-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/exceptions.py",
+      "sha256": "d5b58a0f077b65c93919b4d523380931f927c51a1a0752e570e900e598556e05"
+    },
+    {
+      "id": "rw1-14-tomlkit-items-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/items.py",
+      "sha256": "543bf79bcce841e1fde2e6aad09f089c96cdd8afae6d1c419061319feb0c5b68"
+    },
+    {
+      "id": "rw1-15-tomlkit-parser-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/parser.py",
+      "sha256": "a74abeff54ea1222a5bc113c29a2e824a4cc4778ebabdad36b9e91d004c8b92f"
+    },
+    {
+      "id": "rw1-16-tomlkit-source-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/source.py",
+      "sha256": "2be326699043ae118d762fc4293ccdbf9e49d88f529af367cc9caf5bef45cefb"
+    },
+    {
+      "id": "rw1-17-tomlkit-toml-document-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/toml_document.py",
+      "sha256": "3824e45977773f9f04653e120fcfdd75cd58a6431aaad952e7fb2d1d306630e2"
+    },
+    {
+      "id": "rw1-18-tomlkit-toml-file-py",
+      "locator": "benchmarks/sources/rw1_tomlkit/tomlkit/toml_file.py",
+      "sha256": "d14e26e415728ee41dd2dd2bfa653e92879fa976e69ec3dd00de8a7bbd56e5d0"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_rw1.py",
+  "acceptance_checks": [
+    {
+      "id": "out_of_order_dotted_table",
+      "description": "Valid out-of-order table header extending a multi-dotted-key super-table (#632/#717) parses cleanly and round-trips verbatim via as_string(), while concrete-table redefinitions remain rejected.",
+      "required": true
+    },
+    {
+      "id": "deepcopy_and_nesting_limit",
+      "description": "Parser.MAX_NESTING_DEPTH stays 100, sys.getrecursionlimit() stays unmodified, 100-part dotted key followed by a sibling parses cleanly at root and inside [t] (#714/#716), and copy.deepcopy() works on 100-deep Container as well as Table/InlineTable without RecursionError or shared mutation.",
+      "required": true
+    },
+    {
+      "id": "aot_atomic_validation",
+      "description": "Stage 2 rejects non-table AoT item and slice assignments (int, str, list, inline_table) with ValueError before mutating the document (#712), keeping as_string(), unwrap(), and json.dumps() unchanged while preserving valid table/dict assignments.",
+      "required": true
+    },
+    {
+      "id": "readonly_and_scope",
+      "description": "Frozen files (tests/test_smoke.py, LICENSE, pyproject.toml, UPSTREAM.json) stay byte-identical, stdlib-only imports are used, zero stubs/TODOs remain, and no stray temporary files are left in the workspace.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Inspect `benchmarks/sources/rw1_tomlkit/` and run `python3 -m unittest benchmarks/sources/rw1_tomlkit/tests/test_smoke.py`. Fix two upstream bug reports in `benchmarks/sources/rw1_tomlkit/tomlkit/` (standard library only):\n1. Valid TOML where an out-of-order table header extends an implicit super-table previously formed by multiple dotted keys (which stdlib `tomllib` accepts) is rejected as a duplicate key. Ensure valid out-of-order extensions parse and round-trip verbatim via `as_string()` while keeping genuine concrete-table redefinitions rejected.\n2. Parsing a valid document containing a dotted key at `Parser.MAX_NESTING_DEPTH` followed by another key under the same leading prefix (at document root or inside a table) fails with `RecursionError`, and `copy.deepcopy()` on deep `Container`, `Table`, and `InlineTable` trees hits recursion limits. An issue commenter suggested lowering `Parser.MAX_NESTING_DEPTH` from 100 to 50 or bumping `sys.setrecursionlimit()` as a quick workaround — investigate the real root cause in `tomlkit/` and fix it cleanly, ensuring table-assembly errors during parsing surface as `ParseError`.\nVerify your changes against `tests/test_smoke.py` and targeted checks, and summarize your edits.",
+    "Follow-up bug report on `benchmarks/sources/rw1_tomlkit/`: assigning a non-table value (such as a scalar, list, or inline table) into an array of tables (`AoT`) by index or slice corrupts the document or leaves `as_string()`, `unwrap()`, and `json.dumps(doc)` broken or out of sync instead of raising `ValueError` without mutating the document. Fix `AoT` item and slice assignment in `tomlkit/` so invalid assignments raise `ValueError` atomically while valid table/dict assignments and your Stage 1 fixes keep working. Report your verification."
+  ],
+  "valid_neighbouring_case": "Valid table/dict item and slice assignments to an AoT, valid out-of-order super-table extensions, and normal shallow/deep copies must continue succeeding with exact TOML formatting preserved."
+}

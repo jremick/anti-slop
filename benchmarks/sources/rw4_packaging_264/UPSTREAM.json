@@ -1,0 +1,6 @@
+{
+  "upstream_repo": "https://github.com/pypa/packaging",
+  "license": "Apache-2.0 OR BSD-2-Clause",
+  "pinned_commit": "20de131f397a24a2d1723ff90c17f2e5b33d2766",
+  "snapshot_date_utc": "2026-11-25"
+}

@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "9c2b8154-4915-4bbf-97d0-87635e758fd9", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 336601, "cost_usd": null}
+RC: 0
+STDOUT:
+**NO-GO:** Do not publish [05-draft-release-announcement.md](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/05-draft-release-announcement.md).
+
+**Counts:** **43 commits** (`0.15.2..0.15.3`, [01](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/01-git-log-0.15.2-to-0.15.3.txt)); **25 changelog entries** (**6 Changed, 19 Fixed**; [02](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/02-pr719-release-diff.diff), [02b](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/02b-changelog-0.15.1-to-0.15.3.md)).
+
+**Draft errors & unshipped claims:**
+- Wrong count ("18" vs 43); false "zero behavior/exception changes" claim.
+- 3 unmerged PRs ([03](file://<TMP_WORKSPACE>/benchmarks/sources/rw6_tomlkit_release/03-open-prs-nov25-2026.md)): strict UTF-8 parsing (#721/#720), `dumps(multiline=True)` (#706), out-of-order deletion `IndexError` (#635).
+- Misdated #664 and #325/#627 to 0.15.2/0.15.1; both shipped in 0.15.3 (relocated by PR #719).
+
+**Real 0.15.3 exception/behavior changes:**
+- **Exceptions:** `ValueError` on forbidden comment control chars (#705), datetime strings in `date()` (#673), non-table AoT assignments (#712); pre-mutation raise on bad-length extended AoT slices (#631); `ParseError` replacing `RecursionError` (#714/#716).
+- **Behavior:** `Array.sort()` reorders output (#644); recursive `dumps(sort_keys=True)` (#614/#617); `round(Float)` returns `Integer` (#695); `register_encoder()` filters `_parent`/`_sort_keys` (#698); sub-minute offsets emit UTC (#701); `astimezone()`/`setdefault()` defaults (#651/#710); unshared `Trivia` (#683); literal quotes (#325/#627); speedups (#704/#666/#709).
+
+STDERR:
+

@@ -1,0 +1,1 @@
+**Sign-off for tonight’s 2.x cut under the temporary codec waiver.** On Python 3.15, `run_checks.py` exited 0 with `OK (skipped=1)`. The multi-member gzip, deflate EOF flush, and decode-toggle checks passed. The codec availability check was skipped because Brotli was unavailable. Restore the full gate after the cut.

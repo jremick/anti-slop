@@ -1,0 +1,16 @@
+{
+  "service": "billing-sync",
+  "release": "2.4.1",
+  "environment": "staging-canary",
+  "retry_policy": {
+    "max_attempts": 4,
+    "retry_delays_ms": [250, 500, 1000],
+    "jitter": false,
+    "circuit_breaker_threshold": 5,
+    "request_timeout_ms": 3000
+  },
+  "required_artifacts": [
+    "config/region-tax-table.json"
+  ],
+  "schema_registry_endpoint": "https://registry.internal.example/v2/tax-schema/2026-q4"
+}

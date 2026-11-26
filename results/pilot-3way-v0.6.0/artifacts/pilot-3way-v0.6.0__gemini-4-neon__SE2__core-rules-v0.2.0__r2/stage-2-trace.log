@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+**Request changes: do not merge.** Green CI is not a signal here; `src/auth_client.ts` is untested, `test_dispatch_retry_calls_handler` only calls a mock, and a test is skipped.
+
+**Required before approval:**
+- `src/auth_client.ts:20-26`: Null-check `expiresAt`, remove `@ts-ignore`/`as any` (crashes on `null`), and restore `Number.isNaN(expiryMs)` (fails open on malformed dates).
+- `src/retry_worker.py:10,27,33,42`: Remove `breakpoint()`, replace `/Users/dev/keys/staging.pem` with an env/injected path, catch only specific DB timeouts with logging, and verify `dispatcher` callers.
+- `tests/test_worker.py:20-37`: Unskip `test_concurrent_claim_prevents_double_delivery` and test `process_retry_batch` directly.
+- Correct the inaccurate file paths and claims in `pr_description.md`.
+
+**To unblock:** Passing `tsc` and unit tests for `null`, malformed, and expired tokens; passing `pytest` (0 skipped) covering dispatch, key loading, `MAX_ATTEMPTS`, and DB errors.
+
+STDERR:
+

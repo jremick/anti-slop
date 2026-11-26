@@ -1,0 +1,6 @@
+{
+  "upstream_repo": "https://github.com/Python-Markdown/markdown",
+  "license": "BSD-3-Clause",
+  "pinned_base_commit": "2c96e36ba4750cf18583d62e2fcecff49e077419",
+  "snapshot_scope": "markdown package source and LICENSE.md at pinned base commit"
+}

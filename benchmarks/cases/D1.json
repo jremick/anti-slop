@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "case_id": "D1",
+  "version": "0.3.0",
+  "origin": "constructed",
+  "domain": "research",
+  "title": "Resolve an 8-document webhook specification packet with supersession, lifted emergency overrides, and unapproved drafts under tight word caps",
+  "prompt": "Read all 8 files in benchmarks/sources/d1_packet/ without modifying or creating any files. Today is 2026-11-25. Produce the authoritative current production contract for `POST /v3/webhooks` in at most 140 words. State exact active values (payload limit, rate limit and burst, delivery attempts/backoff, auth and required headers including replay window and error codes), explicitly flag which sources are superseded, temporary-and-lifted, inaccurate, or unapproved drafts (and therefore NOT live), and reply ONLY with the contract brief (no conversational preamble, no word-count postscript).",
+  "evidence_sources": [
+    {
+      "id": "d1-rfc-041",
+      "locator": "benchmarks/sources/d1_packet/01-rfc-041-rate-limits.md",
+      "sha256": "1206a1e36016f55d8ea6b4de528dd58deab880922e49b2e805c3802d9bf69a21"
+    },
+    {
+      "id": "d1-adr-019",
+      "locator": "benchmarks/sources/d1_packet/02-adr-019-webhook-amendment.md",
+      "sha256": "5c9772b0dae2032844465c8507672ac985d168a1949cebed96e58e3f2b42b377"
+    },
+    {
+      "id": "d1-pr-884",
+      "locator": "benchmarks/sources/d1_packet/03-pr-884-notes.md",
+      "sha256": "624a098373741372dd078652eef81ae4b08dd36a4fd0901020a306c6e4652b51"
+    },
+    {
+      "id": "d1-slack-digest",
+      "locator": "benchmarks/sources/d1_packet/04-slack-digest-nov.md",
+      "sha256": "6c0caa030ab230110a3182c8db5f8f7fc9f09c0afb3152909d2e9c95a7c42334"
+    },
+    {
+      "id": "d1-changelog",
+      "locator": "benchmarks/sources/d1_packet/05-changelog-v3.4.md",
+      "sha256": "792af53901ff50b9b67f5cf4c0396196ec1132460269e82c439721db0e7bd952"
+    },
+    {
+      "id": "d1-inc-214",
+      "locator": "benchmarks/sources/d1_packet/06-incident-214-postmortem.md",
+      "sha256": "e615ea1fd4f934953251411908ebe22052676a5ac9e566f32a5649b4446c995a"
+    },
+    {
+      "id": "d1-support-macro",
+      "locator": "benchmarks/sources/d1_packet/07-support-macro-webhooks.md",
+      "sha256": "f54ff10eb94718888b26c764c737adffc2ba2203178edd2c72e041b8cd436bc6"
+    },
+    {
+      "id": "d1-security-draft",
+      "locator": "benchmarks/sources/d1_packet/08-security-addendum-draft.md",
+      "sha256": "aed8be9b572e81ceac3a6532b231526477a53c9ab252bb9f4bcca49c906f091a"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "active_contract_exact",
+      "description": "Stage 1 states exact active v3.4.2 production values as of 2026-11-25: 96 KiB payload limit, 60 req/min per workspace (burst 10), 3 total attempts (1 initial + 2 retries at 30s, 2m), Bearer auth, X-Hook-Signature-256, X-Hook-Timestamp (300s / 5-min replay window -> HTTP 401), and mandatory Idempotency-Key (-> HTTP 400).",
+      "required": true
+    },
+    {
+      "id": "supersession_and_draft_distinction",
+      "description": "Stage 1 explicitly separates superseded/stale sources (RFC-041 128 KiB/120 req/min/5 attempts, July support macro SUP-WH-03), lifted INC-214 emergency breakers (32 KiB / 30 req/min), inaccurate Slack 64 KiB recall, and unapproved 08-security-addendum-draft.md proposals (64 KiB and mTLS not live).",
+      "required": true
+    },
+    {
+      "id": "stage2_temporal_split",
+      "description": "Stage 2 clearly distinguishes active 2026-11-25 production (96 KiB) from the CAB-approved 64 KiB reduction effective 2026-12-01, preserves active rate/retry/header facts, and keeps mTLS explicitly unapproved.",
+      "required": true
+    },
+    {
+      "id": "word_caps_and_readonly",
+      "description": "Stage 1 <= 140 lexical words, Stage 2 <= 75 lexical words, zero chatbot openers or word-count postscripts in either stage, and zero files created or modified in the workspace.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Read all 8 files in benchmarks/sources/d1_packet/ without modifying or creating any files. Today is 2026-11-25. Produce the authoritative current production contract for `POST /v3/webhooks` in at most 140 words. State exact active values (payload limit, rate limit and burst, delivery attempts/backoff, auth and required headers including replay window and error codes), explicitly flag which sources are superseded, temporary-and-lifted, inaccurate, or unapproved drafts (and therefore NOT live), and reply ONLY with the contract brief (no conversational preamble, no word-count postscript).",
+    "Update: CAB just approved ONLY item 1 from 08-security-addendum-draft.md — reducing the payload limit to 64 KiB — effective 2026-12-01 (not today, 2026-11-25). Item 2 (mTLS) remains unapproved. Without modifying or creating any files, reply ONLY with a Slack-ready engineering handoff of at most 75 words (no preamble, no word-count note) that clearly distinguishes today's active contract (2026-11-25) from the scheduled 2026-12-01 change and keeps mTLS explicitly unapproved."
+  ],
+  "valid_neighbouring_case": "When all sources in a packet agree on the current contract and an addendum is already approved and effective in production, the summary must state the active contract concisely without inventing artificial conflicts or unnecessary historical caveats."
+}

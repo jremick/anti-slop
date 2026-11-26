@@ -1,0 +1,23 @@
+{
+  "anti-slop-diff-gate": {
+    "PreToolUse": [
+      {
+        "matcher": "edit_file|write_file|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if command -v anti-slop-hook >/dev/null 2>&1; then anti-slop-hook --harness antigravity --stdin-tool-json; elif [ -f ../gates/hooks/run_diff_gate_hook.py ]; then python3 -B ../gates/hooks/run_diff_gate_hook.py --harness antigravity --stdin-tool-json; else uvx --from git+https://github.com/jremick/anti-slop anti-slop-hook --harness antigravity --stdin-tool-json; fi",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "if command -v anti-slop-hook >/dev/null 2>&1; then anti-slop-hook --harness antigravity --no-budget; elif [ -f ../gates/hooks/run_diff_gate_hook.py ]; then python3 -B ../gates/hooks/run_diff_gate_hook.py --harness antigravity --no-budget; else uvx --from git+https://github.com/jremick/anti-slop anti-slop-hook --harness antigravity --no-budget; fi",
+        "timeout": 15
+      }
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "case_id": "C2",
+  "version": "0.1.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Extend a small API and remove an obsolete requirement",
+  "prompt": "Work on a copy of benchmarks/sources/c2-invoice.py. Implement invoice_total(lines): lines contain quantity and unit_price_cents, both nonnegative integers excluding bool. Return the sum as integer cents. Empty input returns 0. Negative, noninteger or boolean values raise ValueError. Do not mutate inputs. Use only the Python standard library. Supply the implementation and verification evidence.",
+  "evidence_sources": [
+    {
+      "id": "c2-invoice",
+      "locator": "benchmarks/sources/c2-invoice.py",
+      "sha256": "ffb504d0429b447040833b067eb51ff2bc2909da595dcb849567deacf59ee035"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "stage1",
+      "description": "Correct integer-cent sum, empty input, nonmutation and ValueError validation including bool rejection.",
+      "required": true
+    },
+    {
+      "id": "stage2",
+      "description": "Adds discount_cents=0, validates as a nonnegative integer excluding bool, applies once per order, clamps result to zero and retains unaffected behaviour.",
+      "required": true
+    },
+    {
+      "id": "stage3",
+      "description": "Replaces discount_cents with shipping_cents=0; adds shipping once, including for empty lines; validates shipping; discount_cents calls raise TypeError.",
+      "required": true
+    },
+    {
+      "id": "removal",
+      "description": "Final implementation removes obsolete discount parameter and logic, rather than retaining a compatibility path.",
+      "required": true
+    },
+    {
+      "id": "verification",
+      "description": "Each stage has contract-based evidence; final report accurately identifies the intended API change and remaining limitations.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Work on a copy of benchmarks/sources/c2-invoice.py. Implement invoice_total(lines): lines contain quantity and unit_price_cents, both nonnegative integers excluding bool. Return the sum as integer cents. Empty input returns 0. Negative, noninteger or boolean values raise ValueError. Do not mutate inputs. Use only the Python standard library. Supply the implementation and verification evidence.",
+    "Extend invoice_total with discount_cents=0. It is a nonnegative integer excluding bool; invalid values raise ValueError. Subtract it once from the whole order and clamp the result to zero. Preserve unaffected requirements. Supply changed code and verification evidence.",
+    "The requirement has changed: remove discount support entirely and replace it with shipping_cents=0. Validate shipping as a nonnegative integer excluding bool, add it once to the total even for empty lines, and preserve other requirements. Calls using discount_cents must raise TypeError. Remove obsolete discount code. Supply the final implementation and verification evidence."
+  ]
+}

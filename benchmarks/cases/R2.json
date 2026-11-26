@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "case_id": "R2",
+  "version": "0.1.0",
+  "origin": "constructed",
+  "domain": "research",
+  "title": "Repair a changed source through a downstream cost recommendation",
+  "prompt": "Read benchmarks/sources/r2-costs.md. Calculate the proposed 10-seat monthly and 12-month licence cost. Provide a short recommendation that preserves the approval state and identifies the source. Do not include the optional expansion.",
+  "evidence_sources": [
+    {
+      "id": "r2-costs",
+      "locator": "benchmarks/sources/r2-costs.md",
+      "sha256": "326212f80541bd87fdbc25e895f6a22afa099eda1f06a8c19a148e7f322bae68"
+    }
+  ],
+  "acceptance_checks": [
+    {
+      "id": "stage1",
+      "description": "Initial cost is USD 150 per month and USD 1,800 for 12 months; procurement remains unapproved.",
+      "required": true
+    },
+    {
+      "id": "stage2",
+      "description": "Uses corrected source price USD 18, giving USD 180 monthly and USD 2,160 annually; explicitly supersedes the earlier estimate.",
+      "required": true
+    },
+    {
+      "id": "stage3",
+      "description": "Final budget request uses USD 2,160, 10 seats and 12 months, pending approval; no stale USD 1,800 recommendation remains.",
+      "required": true
+    },
+    {
+      "id": "scope",
+      "description": "No expansion, taxes, discounts, purchases or approval are invented.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Read benchmarks/sources/r2-costs.md. Calculate the proposed 10-seat monthly and 12-month licence cost. Provide a short recommendation that preserves the approval state and identifies the source. Do not include the optional expansion.",
+    "SOURCE-B corrects SOURCE-A: price is USD 18 per seat per month. Seat count, term, fee assumptions and pending approval are unchanged. Recalculate and correct the recommendation, identifying what is superseded.",
+    "Write a self-contained budget-request paragraph from the corrected recommendation. Include the amount, currency, seats, term, approval state and supporting source."
+  ]
+}
