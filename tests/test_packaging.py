@@ -120,6 +120,85 @@ class PackagingMetadataTests(unittest.TestCase):
         # Multi-line YAML `files: |` inputs must normalize newlines before splitting.
         self.assertIn("tr '\\r\\n' '  '", run_block)
 
+    def test_action_yml_shell_handles_single_commit_multi_commit_and_files_mode(self) -> None:
+        action_text = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
+        marker = "      run: |\n"
+        idx = action_text.find(marker)
+        self.assertGreater(idx, 0)
+        script_lines = [
+            line[8:] if line.startswith("        ") else line
+            for line in action_text[idx + len(marker) :].splitlines()
+        ]
+        bash_script = "\n".join(script_lines) + "\n"
+
+        def _run_action(cwd: Path, **env_overrides: str) -> subprocess.CompletedProcess:
+            env = os.environ.copy()
+            env.update({
+                "ACTION_PATH": str(REPO_ROOT),
+                "INPUT_ALLOW_TEST_EDIT": "false",
+                "INPUT_ALLOW_TEST_SKIP": "false",
+                "INPUT_STRICT_PROSE": "false",
+                "INPUT_NO_BUDGET": "true",
+                "INPUT_MAX_NET_LOC": "400",
+                "INPUT_MAX_FILES": "10",
+                "INPUT_CHECK_PR_BODY": "false",
+                "INPUT_FILES": "",
+                "BASE_REF": "",
+                "BASE_SHA": "",
+                "BEFORE_SHA": "",
+                "PR_BODY": "",
+            })
+            env.update(env_overrides)
+            return subprocess.run(
+                ["bash", "-c", bash_script],
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "ci@example.com"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "CI"], cwd=repo, check=True)
+            (repo / "src").mkdir()
+            (repo / "src/app.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (repo / "README.md").write_text("# Sample\n\nSee `src/app.py`.\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "Initial commit"], cwd=repo, check=True)
+
+            # 1. Single-commit push (no HEAD~1): exits 0 cleanly with notice, no crash.
+            single_res = _run_action(repo)
+            self.assertEqual(single_res.returncode, 0, msg=single_res.stderr + single_res.stdout)
+            self.assertIn("single-commit repository", single_res.stdout)
+
+            # 2. Multi-line `files: |` mode inspects listed files directly.
+            files_ok = _run_action(repo, INPUT_FILES="README.md\nsrc/app.py\n")
+            self.assertEqual(files_ok.returncode, 0, msg=files_ok.stderr)
+
+            # Whitespace-only `files` input gracefully falls through instead of argparse exit 2.
+            ws_files = _run_action(repo, INPUT_FILES="   \n  ")
+            self.assertEqual(ws_files.returncode, 0, msg=ws_files.stderr)
+
+            # 3. Second commit with objective defect (`breakpoint()`) is caught via HEAD~1...HEAD.
+            (repo / "src/app.py").write_text("def run():\n    breakpoint()\n", encoding="utf-8")
+            subprocess.run(["git", "add", "src/app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "Add debug leftover"], cwd=repo, check=True)
+
+            dirty_res = _run_action(repo)
+            self.assertEqual(dirty_res.returncode, 1, msg=dirty_res.stdout)
+            self.assertIn("DIFF-DEBUG-LEFTOVER", dirty_res.stderr)
+
+            # 4. Validate workflow tests Python 3.11-3.13 matrix and dogfoods `uses: ./`.
+            wf_text = (REPO_ROOT / ".github/workflows/validate.yml").read_text(encoding="utf-8")
+            for py_ver in ("'3.11'", "'3.12'", "'3.13'"):
+                self.assertIn(py_ver, wf_text)
+            self.assertIn("dogfood-action:", wf_text)
+            self.assertIn("uses: ./", wf_text)
+            self.assertIn("persist-credentials: false", wf_text)
+
     def test_pre_commit_hooks_yaml_definition(self) -> None:
         hook_cfg = REPO_ROOT / ".pre-commit-hooks.yaml"
         self.assertTrue(hook_cfg.is_file())

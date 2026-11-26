@@ -12,12 +12,47 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
       - name: Validate cases, pilot manifest, example record, evidence and test suites
         run: python -B scripts/check.py
+
+  dogfood-action:
+    name: Dogfood Anti-Slop Composite Action
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run Anti-Slop Diff Gate (diff mode)
+        uses: ./
+        with:
+          allow-test-edit: 'true'
+          no-budget: 'true'
+          check-pr-body: 'true'
+      - name: Run Anti-Slop Diff Gate (files mode)
+        uses: ./
+        with:
+          no-budget: 'true'
+          check-pr-body: 'false'
+          files: |
+            README.md
+            CHANGELOG.md
+            SECURITY.md
+            THIRD_PARTY_LICENSES.md
+            standard/core.md
+            gates/README.md
+            gates/api_checks.py
+            gates/diff_check.py
+            gates/hooks/run_diff_gate_hook.py

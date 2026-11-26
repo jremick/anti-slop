@@ -59,6 +59,8 @@ runs:
         INPUT_CHECK_PR_BODY: ${{ inputs.check-pr-body }}
         INPUT_FILES: ${{ inputs.files }}
         BASE_REF: ${{ github.base_ref }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        BEFORE_SHA: ${{ github.event.before }}
         PR_BODY: ${{ github.event.pull_request.body }}
       run: |
         set -euo pipefail
@@ -86,8 +88,12 @@ runs:
         PR_BODY_FILE=""
         DIFF_FILE=""
         cleanup() {
-          [ -n "${PR_BODY_FILE}" ] && rm -f "${PR_BODY_FILE}"
-          [ -n "${DIFF_FILE}" ] && rm -f "${DIFF_FILE}"
+          if [ -n "${PR_BODY_FILE}" ]; then
+            rm -f "${PR_BODY_FILE}"
+          fi
+          if [ -n "${DIFF_FILE}" ]; then
+            rm -f "${DIFF_FILE}"
+          fi
         }
         trap cleanup EXIT
 
@@ -97,20 +103,34 @@ runs:
           ARGS+=(--pr-body-file "${PR_BODY_FILE}")
         fi
 
+        TARGET_FILES=()
         if [ -n "${INPUT_FILES}" ]; then
           NORMALIZED_FILES="$(printf '%s' "${INPUT_FILES}" | tr '\r\n' '  ')"
-          read -r -a TARGET_FILES <<< "${NORMALIZED_FILES}"
-          if [ "${#TARGET_FILES[@]}" -gt 0 ]; then
-            ARGS+=(--files "${TARGET_FILES[@]}")
-          fi
+          read -r -a TARGET_FILES <<< "${NORMALIZED_FILES}" || true
+        fi
+
+        if [ "${#TARGET_FILES[@]}" -gt 0 ]; then
+          ARGS+=(--files "${TARGET_FILES[@]}")
         else
           DIFF_FILE="$(mktemp)"
-          if [ -n "${BASE_REF}" ] && git rev-parse --verify "origin/${BASE_REF}" >/dev/null 2>&1; then
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          if [ -n "${BASE_REF:-}" ] && git rev-parse --verify "origin/${BASE_REF}^{commit}" >/dev/null 2>&1; then
             git diff --unified=3 "origin/${BASE_REF}...HEAD" > "${DIFF_FILE}"
-          elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+          elif [ -n "${BASE_SHA:-}" ] && [ "${BASE_SHA}" != "${ZERO_SHA}" ] && git rev-parse --verify "${BASE_SHA}^{commit}" >/dev/null 2>&1; then
+            git diff --unified=3 "${BASE_SHA}...HEAD" > "${DIFF_FILE}"
+          elif [ -n "${BEFORE_SHA:-}" ] && [ "${BEFORE_SHA}" != "${ZERO_SHA}" ] && git rev-parse --verify "${BEFORE_SHA}^{commit}" >/dev/null 2>&1; then
+            git diff --unified=3 "${BEFORE_SHA}...HEAD" > "${DIFF_FILE}"
+          elif git rev-parse --verify "HEAD~1^{commit}" >/dev/null 2>&1; then
             git diff --unified=3 HEAD~1...HEAD > "${DIFF_FILE}"
-          else
+          elif git rev-parse --verify "HEAD^{commit}" >/dev/null 2>&1; then
+            if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo false)" = "true" ]; then
+              echo "::warning::Anti-Slop Diff Gate: parent commit unavailable in shallow checkout; pass fetch-depth: 0 to actions/checkout (or pass explicit files:) to diff committed changes."
+            else
+              echo "::notice::Anti-Slop Diff Gate: single-commit repository has no parent commit for HEAD~1 diff; checking working-tree diff against HEAD (pass explicit files: to inspect initial commit files)."
+            fi
             git diff --unified=3 HEAD > "${DIFF_FILE}"
+          else
+            git diff --cached --unified=3 > "${DIFF_FILE}"
           fi
           ARGS+=(--diff "${DIFF_FILE}")
         fi

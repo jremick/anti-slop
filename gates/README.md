@@ -99,3 +99,80 @@ Follow the prose boundaries in [docs/operating-guide.md](../docs/operating-guide
 - **Never treat style warnings as proof of factual error.** Reserve hard CI errors for objective defects (broken paths, chatbot openers/closers, API contract traps, unauthorized test edits, test-skip waivers, unjustified suppressions, silent broad catches, debug leftovers, hardcoded host paths, stub code). Keep decorative emoji checks (`DIFF-DECORATIVE-EMOJI`) at `warning` unless `--strict-prose` is explicitly enabled.
 - **Preserve domain vocabulary.** `gates/vale/styles/AntiSlop/Vocab.yml` and `gates/vale/styles/AntiSlop/Phrasing.yml` intentionally omit `vector`, `harness`, `primitive`, `surface`, `substrate`, and `features` from their banned `tokens` and guard them in `exceptions` so future edits do not degrade technical documentation into choppy prose (a documented failure mode under rigid style rules on Claude Fable 5.2).
 - **Test valid neighbouring cases before tightening any gate.** Before promoting `ADRStructure` from `warning` to `error` or lowering diff budgets, verify the change against both a reproduced defect and a valid neighbouring case (see [CONTRIBUTING.md](../CONTRIBUTING.md) and [tests/test_gates.py](../tests/test_gates.py)).
+
+## Complementary to Ruff, ESLint, and Semgrep
+
+`anti-slop` does not replace language-specific AST linters or security SAST tools — run Ruff, ESLint, and Semgrep for deep single-language analysis, and layer `gates/diff_check.py` as a zero-dependency polyglot diff, prose, and agent-hook gate.
+
+| Capability | Ruff / ESLint | Semgrep | `anti-slop` (`diff_check.py` + hooks) |
+| --- | --- | --- | --- |
+| Deep language-specific lint, formatting, and type rules | Primary strength (per-stack setup) | Partial (pattern rules) | Out of scope — keep Ruff/ESLint |
+| Security taint / dataflow SAST across codebase | Limited | Primary strength | Out of scope — keep Semgrep |
+| Zero-config polyglot diff gate (Python, JS/TS, Go, Markdown, PR body in one stdlib script) | Separate per-language configs | Requires rulepacks + binary | Native (`--diff - --no-budget`, 0 deps) |
+| Block unauthorized edits under `tests/` and newly added test skips (`DIFF-TEST-SKIP`) | Not enforced by default | Custom rules only | Native (explicit `--allow-test-edit` / `--allow-test-skip`) |
+| Catch unjustified suppressions, silent broad catches, debug leftovers, and stubs on *added diff lines only* | Overlaps on Python (`BLE001`/`PGH003`/`T100`) or JS (`no-empty`/`no-debugger`) per language | Overlaps with custom rules | Unified diff-scoped gate across Python, JS/TS, and Go |
+| Verify backticked local repo paths in Markdown docs and PR bodies (`DIFF-BROKEN-DOC-PATH`) | Not covered | Not covered | Native (respects `.gitignore`, globs, URLs, placeholders) |
+| Block hardcoded workstation home paths (`DIFF-HOST-PATH`) and chatbot openers/closers | Not covered | Custom regex only | Native across code, Markdown, and PR bodies |
+| Blocking `PreToolUse` / `Stop` exit-2 hooks for Claude Code, Antigravity, and Codex | Not built in | Not built in | Native (`anti-slop-hook --install <cli>`) |
+
+## Real-World OSS Precision Audit
+
+To measure false positives honestly on real production engineering history (not just synthetic unit tests), `gates/diff_check.py` was audited against the last **50 non-merge commits** of three public OSS repositories spanning Python and TypeScript (**150 commits**, **409 file edits**, `+10,442 / -2,936` LOC) using `--diff - --allow-test-edit --no-budget --json`, plus all tracked authored files in this repository.
+
+Every commit was evaluated in both **checkout mode** (`--repo-root` checked out at each commit SHA, matching CI `action.yml` and local `Stop` hooks) and **hunk-only mode** (`repo_root=None`, matching piped diffs without disk files). Every finding was inspected verbatim and classified into one of four buckets: **Parser/Regex FP** (tool bug), **True Positive**, **Debatable / Intentional Pattern** (rule matched real syntax used deliberately upstream), or **Policy-Strict Convention** (upstream style omits an inline reason required by the rule).
+
+### Corpus Summary (Post-Fix)
+
+| Repository | Pinned `HEAD` SHA | Commits | File Edits (`+ / -` LOC) | Clean Commits | Errors / Warnings | Findings by Rule ID |
+| --- | --- | ---: | --- | ---: | ---: | --- |
+| [urllib3/urllib3](https://github.com/urllib3/urllib3) (Python) | `3db5970fcc56` | 50 | 185 (`+4,779 / -2,214`) | 39 / 50 (78.0%) | 23 E / 0 W | `DIFF-SUPPRESSION`: 19, `DIFF-TEST-SKIP`: 3, `DIFF-STUB-TODO`: 1 |
+| [sdispater/tomlkit](https://github.com/sdispater/tomlkit) (Python) | `d2aa305673a0` | 50 | 110 (`+3,621 / -357`) | 48 / 50 (96.0%) | 5 E / 0 W | `DIFF-SUPPRESSION`: 5 |
+| [honojs/hono](https://github.com/honojs/hono) (TypeScript) | `717dc17cb80b` | 50 | 114 (`+2,042 / -365`) | 49 / 50 (98.0%) | 1 E / 0 W | `DIFF-SILENT-CATCH`: 1 |
+| **OSS Total** | — | **150** | **409 (`+10,442 / -2,936`)** | **136 / 150 (90.7%)** | **29 E / 0 W** | **`DIFF-SUPPRESSION`: 24, `DIFF-TEST-SKIP`: 3, `DIFF-STUB-TODO`: 1, `DIFF-SILENT-CATCH`: 1** |
+
+- **Zero-noise rules across all 150 commits (0 errors, 0 warnings):** `DIFF-DEBUG-LEFTOVER`, `DIFF-HOST-PATH`, `DIFF-STUB-PASS` (post-fix), `DIFF-STUB-NOT-IMPLEMENTED`, `DIFF-BROKEN-DOC-PATH`, `DIFF-CHATBOT-OPENER`, `DIFF-CHATBOT-CLOSER`, and `DIFF-DECORATIVE-EMOJI`.
+- **Checkout vs. hunk-only parity (post-fix):** `100%` identical findings across all 150 commits (`29 E / 0 W` in both modes).
+
+### Honest Classification of All 29 OSS Findings (and 2 Bugs Found & Fixed)
+
+1. **Parser / Regex False Positives (`0 / 29` post-fix; `2` real bugs caught during the audit and fixed with regression tests in [tests/test_gates.py](../tests/test_gates.py)):**
+   - **Hunk-only `DIFF-STUB-PASS` FP (OSS corpus, `sdispater/tomlkit` commit `7133174ab7`):** `class StringKey(str): pass` passed cleanly in checkout/AST mode (`5 E`) but falsely triggered `DIFF-STUB-PASS` in hunk-only mode (`6 E -> 5 E`, aggregate hunk-only `30 E -> 29 E`) because `_hunk_pass_is_non_function_block` only exempted `Protocol`/`Exception`/`*Error` bases rather than all `class` headers. Fixed for single-line and multi-line `class` headers without relaxing non-abstract `def ...: pass` detection.
+   - **Prose-comment `DIFF-STUB-TODO` FP (self-repo audit, `tests/test_gates.py`):** `# 1) Removed TODO lines do not trigger errors.` falsely triggered `DIFF-STUB-TODO` (`9 E -> 8 E` on `tests/`) because `COMMENT_TODO_RE` and `TODO_FIXME_RE` matched `TODO`/`FIXME` anywhere in a comment. Tightened comment matching to require a leading marker (`# TODO`, `// FIXME`, `/* TODO`) or explicit marker punctuation (`TODO:`, `TODO(`, `TODO[`), and wired comment-aware scanning into Python hunk mode and JS/TS/Go stub checks so string literals never false-positive.
+2. **True Positives (`1 / 29`):**
+   - `DIFF-STUB-TODO` (`1`, `urllib3` commit `01cd60b539`): genuine `# TODO: Add optional support for socket.gethostbyname checking.` line added inside a newly extracted helper function (caveat: the line was moved verbatim from an existing method in the same commit; line-level diff checks do not suppress moved TODOs).
+3. **Debatable / Intentional Upstream Patterns (`4 / 29`):**
+   - `DIFF-TEST-SKIP` (`3`, `urllib3` commits `a0cab2d084`, `9016d7e8af`, `ea2ad7b21a`): deliberate `@pytest.mark.skipif` (PyPy 8.0.0 bug) and `pytest.skip()` (optional codec availability). Blocked intentionally by default so agents cannot silently waive failing tests; maintainers pass `--allow-test-skip` when an environment skip is authorized.
+   - `DIFF-SILENT-CATCH` (`1`, `hono` commit `5704c75137`): deliberate empty `try { decoded = decodeURI(path) } catch {}` immediately followed by an explicit `if (decoded === undefined)` recovery branch. Matches the exact syntax the rule targets, illustrating a real-world intentional empty-catch edge case.
+4. **Policy-Strict Upstream Style Conventions (`24 / 29`):**
+   - `DIFF-SUPPRESSION` (`24` total: `19` across 8 `urllib3` commits and `5` across 2 `tomlkit` commits): every single hit is a mypy-coded `# type: ignore[arg-type]`, `[assignment]`, `[misc]`, `[union-attr]`, `[comparison-overlap]`, or `[index]` comment that omits a trailing `# <reason>` explanation. `diff_check.py` intentionally requires both `[code]` and a short reason (`# type: ignore[arg-type]  # mock socket`); teams adopting `anti-slop` on mypy-strict repos should expect this rule to require brief inline justifications on new `# type: ignore[...]` additions.
+
+### Self-Repository Dogfood Audit
+
+Scanning this repository's own tracked authored files (excluding pinned third-party OSS snapshots under `benchmarks/sources/` and archived raw model transcripts under `results/pilot-3way-v0.6.0/artifacts/`):
+
+- **163 authored Markdown files:** `0` errors, `0` warnings.
+- **20 authored non-test Python files (`gates/`, `scripts/`, `benchmarks/graders/`):** `1` error (`benchmarks/graders/grade_rw3.py:281`, an intentional `except Exception: pass` negative probe inside a grader), `0` warnings.
+- **6 test-suite files (`tests/test_*.py`):** `8` errors post-fix (down from `9` after fixing the prose `TODO` false positive in `tests/test_gates.py`): `6` intentional `DIFF-HOST-PATH` negative-test fixture strings and `2` intentional Python-version `@unittest.skipIf` guards in `tests/test_graders.py`.
+
+### Reproducing the OSS Audit
+
+```bash
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
+
+for spec in \
+  "urllib3 https://github.com/urllib3/urllib3.git 3db5970fcc56666ed5e7d450816ece9cce55589f" \
+  "tomlkit https://github.com/sdispater/tomlkit.git d2aa305673a01eafd0edda54ef07ebcb8902f4d4" \
+  "hono https://github.com/honojs/hono.git 717dc17cb80bff270ddc557614fe3c3e1b916a1f"
+do
+  read -r name url pinned <<< "$spec"
+  git clone --depth=100 "$url" "$WORKDIR/$name"
+  git -C "$WORKDIR/$name" checkout --quiet "$pinned" 2>/dev/null || true
+  for sha in $(git -C "$WORKDIR/$name" rev-list --no-merges -n 50 HEAD); do
+    git -C "$WORKDIR/$name" checkout --force --quiet "$sha"
+    git -C "$WORKDIR/$name" diff --unified=3 "${sha}~1" "$sha" \
+      | python3 -B gates/diff_check.py --diff - --repo-root "$WORKDIR/$name" --allow-test-edit --no-budget --json \
+      | python3 -c 'import json,sys; d=json.load(sys.stdin); print("'"$name"'", "'"${sha:0:10}"'", len(d["errors"]), [e["code"] for e in d["errors"]]) if d["errors"] or d["warnings"] else None'
+  done
+done
+```

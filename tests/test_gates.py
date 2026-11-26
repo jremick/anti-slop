@@ -516,6 +516,99 @@ class DiffCheckTests(unittest.TestCase):
         res_file = diff_check.check_files(["src/interfaces.py"], repo_root=self.root)
         self.assertTrue(res_file["ok"], msg=res_file["errors"])
 
+    def test_stub_false_positive_regressions_empty_subclass_and_prose_todo_mentions(self) -> None:
+        # Regression 1 (sdispater/tomlkit hunk-only audit): empty marker/subclass
+        # definitions with `pass` (single-line and multi-line headers) must pass
+        # in BOTH hunk-only mode (repo_root=None) and disk AST mode.
+        subclass_diff = (
+            "diff --git a/src/keys.py b/src/keys.py\n"
+            "--- /dev/null\n"
+            "+++ b/src/keys.py\n"
+            "@@ -0,0 +1,9 @@\n"
+            "+class StringKey(str):\n"
+            "+    pass\n"
+            "+\n"
+            "+class MultiLineKey(\n"
+            "+    str,\n"
+            "+):\n"
+            "+    pass\n"
+            "+\n"
+            "+class Sentinel:\n"
+            "+    pass\n"
+        )
+        res_sub_hunk = diff_check.check_diff(subclass_diff, repo_root=None)
+        self.assertTrue(res_sub_hunk["ok"], msg=res_sub_hunk["errors"])
+
+        # Non-abstract method `pass` inside a class (including multi-line def) MUST still fail.
+        bad_method_diff = (
+            "diff --git a/src/keys.py b/src/keys.py\n"
+            "--- /dev/null\n"
+            "+++ b/src/keys.py\n"
+            "@@ -0,0 +1,6 @@\n"
+            "+class Worker:\n"
+            "+    def run(\n"
+            "+        self,\n"
+            "+    ) -> None:\n"
+            "+        pass\n"
+        )
+        res_bad_method = diff_check.check_diff(bad_method_diff, repo_root=None)
+        self.assertFalse(res_bad_method["ok"])
+        self.assertIn("DIFF-STUB-PASS", _codes(res_bad_method["errors"]))
+
+        # Regression 2 (self-repo audit): prose comments mentioning TODO/FIXME and
+        # string literals containing TODO/FIXME must not trigger DIFF-STUB-TODO,
+        # while actual TODO/FIXME markers in comments still trigger in both modes.
+        prose_py = (
+            "# 1) Removed TODO lines do not trigger errors.\n"
+            "# Document how FIXME markers are stripped from reports.\n"
+            'LABEL = "# TODO: example inside Python string"\n'
+        )
+        prose_py_diff = (
+            "diff --git a/src/prose_notes.py b/src/prose_notes.py\n"
+            "--- /dev/null\n"
+            "+++ b/src/prose_notes.py\n"
+            "@@ -0,0 +1,3 @@\n"
+            + "".join(f"+{line}\n" for line in prose_py.splitlines())
+        )
+        self.assertTrue(diff_check.check_diff(prose_py_diff, repo_root=None)["ok"])
+        (self.root / "src" / "prose_notes.py").write_text(prose_py, encoding="utf-8")
+        self.assertTrue(diff_check.check_files(["src/prose_notes.py"], repo_root=self.root)["ok"])
+
+        prose_ts = (
+            "// Verify removed TODO lines are ignored by the scanner.\n"
+            'const sample = "TODO: placeholder inside string literal";\n'
+            'const fakeComment = "// FIXME: inside string literal";\n'
+        )
+        prose_ts_diff = (
+            "diff --git a/src/prose_notes.ts b/src/prose_notes.ts\n"
+            "--- /dev/null\n"
+            "+++ b/src/prose_notes.ts\n"
+            "@@ -0,0 +1,3 @@\n"
+            + "".join(f"+{line}\n" for line in prose_ts.splitlines())
+        )
+        self.assertTrue(diff_check.check_diff(prose_ts_diff, repo_root=None)["ok"])
+        (self.root / "src" / "prose_notes.ts").write_text(prose_ts, encoding="utf-8")
+        self.assertTrue(diff_check.check_files(["src/prose_notes.ts"], repo_root=self.root)["ok"])
+
+        # True-positive TODO/FIXME markers in Python and TS comments must still fail.
+        for path, line in (
+            ("src/real_todo.py", "x = 1  # TODO fix edge case"),
+            ("src/real_todo.py", "# Note: FIXME: handle retry"),
+            ("src/real_todo.ts", "// TODO: implement retry"),
+            ("src/real_todo.ts", "/* FIXME handle timeout */"),
+        ):
+            real_diff = (
+                f"diff --git a/{path} b/{path}\n"
+                "--- /dev/null\n"
+                f"+++ b/{path}\n"
+                "@@ -0,0 +1,1 @@\n"
+                f"+{line}\n"
+            )
+            with self.subTest(path=path, line=line):
+                res_real = diff_check.check_diff(real_diff, repo_root=None)
+                self.assertFalse(res_real["ok"])
+                self.assertIn("DIFF-STUB-TODO", _codes(res_real["errors"]))
+
     def test_unauthorized_test_edits_blocked_unless_allow_test_edit(self) -> None:
         test_diff = (
             "diff --git a/tests/test_app.py b/tests/test_app.py\n"

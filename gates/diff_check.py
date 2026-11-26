@@ -76,14 +76,20 @@ HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})")
 
 TODO_FIXME_RE = re.compile(
-    r"(?:(?:#|//|/\*|\*|--).*\b(?:TODO|FIXME)\b|\b(?:TODO|FIXME)\s*[:(\[])"
+    r"(?:(?:#|//|/\*|--)\s*(?:TODO|FIXME)\b|^\s*\*\s*(?:TODO|FIXME)\b|(?:#|//|/\*|\*|--).*\b(?:TODO|FIXME)\s*[:(\[])"
 )
-COMMENT_TODO_RE = re.compile(r"\b(?:TODO|FIXME)\b")
+COMMENT_TODO_RE = re.compile(
+    r"(?:^#\s*(?:TODO|FIXME)\b|\b(?:TODO|FIXME)\s*[:(\[])"
+)
+C_COMMENT_TODO_RE = re.compile(
+    r"(?:^\s*\*?\s*(?:TODO|FIXME)\b|\b(?:TODO|FIXME)\s*[:(\[])"
+)
 NOT_IMPL_RE = re.compile(r"\braise\s+NotImplementedError\b|\bthrow\s+new\s+NotImplementedError\b")
 BARE_PASS_RE = re.compile(r"^\s*pass\s*(?:#.*)?$")
 INLINE_DEF_PASS_RE = re.compile(r"^\s*(?:async\s+)?def\s+\w+.*:\s*pass\s*(?:#.*)?$")
 DEF_HEADER_RE = re.compile(r"^(\s*)(?:async\s+)?def\s+\w+")
 CLASS_HEADER_RE = re.compile(r"^(\s*)class\s+(\w+)\s*(?:\(([^)]*)\))?\s*:")
+CLASS_START_RE = re.compile(r"^\s*class\s+\w+")
 DECORATOR_RE = re.compile(r"^(\s*)@([\w.]+)")
 
 CHATBOT_OPENER_RE = re.compile(
@@ -1447,7 +1453,7 @@ def _hunk_pass_is_non_function_block(
     hunk_lines: List[Tuple[str, int, str]],
     target_idx: int,
 ) -> bool:
-    """Return True if a bare 'pass' sits directly under except/try/if/for/while/with/etc."""
+    """Return True if a bare 'pass' sits directly under a class or non-function block."""
     _, _, target_text = hunk_lines[target_idx]
     target_indent = len(target_text) - len(target_text.lstrip(" "))
     idx = target_idx - 1
@@ -1462,7 +1468,29 @@ def _hunk_pass_is_non_function_block(
             continue
         indent = len(text) - len(text.lstrip(" "))
         if indent < target_indent:
-            return bool(NON_FUNC_BLOCK_HEADER_RE.match(text))
+            if stripped.startswith(")") and stripped.endswith(":"):
+                # Multi-line header closing line (e.g. `class Foo(\n    str,\n):`);
+                # walk back to its opening line at the same indentation.
+                header_indent = indent
+                idx -= 1
+                while idx >= 0:
+                    hkind, _, htext = hunk_lines[idx]
+                    if hkind == "-":
+                        idx -= 1
+                        continue
+                    hstripped = htext.strip()
+                    if not hstripped or hstripped.startswith("#"):
+                        idx -= 1
+                        continue
+                    hindent = len(htext) - len(htext.lstrip(" "))
+                    if hindent <= header_indent:
+                        return bool(
+                            NON_FUNC_BLOCK_HEADER_RE.match(htext)
+                            or CLASS_START_RE.match(htext)
+                        )
+                    idx -= 1
+                return False
+            return bool(NON_FUNC_BLOCK_HEADER_RE.match(text) or CLASS_START_RE.match(text))
         idx -= 1
     return False
 
@@ -1477,25 +1505,73 @@ def _check_code_stubs_in_hunks(
         return
 
     is_python = Path(path).suffix.lower() == ".py"
+    is_c_like = _is_js_ts_path(path) or _is_go_path(path)
     ast_info: Optional[Tuple[Set[int], Set[int], Set[int]]] = None
     py_todo_lines: Optional[Set[int]] = None
-    if is_python and repo_root is not None:
+    c_like_todo_lines: Optional[Set[int]] = None
+    c_like_code_lines: Optional[List[str]] = None
+    if repo_root is not None:
         disk_path = repo_root / path
         if disk_path.is_file():
             disk_source = disk_path.read_text(encoding="utf-8")
-            ast_info = _python_ast_stub_lines(disk_source)
-            py_todo_lines = _python_comment_todo_lines(disk_source)
+            if is_python:
+                ast_info = _python_ast_stub_lines(disk_source)
+                py_todo_lines = _python_comment_todo_lines(disk_source)
+            elif is_c_like:
+                c_like_code_lines, c_comments = _scan_c_like_lines(disk_source.splitlines())
+                c_like_todo_lines = {
+                    ln for ln, body in c_comments if C_COMMENT_TODO_RE.search(body)
+                }
 
     for hunk in file_entry["hunks"]:
         hlines = hunk["lines"]
+        hunk_py_todo: Optional[Set[int]] = None
+        hunk_py_code: Optional[Dict[int, str]] = None
+        hunk_c_todo: Optional[Set[int]] = None
+        hunk_c_code: Optional[Dict[int, str]] = None
+
+        if is_python and (py_todo_lines is None or ast_info is None):
+            visible_indices = [i for i, (k, _, _) in enumerate(hlines) if k != "-"]
+            visible_texts = [hlines[i][2] for i in visible_indices]
+            py_code_only, py_comments = _scan_py_lines_fallback(visible_texts)
+            if py_todo_lines is None:
+                hunk_py_todo = {
+                    visible_indices[ln - 1]
+                    for ln, comment in py_comments
+                    if COMMENT_TODO_RE.search(comment)
+                }
+            if ast_info is None:
+                hunk_py_code = {
+                    visible_indices[i]: py_code_only[i]
+                    for i in range(len(visible_indices))
+                }
+        elif is_c_like and c_like_todo_lines is None:
+            visible_indices = [i for i, (k, _, _) in enumerate(hlines) if k != "-"]
+            visible_texts = [hlines[i][2] for i in visible_indices]
+            c_code_only, c_comments = _scan_c_like_lines(visible_texts)
+            hunk_c_todo = {
+                visible_indices[ln - 1]
+                for ln, body in c_comments
+                if C_COMMENT_TODO_RE.search(body)
+            }
+            hunk_c_code = {
+                visible_indices[i]: c_code_only[i]
+                for i in range(len(visible_indices))
+            }
+
         for idx, (kind, lineno, text) in enumerate(hlines):
             if kind != "+":
                 continue
-            has_todo = (
-                lineno in py_todo_lines
-                if py_todo_lines is not None
-                else bool(TODO_FIXME_RE.search(text))
-            )
+            if py_todo_lines is not None:
+                has_todo = lineno in py_todo_lines
+            elif hunk_py_todo is not None:
+                has_todo = idx in hunk_py_todo
+            elif c_like_todo_lines is not None:
+                has_todo = lineno in c_like_todo_lines
+            elif hunk_c_todo is not None:
+                has_todo = idx in hunk_c_todo
+            else:
+                has_todo = bool(TODO_FIXME_RE.search(text))
             if has_todo:
                 errors.append(
                     _finding(
@@ -1534,7 +1610,8 @@ def _check_code_stubs_in_hunks(
                             )
                         )
                 else:
-                    if NOT_IMPL_RE.search(text):
+                    code_text = hunk_py_code.get(idx, text) if hunk_py_code is not None else text
+                    if NOT_IMPL_RE.search(code_text):
                         if not _hunk_line_is_abstract_python(hlines, idx):
                             errors.append(
                                 _finding(
@@ -1546,8 +1623,8 @@ def _check_code_stubs_in_hunks(
                                     remediation="Implement the function body or mark an interface method with @abstractmethod.",
                                 )
                             )
-                    elif INLINE_DEF_PASS_RE.match(text) or (
-                        BARE_PASS_RE.match(text) and not _hunk_pass_is_non_function_block(hlines, idx)
+                    elif INLINE_DEF_PASS_RE.match(code_text) or (
+                        BARE_PASS_RE.match(code_text) and not _hunk_pass_is_non_function_block(hlines, idx)
                     ):
                         if not _hunk_line_is_abstract_python(hlines, idx):
                             errors.append(
@@ -1561,7 +1638,13 @@ def _check_code_stubs_in_hunks(
                                 )
                             )
             else:
-                if NOT_IMPL_RE.search(text):
+                if c_like_code_lines is not None and 1 <= lineno <= len(c_like_code_lines):
+                    code_text = c_like_code_lines[lineno - 1]
+                elif hunk_c_code is not None:
+                    code_text = hunk_c_code.get(idx, text)
+                else:
+                    code_text = text
+                if NOT_IMPL_RE.search(code_text):
                     errors.append(
                         _finding(
                             code="DIFF-STUB-NOT-IMPLEMENTED",
@@ -1656,16 +1739,25 @@ def _check_code_stubs_in_file(rel_path: str, text: str, errors: List[Dict[str, A
     if not _is_code_path(rel_path):
         return
     is_python = Path(rel_path).suffix.lower() == ".py"
+    is_c_like = _is_js_ts_path(rel_path) or _is_go_path(rel_path)
     ast_info = _python_ast_stub_lines(text) if is_python else None
     py_todo_lines = _python_comment_todo_lines(text) if is_python else None
     lines = text.splitlines()
+    c_like_code_lines: Optional[List[str]] = None
+    c_like_todo_lines: Optional[Set[int]] = None
+    if is_c_like:
+        c_like_code_lines, c_comments = _scan_c_like_lines(lines)
+        c_like_todo_lines = {
+            ln for ln, body in c_comments if C_COMMENT_TODO_RE.search(body)
+        }
 
     for lineno, line in enumerate(lines, start=1):
-        has_todo = (
-            lineno in py_todo_lines
-            if py_todo_lines is not None
-            else bool(TODO_FIXME_RE.search(line))
-        )
+        if py_todo_lines is not None:
+            has_todo = lineno in py_todo_lines
+        elif c_like_todo_lines is not None:
+            has_todo = lineno in c_like_todo_lines
+        else:
+            has_todo = bool(TODO_FIXME_RE.search(line))
         if has_todo:
             errors.append(
                 _finding(
@@ -1701,17 +1793,23 @@ def _check_code_stubs_in_file(rel_path: str, text: str, errors: List[Dict[str, A
                         remediation="Implement the body or mark an interface method with @abstractmethod / Protocol.",
                     )
                 )
-        elif NOT_IMPL_RE.search(line):
-            errors.append(
-                _finding(
-                    code="DIFF-STUB-NOT-IMPLEMENTED",
-                    severity="error",
-                    file=rel_path,
-                    line=lineno,
-                    message=f"{rel_path}:{lineno} contains NotImplementedError placeholder.",
-                    remediation="Implement the missing logic instead of shipping a placeholder.",
-                )
+        else:
+            code_line = (
+                c_like_code_lines[lineno - 1]
+                if c_like_code_lines is not None and 1 <= lineno <= len(c_like_code_lines)
+                else line
             )
+            if NOT_IMPL_RE.search(code_line):
+                errors.append(
+                    _finding(
+                        code="DIFF-STUB-NOT-IMPLEMENTED",
+                        severity="error",
+                        file=rel_path,
+                        line=lineno,
+                        message=f"{rel_path}:{lineno} contains NotImplementedError placeholder.",
+                        remediation="Implement the missing logic instead of shipping a placeholder.",
+                    )
+                )
 
 
 def _iter_non_fenced_lines(text: str) -> Iterable[Tuple[int, str]]:
