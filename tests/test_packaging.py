@@ -46,6 +46,8 @@ class PackagingMetadataTests(unittest.TestCase):
         raw_text = pyproject_path.read_text(encoding="utf-8")
         expected_scripts = {
             "anti-slop-diff": "gates.diff_check:main",
+            "anti-slop-review": "gates.review:main",
+            "anti-slop-learn": "gates.learn:main",
             "anti-slop-hook": "gates.hooks.run_diff_gate_hook:main",
             "anti-slop-api": "gates.api_checks:main",
         }
@@ -106,6 +108,10 @@ class PackagingMetadataTests(unittest.TestCase):
             "max-files",
             "check-pr-body",
             "files",
+            "structural",
+            "strict-structural",
+            "explain",
+            "learned-rules",
         )
         for inp in required_inputs:
             with self.subTest(input=inp):
@@ -191,6 +197,61 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertEqual(dirty_res.returncode, 1, msg=dirty_res.stdout)
             self.assertIn("DIFF-DEBUG-LEFTOVER", dirty_res.stderr)
 
+            # 3b. Opt-in structural / strict-structural / explain / learned-rules inputs remain off by default
+            # and enforce when enabled.
+            (repo / "src/app.py").write_text(
+                "def calc(cents):\n"
+                "    try:\n"
+                "        return float(cents) / 100.0\n"
+                "    except Exception:\n"
+                "        return 0\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "src/app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "Add silent fallback"], cwd=repo, check=True)
+
+            # Default-off backward compatibility: exits 0 without structural or learned rules.
+            compat_res = _run_action(repo)
+            self.assertEqual(compat_res.returncode, 0, msg=compat_res.stderr)
+
+            # Opt-in structural + explain emits warning + plain-English rationale, exits 0.
+            struct_warn = _run_action(repo, INPUT_STRUCTURAL="true", INPUT_EXPLAIN="true")
+            self.assertEqual(struct_warn.returncode, 0, msg=struct_warn.stderr)
+            self.assertIn("STRUCT-SILENT-FALLBACK", struct_warn.stderr)
+            self.assertIn("why it matters:", struct_warn.stderr)
+
+            # Opt-in strict-structural fails with exit 1.
+            struct_err = _run_action(repo, INPUT_STRICT_STRUCTURAL="true")
+            self.assertEqual(struct_err.returncode, 1, msg=struct_err.stdout)
+            self.assertIn("STRUCT-SILENT-FALLBACK", struct_err.stderr)
+
+            # Opt-in learned-rules enforces an approved deterministic rule.
+            learn_mod = importlib.import_module("gates.learn")
+            store_path = repo / ".anti-slop" / "learned" / "rules.json"
+            entry = learn_mod.capture_pattern(
+                store_path,
+                title="Float math on cents",
+                bad_example="float(cents) / 100.0",
+                desired_outcome="Keep cents as integer",
+                valid_neighbouring_case="float(seconds) / 1000.0",
+            )
+            learn_mod.propose_prevention(
+                store_path,
+                entry["id"],
+                layer="deterministic_check",
+                severity="error",
+                file_glob="*.py",
+                pattern=r"\bfloat\s*\(\s*cents\s*\)",
+                remediation="Use integer cents or Decimal.",
+                retirement_trigger="Retire once static typing enforces integer cents.",
+            )
+            learn_mod.verify_rule(store_path, entry["id"], repo_root=repo, max_repo_hits=1)
+            learn_mod.approve_rule(store_path, entry["id"], approved_by="ci-maintainer")
+
+            learned_res = _run_action(repo, INPUT_LEARNED_RULES=".anti-slop/learned/rules.json")
+            self.assertEqual(learned_res.returncode, 1, msg=learned_res.stdout)
+            self.assertIn("LEARNED-L-001", learned_res.stderr)
+
             # 4. Validate workflow tests Python 3.11-3.13 matrix and dogfoods `uses: ./`.
             wf_text = (REPO_ROOT / ".github/workflows/validate.yml").read_text(encoding="utf-8")
             for py_ver in ("'3.11'", "'3.12'", "'3.13'"):
@@ -209,6 +270,26 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^\s+language:\s+python\s*$")
         self.assertIn("args: [--no-budget, --allow-test-edit]", text)
         self.assertRegex(text, r"(?m)^-\s+id:\s+anti-slop-diff-lock-tests\s*$")
+        self.assertRegex(text, r"(?m)^-\s+id:\s+anti-slop-review\s*$")
+        self.assertRegex(text, r"(?m)^\s+entry:\s+anti-slop-review\s*$")
+
+        # Verify pre-commit positional invocation contract against gates/review.py directly.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            (tmp_root / "src").mkdir()
+            (tmp_root / "src/clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+            (tmp_root / "src/dirty.py").write_text("def run():\n    breakpoint()\n", encoding="utf-8")
+            proc_ok = subprocess.run(
+                [sys.executable, "-B", str(REPO_ROOT / "gates/review.py"), "--repo-root", str(tmp_root), "src/clean.py"],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc_ok.returncode, 0, msg=proc_ok.stderr + proc_ok.stdout)
+            proc_fail = subprocess.run(
+                [sys.executable, "-B", str(REPO_ROOT / "gates/review.py"), "--repo-root", str(tmp_root), "src/dirty.py"],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc_fail.returncode, 1, msg=proc_fail.stdout)
+            self.assertIn("DIFF-DEBUG-LEFTOVER", proc_fail.stdout)
 
     def test_security_and_third_party_licenses_docs(self) -> None:
         diff_check = importlib.import_module("gates.diff_check")

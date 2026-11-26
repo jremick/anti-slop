@@ -16,7 +16,7 @@
 
   <!-- Header -->
   <text x="28" y="36" class="sans" font-size="15.5" font-weight="700" fill="#0f172a">Blocking Agent Turn Loop (Stop Hook)</text>
-  <text x="28" y="55" class="sans" font-size="11" fill="#475569">Enforces diff gates before turn completion — zero prompt tokens, zero CI round-trip</text>
+  <text x="28" y="55" class="sans" font-size="11" fill="#475569">Enforces diff and approved learned-rule gates before turn completion · zero prompt tokens, zero CI round-trip</text>
   <rect x="720" y="23" width="212" height="24" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
   <text x="826" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="#334155">Claude · Antigravity · Codex</text>
   <line x1="28" y1="68" x2="932" y2="68" stroke="#e2e8f0" stroke-width="1"/>
@@ -93,5 +93,5 @@
 
   <!-- Bottom summary bar -->
   <rect x="28" y="296" width="904" height="26" rx="5" fill="#f8fafc" stroke="#e2e8f0"/>
-  <text x="480" y="313" text-anchor="middle" class="sans" font-size="10.5" fill="#475569">Catches test skips, silent catches, and bare suppressions mid-turn — before a commit, PR, or human review · Anti-loop guard prevents infinite retries</text>
+  <text x="480" y="313" text-anchor="middle" class="sans" font-size="10.5" fill="#475569">Catches test skips, silent catches, bare suppressions, and approved learned rules mid-turn before commit or review · Anti-loop guard prevents infinite retries</text>
 </svg>

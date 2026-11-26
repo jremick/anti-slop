@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "anti-slop"
 version = "0.6.0"
-description = "Zero-dependency deterministic diff gates, agent lifecycle hooks, and model API/harness config validators for AI-assisted engineering."
+description = "Catch and prevent AI coding shortcuts and compounding software slop with automated checks, plain-English reviews, a verified learning loop, and real code-quality tests."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -44,6 +44,8 @@ Changelog = "https://github.com/jremick/anti-slop/blob/main/CHANGELOG.md"
 
 [project.scripts]
 anti-slop-diff = "gates.diff_check:main"
+anti-slop-review = "gates.review:main"
+anti-slop-learn = "gates.learn:main"
 anti-slop-hook = "gates.hooks.run_diff_gate_hook:main"
 anti-slop-api = "gates.api_checks:main"
 

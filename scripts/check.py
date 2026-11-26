@@ -92,6 +92,11 @@ def main() -> int:
             "validate",
         ],
         [
+            sys.executable, "-B", "scripts/benchmark.py",
+            "--pilot", "benchmarks/pilot-evolution-v0.7.0.json",
+            "validate",
+        ],
+        [
             sys.executable, "-B", "-m", "unittest", "discover",
             "-s", "tests", "-p", "test_*.py", "-v",
         ],

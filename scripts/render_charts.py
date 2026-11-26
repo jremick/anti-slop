@@ -567,7 +567,7 @@ def render_pilot_results_svg(stats: PilotStats, theme: Theme) -> str:
     lines.extend([
         f'  <line x1="40" y1="334" x2="408" y2="334" stroke="{t.divider}" stroke-width="1"/>',
         f'  <text x="40" y="350" class="sans" font-size="10" fill="{t.muted}">Baseline tampering: {_esc(rw3_breakdown)}</text>',
-        f'  <text x="40" y="364" class="sans" font-size="9.5" fill="{t.muted}">Ruled arms combined: {ruled_tampered}/{ruled_completed} completed runs tampered (0.0%)</text>',
+        f'  <text x="40" y="364" class="sans" font-size="9.5" fill="{t.muted}">Core rules alone cut tampering to 0% ({ruled_tampered}/{ruled_completed} ruled; deltas unchanged)</text>',
         "",
         "  <!-- Right Panel: Overall Acceptance by Model -->",
         f'  <rect x="438" y="84" width="498" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
@@ -631,8 +631,12 @@ def render_pilot_results_svg(stats: PilotStats, theme: Theme) -> str:
                 f'SE2: {stats.opus_se2_failed}/{stats.opus_se2_total} fail</text>'
             )
         else:
+            mc_c = stats.model_cond[(mid, "core-rules-v0.2.0")]
             mc_m = stats.model_cond[(mid, "model-controls")]
-            sub_txt = f"{mc_m.passed}/{mc_m.total} w/ controls"
+            if mc_c.passed == mc_m.passed:
+                sub_txt = f"core = controls ({mc_m.passed}/{mc_m.total})"
+            else:
+                sub_txt = f"core {mc_c.passed} → controls {mc_m.passed}"
             lines.append(
                 f'  <text x="454" y="{label_y + 13.5:.1f}" class="sans" font-size="9.5" fill="{t.muted}">{_esc(sub_txt)}</text>'
             )
@@ -674,12 +678,18 @@ def render_pilot_results_svg(stats: PilotStats, theme: Theme) -> str:
         f"${stats.opus_usd_baseline:.2f} → ${stats.opus_usd_controls:.2f}"
     )
 
+    tied_models = sum(
+        1
+        for mid, _, _ in MODEL_ORDER
+        if stats.model_cond[(mid, "core-rules-v0.2.0")].passed
+        == stats.model_cond[(mid, "model-controls")].passed
+    )
     neg_headline = (
-        f"Unresolved: Opus failed SE2 pushback/TS check on "
-        f"{stats.opus_se2_failed}/{stats.opus_se2_total} runs"
+        f"Opus failed SE2 ({stats.opus_se2_failed}/{stats.opus_se2_total}); "
+        f"core = controls on {tied_models}/{stats.n_models} models"
     )
     neg_detail = (
-        "Prompt brevity rules did not fix pushback concessions or TS checks"
+        "Deltas only moved Opus verbosity/cost; EV1 shifts evals to multi-turn code quality"
     )
 
     lines.extend([
@@ -695,10 +705,10 @@ def render_pilot_results_svg(stats: PilotStats, theme: Theme) -> str:
         f'  <text x="42" y="426" class="sans" font-size="11.5" font-weight="700" fill="{t.ink}">{_esc(pos_headline)}</text>',
         f'  <text x="42" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(pos_detail)}</text>',
         "",
-        "  <!-- Negative Callout: Unresolved SE2 Failure -->",
+        "  <!-- Negative Callout: Unresolved SE2 Failure & Ceiling -->",
         f'  <rect x="488" y="388" width="448" height="68" rx="6" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
         f'  <rect x="488" y="388" width="4.5" height="68" fill="{t.danger}" clip-path="url(#clip-neg-{t.name})"/>',
-        f'  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.danger_ink}">HONEST NEGATIVE · PROMPT CEILING</text>',
+        f'  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.danger_ink}">LIMITS · PROMPT CEILING &amp; SE2 GAP</text>',
         f'  <text x="506" y="426" class="sans" font-size="11.5" font-weight="700" fill="{t.ink}">{_esc(neg_headline)}</text>',
         f'  <text x="506" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(neg_detail)}</text>',
         "</svg>",
@@ -731,7 +741,7 @@ def render_hook_loop_svg(theme: Theme) -> str:
         "",
         "  <!-- Header -->",
         f'  <text x="28" y="36" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">Blocking Agent Turn Loop (Stop Hook)</text>',
-        f'  <text x="28" y="55" class="sans" font-size="11" fill="{t.muted}">Enforces diff gates before turn completion — zero prompt tokens, zero CI round-trip</text>',
+        f'  <text x="28" y="55" class="sans" font-size="11" fill="{t.muted}">Enforces diff and approved learned-rule gates before turn completion · zero prompt tokens, zero CI round-trip</text>',
         f'  <rect x="720" y="23" width="212" height="24" rx="12" fill="{t.neutral_badge_bg}" stroke="{t.neutral_badge_border}"/>',
         f'  <text x="826" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="{t.neutral_badge_ink}">Claude · Antigravity · Codex</text>',
         f'  <line x1="28" y1="68" x2="{width - 28}" y2="68" stroke="{t.divider}" stroke-width="1"/>',
@@ -809,7 +819,7 @@ def render_hook_loop_svg(theme: Theme) -> str:
         "  <!-- Bottom summary bar -->",
         f'  <rect x="28" y="296" width="904" height="26" rx="5" fill="{t.code_bg}" stroke="{t.divider}"/>',
         f'  <text x="480" y="313" text-anchor="middle" class="sans" font-size="10.5" fill="{t.muted}">'
-        'Catches test skips, silent catches, and bare suppressions mid-turn — before a commit, PR, or human review · Anti-loop guard prevents infinite retries</text>',
+        'Catches test skips, silent catches, bare suppressions, and approved learned rules mid-turn before commit or review · Anti-loop guard prevents infinite retries</text>',
         "</svg>",
         "",
     ]
@@ -856,48 +866,48 @@ def render_social_preview_svg(stats: PilotStats) -> str:
         f'  <rect x="28" y="28" width="{width - 56}" height="{height - 56}" rx="16" fill="{t.canvas_bg}" fill-opacity="0.72" stroke="{t.canvas_border}" stroke-width="1.5"/>',
         "",
         "  <!-- Left column: identity -->",
-        '  <g transform="translate(76, 118)">',
-        f'    <rect x="0" y="0" width="262" height="32" rx="16" fill="{t.panel_bg}" stroke="{t.canvas_border}"/>',
+        '  <g transform="translate(76, 114)">',
+        f'    <rect x="0" y="0" width="268" height="32" rx="16" fill="{t.panel_bg}" stroke="{t.canvas_border}"/>',
         f'    <circle cx="18" cy="16" r="4.5" fill="{t.controls}"/>',
-        f'    <text x="32" y="20.5" class="mono" font-size="12.5" font-weight="600" fill="{t.ink_secondary}">v0.6.0 · DETERMINISTIC GATES</text>',
+        f'    <text x="32" y="20.5" class="mono" font-size="12" font-weight="600" fill="{t.ink_secondary}">AI-ERA CODE QUALITY · 3 PILLARS</text>',
         "",
         f'    <text x="0" y="114" class="mono" font-size="72" font-weight="700" letter-spacing="-2.5" fill="{t.ink}">anti-slop</text>',
         f'    <rect x="0" y="136" width="64" height="3.5" rx="1.75" fill="{t.controls}"/>',
         "",
-        f'    <text x="0" y="188" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">Deterministic diff gates, blocking</text>',
-        f'    <text x="0" y="222" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">agent hooks, and empirical benchmarks</text>',
-        f'    <text x="0" y="256" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">for AI-assisted engineering.</text>',
+        f'    <text x="0" y="188" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">Catch shortcuts and compounding slop,</text>',
+        f'    <text x="0" y="222" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">learn verified project rules, and prove</text>',
+        f'    <text x="0" y="256" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">which rules improve real software.</text>',
         "",
         f'    <line x1="0" y1="306" x2="466" y2="306" stroke="{t.divider}" stroke-width="1.2"/>',
         f'    <text x="0" y="346" class="mono" font-size="15.5" font-weight="600" fill="{t.ink}">Zero dependencies · Python stdlib · MIT</text>',
-        f'    <text x="0" y="378" class="mono" font-size="13" fill="{t.muted}">Claude Code · Antigravity · Codex CLI · GitHub Actions</text>',
+        f'    <text x="0" y="378" class="mono" font-size="12.5" fill="{t.muted}">Plain-English review · Agent hooks · Verified R7 · EV1</text>',
         "  </g>",
         "",
-        "  <!-- Right column: terminal stderr card -->",
+        "  <!-- Right column: terminal review card -->",
         f'  <rect x="596" y="102" width="608" height="348" rx="12" fill="#090d13" stroke="{t.canvas_border}" stroke-width="1.5"/>',
         f'  <path d="M 608 102 H 1192 Q 1204 102 1204 114 V 144 H 596 V 114 Q 596 102 608 102 Z" fill="{t.panel_bg}"/>',
         f'  <line x1="596" y1="144" x2="1204" y2="144" stroke="{t.divider}" stroke-width="1"/>',
         '  <circle cx="620" cy="123" r="5" fill="#30363d"/>',
         '  <circle cx="638" cy="123" r="5" fill="#30363d"/>',
         '  <circle cx="656" cy="123" r="5" fill="#30363d"/>',
-        f'  <text x="680" y="128" class="mono" font-size="13" fill="{t.muted}">anti-slop-diff · stderr (exit 1 / hook exit 2)</text>',
+        f'  <text x="680" y="128" class="mono" font-size="13" fill="{t.muted}">anti-slop-review · shortcuts + structural + learned</text>',
         "",
-        f'  <text x="622" y="179" class="mono" font-size="13.5" fill="{t.muted}">$ git diff origin/main...HEAD | anti-slop-diff --diff -</text>',
+        f'  <text x="622" y="179" class="mono" font-size="13.5" fill="{t.muted}">$ anti-slop-review   # CLI · hooks · pre-commit · CI</text>',
         "",
-        f'  <text x="622" y="218" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[ERROR] DIFF-TEST-SKIP</text>',
+        f'  <text x="622" y="218" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[BLOCK] DIFF-TEST-SKIP</text>',
         f'  <text x="822" y="218" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:8</text>',
-        f'  <text x="638" y="239" class="mono" font-size="13" fill="{t.ink_secondary}">adds test-skip annotation &apos;@pytest.mark.skip&apos;</text>',
+        f'  <text x="638" y="239" class="mono" font-size="12.8" fill="{t.ink_secondary}">skipped test instead of fixing the underlying bug</text>',
         "",
-        f'  <text x="622" y="280" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[ERROR] DIFF-SILENT-CATCH</text>',
-        f'  <text x="846" y="280" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:17</text>',
-        f'  <text x="638" y="301" class="mono" font-size="13" fill="{t.ink_secondary}">swallows errors via silent handler (except Exception: pass)</text>',
+        f'  <text x="622" y="280" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-SILENT-FALLBACK</text>',
+        f'  <text x="880" y="280" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:17</text>',
+        f'  <text x="638" y="301" class="mono" font-size="12.8" fill="{t.ink_secondary}">broad catch returns default 0 (hides failures)</text>',
         "",
-        f'  <text x="622" y="342" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[ERROR] DIFF-SUPPRESSION</text>',
-        f'  <text x="838" y="342" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:13</text>',
-        f'  <text x="638" y="363" class="mono" font-size="13" fill="{t.ink_secondary}">adds bare &apos;# type: ignore&apos; without [code] and reason</text>',
+        f'  <text x="622" y="342" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-TEST-THEATER</text>',
+        f'  <text x="856" y="342" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:19</text>',
+        f'  <text x="638" y="363" class="mono" font-size="12.8" fill="{t.ink_secondary}">0 assertions (stays green even when code breaks)</text>',
         "",
-        f'  <rect x="618" y="394" width="564" height="36" rx="6" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
-        f'  <text x="634" y="416.5" class="mono" font-size="12.5" font-weight="600" fill="{t.danger_ink}">BLOCKED · 3 errors · 0 LLM calls · 0 standing prompt tokens</text>',
+        f'  <rect x="618" y="394" width="564" height="36" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+        f'  <text x="634" y="416.5" class="mono" font-size="12.2" font-weight="600" fill="{t.positive_ink}">+ Human-approved learned rules enforced automatically</text>',
         "",
         "  <!-- Empirical Stat Pill -->",
         f'  <rect x="596" y="472" width="608" height="72" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}" stroke-width="1.5"/>',

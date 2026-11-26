@@ -50,7 +50,15 @@ For code, removal means deleting obsolete paths or duplicated implementations wh
 
 Record a serious defect immediately. Record a recurring minor defect when the pattern shows up twice or becomes useful to investigate (an operational starting policy, not an empirically optimal threshold).
 
-Use one short record (matching `.github/ISSUE_TEMPLATE/slop-defect.md`):
+You can run this loop directly with the zero-dependency CLI tool [gates/learn.py](../gates/learn.py) (`anti-slop-learn`):
+
+1. `capture`: record the slipped bad example, desired behavior, and a **valid neighbouring case** (assigns permanent ID `L-001`, `L-002`, ...).
+2. `suggest` / `propose`: choose the smallest effective layer (`deterministic_check` first, `codebase_example` second, short `<= 45`-word `prompt_rule` last with explicit justification and retirement trigger).
+3. `verify`: automatically verify against (a) the bad example, (b) the valid neighbouring case, and (c) an existing-repository false-positive scan.
+4. `approve`: explicit human approval gate (SHA-256-bound to the verified proposal; activates deterministic rules in `gates/review.py` and `gates/diff_check.py --learned-rules`).
+5. `retire`: cleanly stop enforcing an obsolete rule while preserving its captured regression examples and leaving its stable ID unused.
+
+For issue-tracked defects, use one short record (matching `.github/ISSUE_TEMPLATE/slop-defect.md`):
 
 ```text
 Case and affected artifact:

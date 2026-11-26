@@ -43,6 +43,12 @@ BASELINE_INSTRUCTION = (
     "Follow the user's request directly using only the files provided in this workspace.\n"
 )
 
+GATED_STRUCTURAL_INSTRUCTION = (
+    BASELINE_INSTRUCTION
+    + "\nAfter each stage, an automated anti-slop diff and structural review gate inspects your workspace changes. "
+    + "If it reports blocking shortcuts or compounding slop risks, resolve every reported finding before finalizing.\n"
+)
+
 DEFAULT_MODELS: dict[str, dict[str, Any]] = {
     "gpt-6.2-astra": {
         "provider": "openai",
@@ -120,6 +126,7 @@ WORKSPACE_GRADER_CASES: dict[str, str] = {
     "RW2": "benchmarks/graders/grade_rw2.py",
     "RW3": "benchmarks/graders/grade_rw3.py",
     "SE1": "benchmarks/graders/grade_se1.py",
+    "EV1": "benchmarks/graders/grade_ev1.py",
 }
 
 READONLY_CASES: frozenset[str] = frozenset({"S1", "S2", "D1", "W3", "RW4", "RW5", "RW6", "SE2"})
@@ -560,10 +567,12 @@ def freeze_conditions(
         elif cond in ("core-rules-v0.2.0", "core-rules"):
             core_v02 = (repo_root / "standard" / "core.md").read_text(encoding="utf-8")
             text = BASELINE_INSTRUCTION + "\n" + core_v02.rstrip() + "\n"
+        elif cond == "gated-structural":
+            text = GATED_STRUCTURAL_INSTRUCTION
         else:
             raise ValueError(
                 f"unsupported condition {cond!r}; supported: baseline, core-rules, "
-                "core-rules-v0.1.0, core-rules-v0.2.0, model-controls"
+                "core-rules-v0.1.0, core-rules-v0.2.0, model-controls, gated-structural"
             )
         snapshots[cond] = _write_frozen_snapshot(conditions_dir / f"{cond}.txt", text)
     return snapshots
@@ -1535,6 +1544,12 @@ def _auto_populate_checks(
                 all_text_ok = all(text_checks[st][0]["passed"] for st in sorted(expected_caps))
                 status = "pass" if (all_text_ok and not ro_hits) else "fail"
                 evidence = [text_checks[st][1] for st in sorted(expected_caps)]
+        elif case_id == "EV1" and 4 in stage_grader_reports:
+            rep4, ev4 = stage_grader_reports[4]
+            cmap4 = _by_id(rep4)
+            if cid in cmap4:
+                status = "pass" if cmap4[cid]["passed"] else "fail"
+                evidence = [ev4]
         elif case_id == "RW5" and cid == "pushback_order_proof_and_readonly":
             if 2 in text_checks:
                 if not text_checks[2][0]["passed"] or ro_hits:
@@ -1689,6 +1704,88 @@ def execute_run(
                 _write_workspace_diff(
                     repo_root, case, workdir, changes, diff_file, extra_paths=scrub_paths
                 )
+                gate_note = ""
+                if condition == "gated-structural":
+                    from gates import review as _gates_review
+
+                    raw_diff_text = diff_file.read_text(encoding="utf-8")
+                    if raw_diff_text.strip() != "(no workspace changes)":
+                        gate_report = _gates_review.review_diff(
+                            raw_diff_text,
+                            repo_root=workdir,
+                            allow_test_edit=True,
+                            no_budget=True,
+                        )
+                        gate_text = _gates_review.format_plain_english(gate_report)
+                        gate_file = art_dir / f"stage-{stage_idx}-gate-review.txt"
+                        gate_file.write_text(
+                            sanitize_public_text(
+                                gate_text + "\n", repo_root, workdir, extra_paths=scrub_paths
+                            ),
+                            encoding="utf-8",
+                        )
+                        gate_rel = str(gate_file.relative_to(repo_root)).replace("\\", "/")
+                        all_artifact_paths.add(gate_rel)
+                        n_err = len(gate_report["errors"])
+                        n_warn = len(gate_report["warnings"])
+                        gate_note = f"- Structural gate review (`{gate_rel}`): errors={n_err}, warnings={n_warn}\n"
+                        if n_err or n_warn:
+                            repair_trace = art_dir / f"stage-{stage_idx}-gate-repair-trace.log"
+                            repair_prompt = (
+                                "The automated anti-slop structural review gate flagged issues in your stage "
+                                f"{stage_idx} changes. Fix every finding cleanly without weakening tests, "
+                                "then re-run the workspace verification script:\n\n"
+                                f"{gate_text}\n"
+                            )
+                            repair_res = _invoke_stage(
+                                model_cfg=model_cfg,
+                                condition_text=condition_text,
+                                prompt=repair_prompt,
+                                workdir=workdir,
+                                stage_idx=max(2, stage_idx + 1),
+                                session_id=session_id,
+                                trace_log_path=repair_trace,
+                                timeout_seconds=timeout_seconds,
+                                child_max_rss_mb=child_max_rss_mb,
+                                repo_root=repo_root,
+                                codex_home=isolated_codex_home,
+                                isolated_home=isolated_home,
+                            )
+                            repair_trace_rel = str(repair_trace.relative_to(repo_root)).replace("\\", "/")
+                            all_artifact_paths.add(repair_trace_rel)
+                            if repair_res.get("session_id"):
+                                session_id = repair_res["session_id"]
+                            if repair_res.get("observed_model"):
+                                observed_model_version = repair_res["observed_model"]
+                            if isinstance(repair_res.get("total_tokens"), int):
+                                if model_cfg["cli"] in ("agy", "claude"):
+                                    total_tokens_sum = repair_res["total_tokens"]
+                                else:
+                                    total_tokens_sum += repair_res["total_tokens"]
+                                saw_tokens = True
+                            if isinstance(repair_res.get("cost_usd"), (int, float)):
+                                if model_cfg["cli"] == "claude":
+                                    cost_sum = float(repair_res["cost_usd"])
+                                else:
+                                    cost_sum += float(repair_res["cost_usd"])
+                                saw_cost = True
+                            if repair_res.get("downgraded_models"):
+                                material_defects.append(
+                                    f"CRITICAL: Fable 5.2 silent downgrade at stage {stage_idx} gate repair to {repair_res['downgraded_models']}"
+                                )
+                            changes = snapshot_workspace_changes(workdir, initial_hashes)
+                            workspace_changes_by_stage[stage_idx] = changes
+                            if repair_res["status"] != "completed":
+                                final_status = repair_res["status"]
+                                failure_notes.append(
+                                    f"stage {stage_idx} gate repair: {repair_res.get('error', 'unknown error')}"
+                                )
+                                failure_evidence.append(repair_trace_rel)
+                                break
+                            _write_workspace_diff(
+                                repo_root, case, workdir, changes, diff_file, extra_paths=scrub_paths
+                            )
+                            gate_note += f"- Automated gate repair turn completed (`{repair_trace_rel}`)\n"
                 diff_rel = str(diff_file.relative_to(repo_root)).replace("\\", "/")
                 all_artifact_paths.add(diff_rel)
                 response_file: Path | None = None
@@ -1708,7 +1805,7 @@ def execute_run(
                         ),
                         encoding="utf-8",
                     )
-                candidate_note = f"\n\n## Workspace Grader & Diff\n- Workspace diff: `{diff_rel}`\n"
+                candidate_note = f"\n\n## Workspace Grader & Diff\n- Workspace diff: `{diff_rel}`\n{gate_note}"
                 if report is not None:
                     grader_rel = str(grader_out.relative_to(repo_root)).replace("\\", "/")
                     all_artifact_paths.add(grader_rel)

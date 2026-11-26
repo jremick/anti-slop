@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-evolution-v0.7.0",
+  "status": "planned",
+  "standard_version": "0.2.0",
+  "suite": "multi-turn-compounding-quality",
+  "cases": [
+    {
+      "case_id": "EV1",
+      "case_version": "0.7.0",
+      "stages": 4,
+      "automated_grader": "benchmarks/graders/grade_ev1.py"
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules-v0.2.0",
+    "gated-structural"
+  ],
+  "replicates": 3,
+  "planned_matched_pairs": 12,
+  "planned_run_records": 36,
+  "planned_generation_stages": 144,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules-v0.2.0",
+      "baseline": "baseline",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Measure whether standing core rules alone prevent compounding software decay across 4 sequential feature/bugfix/refactor turns (functional correctness, mutation kill rate, duplicate growth, dead-code removal, god-function sprawl, silent failures).",
+      "case_ids": ["EV1"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 96
+    },
+    {
+      "track_id": "baseline-vs-gated-structural",
+      "baseline": "baseline",
+      "treatment": "gated-structural",
+      "description": "Measure whether mechanical diff + structural compounding-slop hooks/review prevent multi-turn software decay without prompt bloat.",
+      "case_ids": ["EV1"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 96
+    }
+  ],
+  "limits": [
+    "Status is planned (0 live model runs executed yet); do not report unrun planned tracks as measured results.",
+    "EV1 is an initial constructed 4-turn Python evolution scenario; expand with additional stacks and real-work evolution chains before generalizing across all codebases.",
+    "Zero word-cap checks are included by design: rules must prove value on functional bugs, mutation-tested test strength, duplication, dead code, sprawl, and silent failures, or be dropped via benchmarks/evolution.py compare."
+  ]
+}

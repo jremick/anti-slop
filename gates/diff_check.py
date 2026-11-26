@@ -2263,6 +2263,13 @@ def _check_markdown_hunks_without_disk(
             )
 
 
+def _ensure_repo_package_path() -> None:
+    """Ensure sibling modules under `gates/` import cleanly whether invoked as script or package."""
+    pkg_parent = str(Path(__file__).resolve().parents[1])
+    if pkg_parent not in sys.path:
+        sys.path.insert(0, pkg_parent)
+
+
 def check_diff(
     diff_text: str,
     *,
@@ -2275,8 +2282,13 @@ def check_diff(
     pr_body: Optional[str] = None,
     pr_body_source: str = "<pr-body>",
     strict_prose: bool = False,
+    structural: bool = False,
+    strict_structural: bool = False,
+    learned_rules: Optional[Path | str] = None,
 ) -> Dict[str, Any]:
     """Validate a unified diff against Layer-1 deterministic diff and prose gates."""
+    if strict_structural:
+        structural = True
     if no_budget:
         max_net_loc = 0
         max_files = 0
@@ -2391,6 +2403,33 @@ def check_diff(
         errors.extend(pr_res["errors"])
         warnings.extend(pr_res["warnings"])
 
+    # 4. Optional AI-era structural compounding-slop checks.
+    if structural:
+        _ensure_repo_package_path()
+        from gates import structural as _structural
+
+        s_res = _structural.check_structural_diff(
+            diff_text,
+            repo_root=root_path,
+            strict_structural=strict_structural,
+        )
+        errors.extend(s_res["errors"])
+        warnings.extend(s_res["warnings"])
+
+    # 5. Optional approved learned rules enforcement.
+    if learned_rules is not None:
+        _ensure_repo_package_path()
+        from gates import learn as _learn
+
+        l_res = _learn.check_learned_rules_in_diff(
+            diff_text,
+            learned_rules,
+            repo_root=root_path,
+            require_exists=True,
+        )
+        errors.extend(l_res["errors"])
+        warnings.extend(l_res["warnings"])
+
     return {
         "ok": len(errors) == 0,
         "errors": errors,
@@ -2437,8 +2476,13 @@ def check_files(
     max_files: int = DEFAULT_MAX_FILES,
     pr_body: Optional[str] = None,
     strict_prose: bool = False,
+    structural: bool = False,
+    strict_structural: bool = False,
+    learned_rules: Optional[Path | str] = None,
 ) -> Dict[str, Any]:
     """Validate an explicit list of modified files against Layer-1 diff and prose gates."""
+    if strict_structural:
+        structural = True
     if no_budget:
         max_files = 0
     root = Path(repo_root).resolve() if repo_root is not None else Path.cwd().resolve()
@@ -2523,6 +2567,31 @@ def check_files(
         errors.extend(pr_res["errors"])
         warnings.extend(pr_res["warnings"])
 
+    if structural:
+        _ensure_repo_package_path()
+        from gates import structural as _structural
+
+        s_res = _structural.check_structural_files(
+            norm_files,
+            repo_root=root,
+            strict_structural=strict_structural,
+        )
+        errors.extend(s_res["errors"])
+        warnings.extend(s_res["warnings"])
+
+    if learned_rules is not None:
+        _ensure_repo_package_path()
+        from gates import learn as _learn
+
+        l_res = _learn.check_learned_rules_in_files(
+            norm_files,
+            learned_rules,
+            repo_root=root,
+            require_exists=True,
+        )
+        errors.extend(l_res["errors"])
+        warnings.extend(l_res["warnings"])
+
     return {
         "ok": len(errors) == 0,
         "errors": errors,
@@ -2531,20 +2600,26 @@ def check_files(
     }
 
 
-def _format_human(result: Dict[str, Any]) -> str:
+def _format_human(result: Dict[str, Any], *, explain: bool = False) -> str:
+    explain_fn = None
+    if explain:
+        _ensure_repo_package_path()
+        from gates import review as _review
+
+        explain_fn = _review.explain_finding
+
     lines: List[str] = []
-    for item in result["errors"]:
-        loc = ""
-        if "file" in item:
-            loc = f"{item['file']}:{item['line']}: " if "line" in item else f"{item['file']}: "
-        lines.append(f"{loc}[ERROR] {item['code']}: {item['message']}")
-        lines.append(f"  remediation: {item['remediation']}")
-    for item in result["warnings"]:
-        loc = ""
-        if "file" in item:
-            loc = f"{item['file']}:{item['line']}: " if "line" in item else f"{item['file']}: "
-        lines.append(f"{loc}[WARNING] {item['code']}: {item['message']}")
-        lines.append(f"  remediation: {item['remediation']}")
+    for label, bucket in (("ERROR", result["errors"]), ("WARNING", result["warnings"])):
+        for item in bucket:
+            loc = ""
+            if "file" in item:
+                loc = f"{item['file']}:{item['line']}: " if "line" in item else f"{item['file']}: "
+            lines.append(f"{loc}[{label}] {item['code']}: {item['message']}")
+            lines.append(f"  remediation: {item['remediation']}")
+            if explain_fn is not None:
+                exp = explain_fn(item)
+                lines.append(f"  why it matters: {exp['why_veterans_flag_it']}")
+                lines.append(f"  how it compounds: {exp['how_it_compounds']}")
     return "\n".join(lines)
 
 
@@ -2580,6 +2655,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "--strict-prose",
         action="store_true",
         help="Promote prose warnings (e.g., DIFF-DECORATIVE-EMOJI) to hard errors.",
+    )
+    parser.add_argument(
+        "--structural",
+        action="store_true",
+        help="Enable AI-era structural compounding-slop checks (test theater, silent fallbacks, duplicate blocks, dead compat paths, god growth, scope sprawl) as warnings.",
+    )
+    parser.add_argument(
+        "--strict-structural",
+        action="store_true",
+        help="Enable structural compounding-slop checks and promote them to hard errors.",
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        help="Include plain-English explanations of why engineers flag each pattern and how it compounds.",
+    )
+    parser.add_argument(
+        "--learned-rules",
+        default=None,
+        help="Path to an approved anti-slop-learn rules JSON store to enforce alongside built-in checks.",
     )
     parser.add_argument(
         "--no-budget",
@@ -2630,65 +2725,81 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     effective_max_files = 0 if args.no_budget else args.max_files
     target_files: List[str] = list(args.files or []) + list(args.paths or [])
 
-    if args.diff is not None:
-        if args.diff == "-":
+    try:
+        if args.diff is not None:
+            if args.diff == "-":
+                diff_text = sys.stdin.read()
+            else:
+                diff_text = Path(args.diff).read_text(encoding="utf-8")
+            result = check_diff(
+                diff_text,
+                repo_root=args.repo_root,
+                allow_test_edit=args.allow_test_edit,
+                allow_test_skip=args.allow_test_skip,
+                no_budget=args.no_budget,
+                max_net_loc=effective_max_net_loc,
+                max_files=effective_max_files,
+                pr_body=pr_body,
+                strict_prose=args.strict_prose,
+                structural=args.structural,
+                strict_structural=args.strict_structural,
+                learned_rules=args.learned_rules,
+            )
+        elif target_files:
+            result = check_files(
+                target_files,
+                repo_root=args.repo_root,
+                allow_test_edit=args.allow_test_edit,
+                allow_test_skip=args.allow_test_skip,
+                no_budget=args.no_budget,
+                max_files=effective_max_files,
+                pr_body=pr_body,
+                strict_prose=args.strict_prose,
+                structural=args.structural,
+                strict_structural=args.strict_structural,
+                learned_rules=args.learned_rules,
+            )
+        elif pr_body is not None:
+            result = check_files(
+                [],
+                repo_root=args.repo_root,
+                allow_test_edit=args.allow_test_edit,
+                allow_test_skip=args.allow_test_skip,
+                no_budget=args.no_budget,
+                max_files=effective_max_files,
+                pr_body=pr_body,
+                strict_prose=args.strict_prose,
+                structural=args.structural,
+                strict_structural=args.strict_structural,
+                learned_rules=args.learned_rules,
+            )
+        elif not sys.stdin.isatty():
             diff_text = sys.stdin.read()
+            result = check_diff(
+                diff_text,
+                repo_root=args.repo_root,
+                allow_test_edit=args.allow_test_edit,
+                allow_test_skip=args.allow_test_skip,
+                no_budget=args.no_budget,
+                max_net_loc=effective_max_net_loc,
+                max_files=effective_max_files,
+                pr_body=pr_body,
+                strict_prose=args.strict_prose,
+                structural=args.structural,
+                strict_structural=args.strict_structural,
+                learned_rules=args.learned_rules,
+            )
         else:
-            diff_text = Path(args.diff).read_text(encoding="utf-8")
-        result = check_diff(
-            diff_text,
-            repo_root=args.repo_root,
-            allow_test_edit=args.allow_test_edit,
-            allow_test_skip=args.allow_test_skip,
-            no_budget=args.no_budget,
-            max_net_loc=effective_max_net_loc,
-            max_files=effective_max_files,
-            pr_body=pr_body,
-            strict_prose=args.strict_prose,
-        )
-    elif target_files:
-        result = check_files(
-            target_files,
-            repo_root=args.repo_root,
-            allow_test_edit=args.allow_test_edit,
-            allow_test_skip=args.allow_test_skip,
-            no_budget=args.no_budget,
-            max_files=effective_max_files,
-            pr_body=pr_body,
-            strict_prose=args.strict_prose,
-        )
-    elif pr_body is not None:
-        result = check_files(
-            [],
-            repo_root=args.repo_root,
-            allow_test_edit=args.allow_test_edit,
-            allow_test_skip=args.allow_test_skip,
-            no_budget=args.no_budget,
-            max_files=effective_max_files,
-            pr_body=pr_body,
-            strict_prose=args.strict_prose,
-        )
-    elif not sys.stdin.isatty():
-        diff_text = sys.stdin.read()
-        result = check_diff(
-            diff_text,
-            repo_root=args.repo_root,
-            allow_test_edit=args.allow_test_edit,
-            allow_test_skip=args.allow_test_skip,
-            no_budget=args.no_budget,
-            max_net_loc=effective_max_net_loc,
-            max_files=effective_max_files,
-            pr_body=pr_body,
-            strict_prose=args.strict_prose,
-        )
-    else:
-        parser.error("Provide --diff, --files / PATH, --pr-body/--pr-body-file, or pipe a unified diff on stdin.")
+            parser.error("Provide --diff, --files / PATH, --pr-body/--pr-body-file, or pipe a unified diff on stdin.")
+            return 2
+    except (OSError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
     if args.emit_json:
         print(json.dumps(result, indent=2))
     elif result["errors"] or result["warnings"]:
-        print(_format_human(result), file=sys.stderr)
+        print(_format_human(result, explain=args.explain), file=sys.stderr)
 
     return 0 if result["ok"] else 1
 

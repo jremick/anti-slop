@@ -37,6 +37,22 @@ inputs:
     description: 'Optional whitespace-separated list of files to inspect directly (--files) instead of computing git diff.'
     required: false
     default: ''
+  structural:
+    description: 'Enable AI-era structural compounding-slop checks (STRUCT-*) as warnings (passes --structural).'
+    required: false
+    default: 'false'
+  strict-structural:
+    description: 'Enable structural compounding-slop checks and promote them to hard errors (passes --strict-structural).'
+    required: false
+    default: 'false'
+  explain:
+    description: 'Include plain-English explanations of why engineers flag each pattern and how it compounds (passes --explain).'
+    required: false
+    default: 'false'
+  learned-rules:
+    description: 'Optional path to an approved anti-slop-learn rules JSON store (passes --learned-rules).'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -58,6 +74,10 @@ runs:
         INPUT_MAX_FILES: ${{ inputs.max-files }}
         INPUT_CHECK_PR_BODY: ${{ inputs.check-pr-body }}
         INPUT_FILES: ${{ inputs.files }}
+        INPUT_STRUCTURAL: ${{ inputs.structural }}
+        INPUT_STRICT_STRUCTURAL: ${{ inputs.strict-structural }}
+        INPUT_EXPLAIN: ${{ inputs.explain }}
+        INPUT_LEARNED_RULES: ${{ inputs.learned-rules }}
         BASE_REF: ${{ github.base_ref }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         BEFORE_SHA: ${{ github.event.before }}
@@ -73,6 +93,19 @@ runs:
         fi
         if [ "${INPUT_STRICT_PROSE}" = "true" ]; then
           ARGS+=(--strict-prose)
+        fi
+        if [ "${INPUT_STRUCTURAL:-false}" = "true" ]; then
+          ARGS+=(--structural)
+        fi
+        if [ "${INPUT_STRICT_STRUCTURAL:-false}" = "true" ]; then
+          ARGS+=(--strict-structural)
+        fi
+        if [ "${INPUT_EXPLAIN:-false}" = "true" ]; then
+          ARGS+=(--explain)
+        fi
+        TRIMMED_LEARNED_RULES="$(printf '%s' "${INPUT_LEARNED_RULES:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+        if [ -n "${TRIMMED_LEARNED_RULES}" ]; then
+          ARGS+=(--learned-rules "${TRIMMED_LEARNED_RULES}")
         fi
         if [ "${INPUT_NO_BUDGET}" = "true" ]; then
           ARGS+=(--no-budget)

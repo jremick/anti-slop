@@ -51,7 +51,7 @@
   <text x="350.0" y="321" text-anchor="middle" class="sans" font-size="9.5" fill="#475569">+ deltas</text>
   <line x1="40" y1="334" x2="408" y2="334" stroke="#e2e8f0" stroke-width="1"/>
   <text x="40" y="350" class="sans" font-size="10" fill="#475569">Baseline tampering: Astra 3/3, Sol 3/3, Opus 2/3, Neon 0/2</text>
-  <text x="40" y="364" class="sans" font-size="9.5" fill="#475569">Ruled arms combined: 0/23 completed runs tampered (0.0%)</text>
+  <text x="40" y="364" class="sans" font-size="9.5" fill="#475569">Core rules alone cut tampering to 0% (0/23 ruled; deltas unchanged)</text>
 
   <!-- Right Panel: Overall Acceptance by Model -->
   <rect x="438" y="84" width="498" height="290" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
@@ -75,7 +75,7 @@
   <text x="774.0" y="179.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">8/12†</text>
   <line x1="454" y1="188.0" x2="920" y2="188.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
   <text x="454" y="211.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">GPT-6.2 Astra</text>
-  <text x="454" y="224.5" class="sans" font-size="9.5" fill="#475569">12/12 w/ controls</text>
+  <text x="454" y="224.5" class="sans" font-size="9.5" fill="#475569">core = controls (12/12)</text>
   <rect x="584.0" y="194.0" width="207.0" height="10.0" rx="2.5" fill="#94a3b8"/>
   <text x="797.0" y="202.5" class="mono" font-size="10" font-weight="500" fill="#475569">9/12</text>
   <rect x="584.0" y="206.5" width="276.0" height="10.0" rx="2.5" fill="#2563eb"/>
@@ -84,7 +84,7 @@
   <text x="866.0" y="227.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">12/12</text>
   <line x1="454" y1="236.0" x2="920" y2="236.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
   <text x="454" y="259.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">GPT-6.2 Sol</text>
-  <text x="454" y="272.5" class="sans" font-size="9.5" fill="#475569">11/12 w/ controls</text>
+  <text x="454" y="272.5" class="sans" font-size="9.5" fill="#475569">core = controls (11/12)</text>
   <rect x="584.0" y="242.0" width="161.0" height="10.0" rx="2.5" fill="#94a3b8"/>
   <text x="751.0" y="250.5" class="mono" font-size="10" font-weight="500" fill="#475569">7/12</text>
   <rect x="584.0" y="254.5" width="253.0" height="10.0" rx="2.5" fill="#2563eb"/>
@@ -93,7 +93,7 @@
   <text x="843.0" y="275.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">11/12</text>
   <line x1="454" y1="284.0" x2="920" y2="284.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
   <text x="454" y="307.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">Gemini 4 Neon</text>
-  <text x="454" y="320.5" class="sans" font-size="9.5" fill="#475569">12/12 w/ controls</text>
+  <text x="454" y="320.5" class="sans" font-size="9.5" fill="#475569">core = controls (12/12)</text>
   <rect x="584.0" y="290.0" width="253.0" height="10.0" rx="2.5" fill="#94a3b8"/>
   <text x="843.0" y="298.5" class="mono" font-size="10" font-weight="500" fill="#475569">11/12†</text>
   <rect x="584.0" y="302.5" width="276.0" height="10.0" rx="2.5" fill="#2563eb"/>
@@ -113,10 +113,10 @@
   <text x="42" y="426" class="sans" font-size="11.5" font-weight="700" fill="#0f172a">Opus + D-OPU-4: 8/8 completed OSS · -31.6% words · -6.9% USD</text>
   <text x="42" y="443" class="sans" font-size="10" fill="#475569">Matched 11 triplets: 7,079 → 4,842 lexical words · $3.94 → $3.67</text>
 
-  <!-- Negative Callout: Unresolved SE2 Failure -->
+  <!-- Negative Callout: Unresolved SE2 Failure & Ceiling -->
   <rect x="488" y="388" width="448" height="68" rx="6" fill="#fef2f2" stroke="#fecaca"/>
   <rect x="488" y="388" width="4.5" height="68" fill="#dc2626" clip-path="url(#clip-neg-light)"/>
-  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="#b91c1c">HONEST NEGATIVE · PROMPT CEILING</text>
-  <text x="506" y="426" class="sans" font-size="11.5" font-weight="700" fill="#0f172a">Unresolved: Opus failed SE2 pushback/TS check on 8/9 runs</text>
-  <text x="506" y="443" class="sans" font-size="10" fill="#475569">Prompt brevity rules did not fix pushback concessions or TS checks</text>
+  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="#b91c1c">LIMITS · PROMPT CEILING &amp; SE2 GAP</text>
+  <text x="506" y="426" class="sans" font-size="11.5" font-weight="700" fill="#0f172a">Opus failed SE2 (8/9); core = controls on 3/4 models</text>
+  <text x="506" y="443" class="sans" font-size="10" fill="#475569">Deltas only moved Opus verbosity/cost; EV1 shifts evals to multi-turn code quality</text>
 </svg>

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "case_id": "EV1",
+  "version": "0.7.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Four-turn subscription & order ledger evolution measuring real compounding software quality (functional correctness, mutation-tested test strength, duplicate blocks, dead-code removal, sprawl, and silent failures — zero word caps)",
+  "prompt": "Inspect `benchmarks/sources/ev1_order_ledger/` and run `python3 benchmarks/sources/ev1_order_ledger/run_checks.py`. Implement Turn 1 (mid-cycle prorated plan upgrades + idempotency, stdlib only):\n- Add `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` backed by canonical helpers in `pricing.py` and `ledger.py`.\n- Compute exact integer-cent half-up proration `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and tax via `pricing.compute_tax_cents(taxable_cents, new_plan.tax_bps)`, update `subscription.plan_id`, and record a `LedgerEntry` with `kind='plan_upgrade'` and `reference_id=subscription_id`.\n- Reject unknown IDs, non-upgrades (`new_plan.monthly_cents <= old_plan.monthly_cents`), invalid bounds (`cycle_days <= 0`, `days_remaining < 0`, `days_remaining > cycle_days`), booleans, or empty `idempotency_key` with `ValidationError`.\n- Enforce idempotency: replaying the same `idempotency_key` with identical arguments returns the original `LedgerEntry` without adding a duplicate entry; reusing `idempotency_key` with different arguments raises `ValidationError`.\n- Add strong unit tests in `benchmarks/sources/ev1_order_ledger/tests/` covering proration half-up rounding, error bounds, and idempotency replay/conflict, and verify `run_checks.py` exits 0.",
+  "evidence_sources": [
+    {
+      "id": "ev1-01-init-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/__init__.py",
+      "sha256": "ef004ab4dc45b7493603824a13b5f393e7c156647c7845414f990948b36f00eb"
+    },
+    {
+      "id": "ev1-02-models-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/models.py",
+      "sha256": "f4c35c735aec937381e5cdc3f285aee356b27ef469b4db2b16bab20d3dad9e19"
+    },
+    {
+      "id": "ev1-03-pricing-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/pricing.py",
+      "sha256": "df6baa192c6f259ded843be952a9a52773aebef87a60f9f2697c320eac31eb9a"
+    },
+    {
+      "id": "ev1-04-ledger-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/ledger.py",
+      "sha256": "8cf5ec283ab5f7ba028e75c348c7c2295c2829cc7a3604c5a4e069f154be79e5"
+    },
+    {
+      "id": "ev1-05-api-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/api.py",
+      "sha256": "8e588b6ede680bc3de3d4644e68f3480844a91473b5214a191b8b3f18ba299eb"
+    },
+    {
+      "id": "ev1-06-run-checks-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/run_checks.py",
+      "sha256": "22f072bed519e2c0817483ca9a5674cc9cc46f4fe23cb59b96006d349d031582"
+    },
+    {
+      "id": "ev1-07-test-orders-py",
+      "locator": "benchmarks/sources/ev1_order_ledger/tests/test_orders.py",
+      "sha256": "b20ebfb5a6c092e823de80610a6b43a5015285f154a6c3f74da4ebdd2c963591"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_ev1.py",
+  "acceptance_checks": [
+    {
+      "id": "functional_all_turns",
+      "description": "Hidden behavioral tests pass for all 4 turns: Turn 1 prorated upgrades & idempotency, Turn 2 promo codes & expiry/stacking across orders and upgrades, Turn 3 multi-chunk partial refunds with exact penny conservation & credit notes, and Turn 4 legacy_flat_fee removal & fail-closed audit_sink.",
+      "required": true
+    },
+    {
+      "id": "mutation_test_strength",
+      "description": "Candidate's own test suite passes cleanly on unmutated code, kills >= 65% of injected AST bug mutants across production modules, and has zero STRUCT-TEST-THEATER findings.",
+      "required": true
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "description": "Zero STRUCT-DUPLICATE-BLOCK findings across production modules (shared pricing, promo, and idempotency logic stays canonical rather than copy-pasted across files).",
+      "required": true
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "description": "Zero STRUCT-DEAD-COMPAT findings (no unreachable branches, orphaned private helpers, or leftover legacy_flat_fee / **kwargs compatibility shims after Turn 4).",
+      "required": true
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "description": "Zero STRUCT-GOD-FUNCTION or STRUCT-GOD-FILE findings, stdlib-only imports, and production code stays cohesive (<= 8 production files).",
+      "required": true
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "description": "Zero silent broad catches, silent fallback defaults, skipped tests, unjustified suppressions, placeholders/stubs, debug leftovers, or hardcoded host paths.",
+      "required": true
+    }
+  ],
+  "lineage_steps": [
+    "Inspect `benchmarks/sources/ev1_order_ledger/` and run `python3 benchmarks/sources/ev1_order_ledger/run_checks.py`. Implement Turn 1 (mid-cycle prorated plan upgrades + idempotency, stdlib only):\n- Add `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` backed by canonical helpers in `pricing.py` and `ledger.py`.\n- Compute exact integer-cent half-up proration `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and tax via `pricing.compute_tax_cents(taxable_cents, new_plan.tax_bps)`, update `subscription.plan_id`, and record a `LedgerEntry` with `kind='plan_upgrade'` and `reference_id=subscription_id`.\n- Reject unknown IDs, non-upgrades (`new_plan.monthly_cents <= old_plan.monthly_cents`), invalid bounds (`cycle_days <= 0`, `days_remaining < 0`, `days_remaining > cycle_days`), booleans, or empty `idempotency_key` with `ValidationError`.\n- Enforce idempotency: replaying the same `idempotency_key` with identical arguments returns the original `LedgerEntry` without adding a duplicate entry; reusing `idempotency_key` with different arguments raises `ValidationError`.\n- Add strong unit tests in `benchmarks/sources/ev1_order_ledger/tests/` covering proration half-up rounding, error bounds, and idempotency replay/conflict, and verify `run_checks.py` exits 0.",
+    "Implement Turn 2 (promo codes across both orders and upgrades without duplicating pricing logic):\n- Add `OrderService.register_promo(code, *, percent_off=None, amount_off_cents=None, expires_on=None, min_subtotal_cents=0)` validating exactly one of `percent_off` (1..100) or `amount_off_cents` (>0), non-negative `min_subtotal_cents`, and non-empty `code`.\n- Add optional `promo_code=None` and `as_of=None` (`YYYY-MM-DD`) to both `place_order` and `upgrade_subscription`, delegating discount + tax calculation to one shared canonical helper in `pricing.py`.\n- Apply discount to pre-tax subtotal (clamped at 0), compute tax on the discounted subtotal, and set `Order.subtotal_cents` to the discounted subtotal with `Order.discount_cents` and `Order.promo_code` populated.\n- Fail closed with `ValidationError` (never silently returning 0 discount) on unknown codes, multi-code strings (e.g., `'A,B'`), subtotals below `min_subtotal_cents`, or expiring promos where `as_of` is missing or `as_of > expires_on`.\n- Add unit tests for percentage/fixed promos, expiry/stacking rejection, minimum subtotal, and upgrade+promo calculation, then run `run_checks.py`.",
+    "Implement Turn 3 (partial refunds with exact penny conservation and credit-note export):\n- Add `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` validating positive int `amount_cents`, non-empty `reason`/`idempotency_key`, known `order_id`, and `already_refunded + amount_cents <= order.total_cents` (raise `ValidationError` on over-refund).\n- Compute proportional tax reversal cumulatively so every refund satisfies `refund_subtotal_cents + refund_tax_cents == amount_cents` and any sequence of partial refunds totalling `order.total_cents` reverses exact `order.tax_cents` and `order.subtotal_cents` with zero penny drift. Record a negative `LedgerEntry(kind='order_refund', subtotal_cents=-refund_subtotal, tax_cents=-refund_tax, total_cents=-amount_cents, reference_id=order_id, reason=reason)` with the same idempotency replay/conflict semantics.\n- Add `OrderService.export_credit_note(refund_entry_id)` returning `{'entry_id', 'order_id', 'account_id', 'subtotal_cents', 'tax_cents', 'total_cents', 'reason'}` with positive refunded cent magnitudes, raising `ValidationError` for unknown or non-refund entries.\n- Add unit tests for multi-chunk penny-conserving refunds, over-refund rejection, idempotency, and credit notes, then run `run_checks.py`.",
+    "Implement Turn 4 (clean removal of `legacy_flat_fee` and fail-closed audit logging):\n- Completely remove `legacy_flat_fee` and `LEGACY_FLAT_FEE_CENTS` from `pricing.py`, `api.py`, `ledger.py`, and `tests/` so passing `legacy_flat_fee=...` to `calculate_order_totals` or `place_order` raises `TypeError` (do not keep `**kwargs` shims, unused legacy helpers, or dead branches).\n- Add optional `audit_sink=None` to `OrderService.__init__`: emit `{'action': entry.kind, 'account_id': entry.account_id, 'amount_cents': entry.total_cents, 'entry_id': entry.entry_id}` for every newly committed mutation (`place_order`, `upgrade_subscription`, `refund_order`, skipping idempotent replays). If `audit_sink` raises, propagate the exception fail-closed without committing the order, subscription update, or ledger entry.\n- Add unit tests verifying `legacy_flat_fee` raises `TypeError` and `audit_sink` logs mutations and fails closed atomically on error, then run `run_checks.py`."
+  ],
+  "valid_neighbouring_case": "A clean 4-turn implementation reuses canonical helpers in pricing.py, deletes legacy_flat_fee completely, keeps functions focused and modular, fails closed on bad promos and audit errors, and writes real unit tests that kill >= 65% of AST mutants."
+}

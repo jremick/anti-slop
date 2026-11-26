@@ -7,7 +7,10 @@ Every Python gate uses stdlib Python only (no third-party packages), exits `0` s
 ## Contents
 
 - [api_checks.py](api_checks.py): Validates 2026 model API and harness configurations (`anti-slop-api`) for `gpt-6.2-astra`, `gpt-6.2-sol`, `claude-opus-5-5`, `claude-fable-5-2`, and `gemini-4-neon`.
-- [diff_check.py](diff_check.py): Validates unified diffs, modified file lists, and PR bodies (`anti-slop-diff`) for stub additions, unauthorized edits under `tests/`, newly added test-skip/waiver annotations (`DIFF-TEST-SKIP`), unjustified lint/type suppressions (`DIFF-SUPPRESSION`), silent broad catches (`DIFF-SILENT-CATCH`), debug leftovers (`DIFF-DEBUG-LEFTOVER`), hardcoded host home paths (`DIFF-HOST-PATH`), optional net-LOC and file-count budgets (`--no-budget` to disable), chatbot openers and closers (`DIFF-CHATBOT-OPENER`, `DIFF-CHATBOT-CLOSER`), decorative AI emojis (`DIFF-DECORATIVE-EMOJI`, warning by default), and broken backticked local repo paths.
+- [diff_check.py](diff_check.py): Validates unified diffs, modified file lists, and PR bodies (`anti-slop-diff`) for objective defects (`DIFF-*`), optional net-LOC/file budgets (`--no-budget`), optional AI-era structural checks (`--structural` / `--strict-structural`), plain-English explanations (`--explain`), and approved learned rules (`--learned-rules`).
+- [structural.py](structural.py): Measurable detectors for compounding AI-era slop (`STRUCT-TEST-THEATER`, `STRUCT-SILENT-FALLBACK`, `STRUCT-DUPLICATE-BLOCK`, `STRUCT-DEAD-COMPAT`, `STRUCT-GOD-FUNCTION`, `STRUCT-GOD-FILE`, `STRUCT-SCOPE-SPRAWL`), warning-first by default.
+- [review.py](review.py): Plain-English review CLI (`anti-slop-review`) combining `diff_check.py`, `structural.py`, and approved learned rules to explain why experienced engineers flag each issue, how it compounds across future AI turns, and what fix prompt to give your AI (`--markdown`, `--json`, `--fail-on-warning`).
+- [learn.py](learn.py): Verified human-gated self-learning loop CLI (`anti-slop-learn`) implementing `R7` (`capture -> propose -> verify -> approve -> check -> retire`) with narrowest-layer escalation (`deterministic_check` > `codebase_example` > `prompt_rule`), 3-way automated verification (bad case, valid neighbouring case, existing repo scan), SHA-256-bound human approval, and non-reusable stable IDs (`L-001`, `L-002`, ...).
 - [hooks/](hooks/README.md): Portable 3-CLI lifecycle hooks (`anti-slop-hook`, including `--install claude|antigravity|codex --dry-run`) wrapping `gates/diff_check.py` outside the model context window.
 - [model_deltas.json](model_deltas.json): Strictly delta-only per-model harness overlays (`D-AST`, `D-SOL`, `D-OPU`, `D-FAB`, `D-NEO`) with stable IDs, falsification checks, valid neighbouring cases, and effort routing. Keep outside `standard/core.md`.
 - [vale/.vale.ini](vale/.vale.ini): Warning-first Vale configuration implementing the deterministic subset of Cursor `unslop` across [Openers.yml](vale/styles/AntiSlop/Openers.yml), [Closers.yml](vale/styles/AntiSlop/Closers.yml), [ADRStructure.yml](vale/styles/AntiSlop/ADRStructure.yml), [Vocab.yml](vale/styles/AntiSlop/Vocab.yml), and [Phrasing.yml](vale/styles/AntiSlop/Phrasing.yml).
@@ -17,11 +20,17 @@ Every Python gate uses stdlib Python only (no third-party packages), exits `0` s
 
 ### 1. Run in Any External Repository (Zero-Clone `uvx`, Action, or `pre-commit`)
 
-`pyproject.toml` exposes three zero-dependency console scripts (`anti-slop-diff`, `anti-slop-hook`, `anti-slop-api`), while root `action.yml` and `.pre-commit-hooks.yaml` enable drop-in CI and local hooks without copying `gates/`:
+`pyproject.toml` exposes five zero-dependency console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-learn`, `anti-slop-hook`, `anti-slop-api`), while root `action.yml` and `.pre-commit-hooks.yaml` enable drop-in CI and local hooks without copying `gates/`:
 
 ```bash
-# Run on your current git diff (objective defects only, no LOC/file caps)
+# Plain-English review of current git changes (shortcuts + compounding slop + approved learned rules)
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-review
+
+# Run fast diff gate on your current git diff (objective defects only, or add --structural --explain)
 git diff HEAD | uvx --from git+https://github.com/jremick/anti-slop anti-slop-diff --diff - --no-budget
+
+# Capture and verify a recurring slop pattern in the human-gated R7 learning loop
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-learn list
 
 # Validate a model/harness JSON config
 uvx --from git+https://github.com/jremick/anti-slop anti-slop-api path/to/model-config.json
@@ -30,15 +39,19 @@ uvx --from git+https://github.com/jremick/anti-slop anti-slop-api path/to/model-
 uvx --from git+https://github.com/jremick/anti-slop anti-slop-hook --install claude --dry-run
 ```
 
-GitHub Actions (5-line drop-in via `action.yml`):
+GitHub Actions (5-line drop-in via `action.yml`; optional opt-in inputs `structural`, `strict-structural`, `explain`, and `learned-rules` default off for backward compatibility):
 
 ```yaml
 - uses: jremick/anti-slop@v0.6.0
   with:
     no-budget: 'true'
+    # Optional opt-ins:
+    # structural: 'true'
+    # explain: 'true'
+    # learned-rules: '.anti-slop/learned/rules.json'
 ```
 
-Local `pre-commit` (via `.pre-commit-hooks.yaml`):
+Local `pre-commit` (via `.pre-commit-hooks.yaml`; also exposes opt-in `anti-slop-review` and `anti-slop-diff-lock-tests`):
 
 ```yaml
 repos:
@@ -46,6 +59,8 @@ repos:
     rev: v0.6.0
     hooks:
       - id: anti-slop-diff
+      # Or opt in to plain-English review (shortcuts + structural warnings + learned rules):
+      # - id: anti-slop-review
 ```
 
 ### 2. Validate Model API and Harness Configs
@@ -146,6 +161,27 @@ Every commit was evaluated in both **checkout mode** (`--repo-root` checked out 
 4. **Policy-Strict Upstream Style Conventions (`24 / 29`):**
    - `DIFF-SUPPRESSION` (`24` total: `19` across 8 `urllib3` commits and `5` across 2 `tomlkit` commits): every single hit is a mypy-coded `# type: ignore[arg-type]`, `[assignment]`, `[misc]`, `[union-attr]`, `[comparison-overlap]`, or `[index]` comment that omits a trailing `# <reason>` explanation. `diff_check.py` intentionally requires both `[code]` and a short reason (`# type: ignore[arg-type]  # mock socket`); teams adopting `anti-slop` on mypy-strict repos should expect this rule to require brief inline justifications on new `# type: ignore[...]` additions.
 
+### Structural Gates (`gates/structural.py`) OSS Precision Audit
+
+Using the exact same 150-commit pinned OSS corpus (`urllib3` `3db5970fcc56`, `tomlkit` `d2aa305673a0`, `hono` `717dc17cb80b`), `gates/structural.py` (`check_structural_diff(..., repo_root=...)`, all rules warning-only by default) was audited in checkout mode and every warning was inspected verbatim.
+
+| Repository | Pinned `HEAD` SHA | Commits | Clean (All 7 `STRUCT-*`) | Clean (Non-Size Defect Rules) | Total Warnings (Post-Fix) | Warnings by Rule ID |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| [urllib3/urllib3](https://github.com/urllib3/urllib3) (Python) | `3db5970fcc56` | 50 | 30 / 50 (60.0%) | 48 / 50 (96.0%) | 29 W | `STRUCT-GOD-FILE`: 14, `STRUCT-GOD-FUNCTION`: 12, `STRUCT-TEST-THEATER`: 3 |
+| [sdispater/tomlkit](https://github.com/sdispater/tomlkit) (Python) | `d2aa305673a0` | 50 | 29 / 50 (58.0%) | 50 / 50 (100.0%) | 33 W | `STRUCT-GOD-FILE`: 22, `STRUCT-GOD-FUNCTION`: 11 |
+| [honojs/hono](https://github.com/honojs/hono) (TypeScript) | `717dc17cb80b` | 50 | 43 / 50 (86.0%) | 47 / 50 (94.0%) | 10 W | `STRUCT-GOD-FILE`: 5, `STRUCT-DUPLICATE-BLOCK`: 4, `STRUCT-GOD-FUNCTION`: 1 |
+| **OSS Total** | - | **150** | **102 / 150 (68.0%)** | **145 / 150 (96.7%)** | **72 W** | **`STRUCT-GOD-FILE`: 41, `STRUCT-GOD-FUNCTION`: 24, `STRUCT-DUPLICATE-BLOCK`: 4, `STRUCT-TEST-THEATER`: 3** |
+
+- **Zero-noise structural rules across all 150 commits (0 warnings):** `STRUCT-SILENT-FALLBACK` (`0`), `STRUCT-DEAD-COMPAT` (`0`), and `STRUCT-SCOPE-SPRAWL` (`0`).
+- **3 genuine parser/AST false-positive classes caught during the audit and fixed (`87 W -> 72 W`, `-15` false warnings; regression tests in [tests/test_structural_and_review.py](../tests/test_structural_and_review.py)):**
+  1. **Vitest / `expect-type` type assertions (`hono`, 5/5 `STRUCT-TEST-THEATER` FPs fixed):** `expectTypeOf<...>().toEqualTypeOf<...>()` and `assertType<...>()` were not recognized by `JS_ASSERT_RE`. Updated `JS_ASSERT_RE` to recognize `expectTypeOf`, `assertType`, and `expect.*(...)` while keeping tautology and empty-test checks intact.
+  2. **AST-verified local and imported test helpers (`tomlkit`, 9/9 `STRUCT-TEST-THEATER` FPs fixed):** `tomlkit`'s `test_items.py` delegated assertions to `from tests.util import elementary_test`, which missed name-prefix checks (`assert_*`). Updated Python test-theater inspection to verify via AST whether same-file or imported `tests/` helper functions actually execute real assertions; assertion-free helpers and production calls without assertions remain flagged.
+  3. **Strict stdlib warning-error assertions (`urllib3`, 1/4 `STRUCT-TEST-THEATER` FPs fixed):** `warnings.simplefilter("error", FutureWarning)` inside `warnings.catch_warnings()` turns any emitted warning into a test failure (`warnings.simplefilter("ignore", ...)` remains flagged).
+- **Classification of all 72 post-fix structural warnings:**
+  - **True duplicates (`4 / 72`):** All 4 `STRUCT-DUPLICATE-BLOCK` hits in `hono` (`64d4cd2234`, `399e7c9207`, `fb48e2b295`) flagged real verbatim mirrored adapter files (`adapters/<target>/src/` duplicating `src/adapter/<target>/`) where each bugfix had to be applied identically in two places.
+  - **Intentional no-assert / string-eval tests (`3 / 72`):** In `urllib3`, `2` hits (`test_assert_hostname_invalid_cn`, `test_timeout_success`) are intentional "does not raise" HTTP smoke tests with zero `assert` statements, and `1` hit (`test_streaming_close`) passes Python assertions inside a string executed by a Pyodide webworker (`run_webworker(worker_code)`).
+  - **Pre-existing large files and complex methods (`65 / 72`):** `41` `STRUCT-GOD-FILE` warnings (growing pre-existing 518-to-1,951-line core files such as `urllib3` `response.py`, `tomlkit` `items.py`, and `hono` `render.ts`) and `24` `STRUCT-GOD-FUNCTION` warnings (`urlopen`, `_parse_table`, `item`, `methodOverride`). These findings explain why `STRUCT-*` rules default to `warning` rather than blocking errors unless `--strict-structural` is opted in.
+
 ### Self-Repository Dogfood Audit
 
 Scanning this repository's own tracked authored files (excluding pinned third-party OSS snapshots under `benchmarks/sources/` and archived raw model transcripts under `results/pilot-3way-v0.6.0/artifacts/`):
@@ -155,6 +191,8 @@ Scanning this repository's own tracked authored files (excluding pinned third-pa
 - **6 test-suite files (`tests/test_*.py`):** `8` errors post-fix (down from `9` after fixing the prose `TODO` false positive in `tests/test_gates.py`): `6` intentional `DIFF-HOST-PATH` negative-test fixture strings and `2` intentional Python-version `@unittest.skipIf` guards in `tests/test_graders.py`.
 
 ### Reproducing the OSS Audit
+
+Add `--structural` to the `gates/diff_check.py` command below (or call `structural.check_structural_diff(...)` directly) to reproduce the structural precision audit on the same pinned SHAs.
 
 ```bash
 WORKDIR="$(mktemp -d)"

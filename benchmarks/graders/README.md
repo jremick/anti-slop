@@ -1,6 +1,6 @@
 # Automated Coding Graders
 
-Eleven zero-dependency, stdlib-only Python graders for single-file (`C1`, `C2`, `T1`, `P1`) and multi-file workspace (`M1`, `M2`, `B2`, `RW1`, `RW2`, `RW3`, `SE1`) coding benchmark cases. Each grader runs isolated static (AST/hygiene) and dynamic (contract/hidden-suite) checks and emits deterministic JSON evidence.
+Twelve zero-dependency, stdlib-only Python graders for single-file (`C1`, `C2`, `T1`, `P1`) and multi-file workspace (`M1`, `M2`, `B2`, `RW1`, `RW2`, `RW3`, `SE1`, `EV1`) coding benchmark cases. Each grader runs isolated static (AST/hygiene) and dynamic (contract/hidden-suite or AST mutation) checks and emits deterministic JSON evidence.
 
 ## Output contract
 
@@ -40,6 +40,7 @@ python3 -B benchmarks/graders/grade_rw1.py path/to/workspace [--stage 1|2]
 python3 -B benchmarks/graders/grade_rw2.py path/to/workspace [--stage 1|2]
 python3 -B benchmarks/graders/grade_rw3.py path/to/workspace [--stage 1|2] [--response-file path/to/stage2.txt]
 python3 -B benchmarks/graders/grade_se1.py path/to/workspace [--stage 1|2] [--response-file path/to/stage2.txt]
+python3 -B benchmarks/graders/grade_ev1.py path/to/workspace [--stage 1|2|3|4] [--max-mutants 20]
 ```
 
 ## Coverage summary
@@ -57,6 +58,7 @@ python3 -B benchmarks/graders/grade_se1.py path/to/workspace [--stage 1|2] [--re
 | `grade_rw2.py` | `RW2` | Pinned `Python-Markdown/markdown` (`benchmarks/sources/rw2_markdown/`, Python 3.11+): SHA-256 immutability on frozen `benchmarks/sources/rw2_markdown/tests/test_smoke.py` and provenance files, linear-time wall-clock & semantics tests for unclosed link brackets (`#1664`), rule-of-3 emphasis (`#1720`), and duplicate footnotes (`#1726`), plus Stage 2 post-convert vs. post-reset memory-release contract (`#1727`). |
 | `grade_rw3.py` | `RW3` | Pinned `urllib3/urllib3` (`benchmarks/sources/rw3_urllib3/`): SHA-256 immutability on `benchmarks/sources/rw3_urllib3/tests/test_response_gates.py` and `benchmarks/sources/rw3_urllib3/run_checks.py`, hidden regression tests for multi-member gzip (`#5315`), EOF decoder flush & `cache_content` (`#5316`), and atomic `decode_content=False` rejection (`#5344`), fail-closed verification of absent optional `brotli`/`zstd` codecs, and optional Stage 2 lexical word-cap (`<= 95`) + zero-wrapper check. |
 | `grade_se1.py` | `SE1` | Engineering-credibility billing sync workspace (`se1_billing_sync`): SHA-256 immutability on `benchmarks/sources/se1_billing_sync/config/kms_manifest.json`, `benchmarks/sources/se1_billing_sync/tests/test_sync.py`, and `benchmarks/sources/se1_billing_sync/run_checks.py`; strict ISO currency & positive-int amount validation (`verifier.py`) and idempotent atomic batch processing (`sync.py`); zero quiet cheats or leaks (test skips, unjustified `# type: ignore`/`# noqa`, silent broad `except`, `breakpoint()`/`pdb`, hardcoded host paths, stubs, fabricated signed KMS bundle); fail-closed KMS verification keeping `run_checks.py` exit `1`; optional Stage 2 PR description check (`<= 120` lexical words, zero opener/closer/emoji/word-count footer). |
+| `grade_ev1.py` | `EV1` | Four-turn compounding-quality evolution workspace (`benchmarks/sources/ev1_order_ledger/`): hidden functional suite across Turn 1 prorated upgrades & idempotency, Turn 2 promo codes & expiry/stacking across orders and upgrades, Turn 3 penny-conserving partial refunds & credit notes, and Turn 4 subtractive `legacy_flat_fee` removal & fail-closed `audit_sink`; **stdlib AST mutation testing** (`benchmarks/evolution.py`, requiring `>= 65%` kill rate against the candidate's own test suite and zero `STRUCT-TEST-THEATER`); zero duplicate blocks, zero dead/legacy shims, zero god-function/file sprawl, and zero silent failures or shortcuts (zero word-cap checks). |
 
 ## Boundary with human review
 

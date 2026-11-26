@@ -38,11 +38,12 @@ If `anti-slop-hook` is on `PATH`, `--install` wires portable `anti-slop-hook` co
 
 ## Global-Safe Guards
 
-When installed globally across repositories, `anti-slop-hook` applies four safety defaults:
+When installed globally across repositories, `anti-slop-hook` applies five safety defaults:
 
 - **Workspace resolution:** When `--repo-root` is `.` or omitted, reads `cwd` or `workspacePaths[0]` from stdin JSON and resolves `git rev-parse --show-toplevel` (essential because Antigravity runs hook commands from the directory containing hooks.json).
 - **Non-git graceful no-op:** In diff-gate (`Stop` / `PostToolUse`) mode, non-git directories cleanly pass (`exit 0`, or `{"decision": "allow"}` for Antigravity).
 - **Anti-loop `Stop` guard:** Immediately allows stop when Claude/Codex sets `"stop_hook_active": true`, or Antigravity sets `"continuationActive": true` or a `"terminationReason"` other than `"NO_TOOL_CALL"`.
+- **Automatic learned-rule enforcement (fail-safe):** When a target repository contains an approved `<repo>/.anti-slop/learned/rules.json` store (created via `anti-slop-learn`), `Stop` mode automatically enforces approved, SHA-256-intact deterministic rules alongside built-in diff checks. Repos without a learned-rule store no-op cleanly, and unapproved, retired, or tampered entries are ignored.
 - **Benchmark isolation & `--no-budget`:** Immediately no-ops when `ANTI_SLOP_BENCHMARK_SUBJECT=1` or the target path lies inside an `antislop_*` temp workspace. Pass `--no-budget` (default in `--install` Stop/PostToolUse hooks) to disable heuristic `--max-net-loc` / `--max-files` caps and block only objective defects (`DIFF-TEST-SKIP`, `DIFF-STUB-*`, `DIFF-SUPPRESSION`, `DIFF-SILENT-CATCH`, `DIFF-DEBUG-LEFTOVER`, `DIFF-HOST-PATH`, `DIFF-CHATBOT-OPENER`, `DIFF-CHATBOT-CLOSER`, `DIFF-BROKEN-DOC-PATH`).
 
 ## Contents

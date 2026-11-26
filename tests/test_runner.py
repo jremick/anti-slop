@@ -600,6 +600,112 @@ class RunnerIntegrityTests(unittest.TestCase):
         self.assertIn("path=<TMP_WORKSPACE>/x home=<HOME>/y repo=<REPO_ROOT>/z", diff_body)
         self.assertNotIn(str(real_home), diff_body)
 
+    def test_ev1_auto_populate_and_gated_structural_condition_repair_loop(self) -> None:
+        # 1. freeze_conditions supports pilot-evolution-v0.7.0's gated-structural arm.
+        cond_dir = self.root / "conds"
+        snaps = run_benchmark.freeze_conditions(
+            REPO_ROOT, cond_dir, ["baseline", "core-rules-v0.2.0", "gated-structural"]
+        )
+        self.assertIn("gated-structural", snaps)
+        self.assertIn("structural review gate", snaps["gated-structural"].read_text(encoding="utf-8"))
+
+        # 2. _auto_populate_checks maps all 6 EV1 acceptance checks from Stage 4 grader report.
+        cases = benchmark.load_cases(REPO_ROOT / "benchmarks" / "cases", REPO_ROOT)
+        ev1_case = cases[("EV1", "0.7.0")]
+        fake_ev1_report = {
+            "case_id": "EV1",
+            "passed": False,
+            "checks": [
+                {"id": spec["id"], "passed": spec["id"] != "no_duplicate_code_growth", "detail": "ok"}
+                for spec in ev1_case["acceptance_checks"]
+            ],
+        }
+        populated, defects = run_benchmark._auto_populate_checks(
+            ev1_case, {4: (fake_ev1_report, "ev1-s4.json")}, {}
+        )
+        self.assertEqual(defects, [])
+        by_id = {c["id"]: c for c in populated}
+        self.assertEqual(by_id["functional_all_turns"]["status"], "pass")
+        self.assertEqual(by_id["mutation_test_strength"]["status"], "pass")
+        self.assertEqual(by_id["no_duplicate_code_growth"]["status"], "fail")
+        self.assertEqual(by_id["no_duplicate_code_growth"]["evidence"], ["ev1-s4.json"])
+
+        # 3. execute_run under gated-structural triggers plain-English gate review + single repair turn.
+        fake_repo = self.root / "fake_gated_repo"
+        src_dir = fake_repo / "benchmarks" / "sources" / "ev1_order_ledger"
+        shutil.copytree(REPO_ROOT / "benchmarks" / "sources" / "ev1_order_ledger", src_dir)
+        exp_dir = fake_repo / "runs-local" / "exp_gated"
+        exp_dir.mkdir(parents=True)
+        gated_cond = run_benchmark.freeze_conditions(
+            REPO_ROOT, exp_dir / "conditions", ["gated-structural"]
+        )["gated-structural"]
+
+        # Mini 2-stage EV1-like case using real EV1 workspace grader key.
+        mini_case = dict(ev1_case)
+        mini_case["lineage_steps"] = [ev1_case["lineage_steps"][0], ev1_case["lineage_steps"][1]]
+        prompts_seen: list[str] = []
+
+        def fake_invoke(**kwargs):
+            wd = kwargs["workdir"]
+            prompts_seen.append(kwargs["prompt"])
+            trace_path = kwargs["trace_log_path"]
+            trace_path.write_text("trace\n", encoding="utf-8")
+            target = wd / "benchmarks/sources/ev1_order_ledger/api.py"
+            if len(prompts_seen) == 1:
+                # Stage 1 initial output injects a silent fallback that gated-structural must catch!
+                target.write_text(
+                    target.read_text(encoding="utf-8")
+                    + "\ndef helper():\n    try:\n        return 1\n    except Exception:\n        return 0\n",
+                    encoding="utf-8",
+                )
+            elif len(prompts_seen) == 2:
+                # Automated gate repair removes the silent fallback.
+                target.write_text(
+                    (REPO_ROOT / "benchmarks/sources/ev1_order_ledger/api.py").read_text(encoding="utf-8")
+                    + "\ndef helper():\n    return 1\n",
+                    encoding="utf-8",
+                )
+            return {
+                "status": "completed",
+                "text": "Done",
+                "session_id": "sid-gated-1",
+                "total_tokens": 100 * len(prompts_seen),
+                "cost_usd": 0.01 * len(prompts_seen),
+                "observed_model": "claude-opus-5-5",
+                "downgraded_models": [],
+                "elapsed_s": 0.1,
+            }
+
+        def fake_ws_grader(_repo_root, _case, _workdir, _stage, grader_out_path, **_kw):
+            rep = {"case_id": "EV1", "passed": True, "checks": []}
+            grader_out_path.write_text(json.dumps(rep) + "\n", encoding="utf-8")
+            return rep
+
+        with (
+            mock.patch("scripts.run_benchmark._invoke_stage", side_effect=fake_invoke),
+            mock.patch("scripts.run_benchmark._run_workspace_grader", side_effect=fake_ws_grader),
+        ):
+            rec = run_benchmark.execute_run(
+                repo_root=fake_repo,
+                exp_dir=exp_dir,
+                experiment_id="exp_gated",
+                case=mini_case,
+                model_cfg=run_benchmark.DEFAULT_MODELS["claude-opus-5-5"],
+                cli_version="claude 1.0",
+                condition="gated-structural",
+                condition_file=gated_cond,
+                replicate=1,
+                source_snapshot_id="git-deadbeef1234",
+                timeout_seconds=30,
+            )
+
+        self.assertEqual(rec["status"], "completed")
+        # Stage 1 -> gate flagged STRUCT-SILENT-FALLBACK -> repair turn (2nd call) -> Stage 2 clean (3rd call)!
+        self.assertEqual(len(prompts_seen), 3)
+        self.assertIn("STRUCT-SILENT-FALLBACK", prompts_seen[1])
+        self.assertIn("runs-local/exp_gated/artifacts/" + rec["run_id"] + "/stage-1-gate-review.txt", rec["artifact_hashes"])
+        self.assertIn("runs-local/exp_gated/artifacts/" + rec["run_id"] + "/stage-1-gate-repair-trace.log", rec["artifact_hashes"])
+
 
 if __name__ == "__main__":
     unittest.main()

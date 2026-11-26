@@ -24,3 +24,17 @@
   types: [file]
   files: '\.(py|js|jsx|ts|tsx|mjs|cjs|go|md|markdown)$'
   minimum_pre_commit_version: '2.9.2'
+
+- id: anti-slop-review
+  name: Anti-Slop Plain-English Review (Shortcuts, Structural Slop & Learned Rules)
+  description: >-
+    Opt-in plain-English review combining objective shortcut gates, compounding
+    structural slop warnings (STRUCT-*), and approved learned rules from
+    .anti-slop/learned/rules.json. Blocks on objective errors by default; pass
+    args: [--fail-on-warning] or [--strict-structural] to block on structural
+    risks too.
+  entry: anti-slop-review
+  language: python
+  types: [file]
+  files: '\.(py|js|jsx|ts|tsx|mjs|cjs|go|md|markdown)$'
+  minimum_pre_commit_version: '2.9.2'

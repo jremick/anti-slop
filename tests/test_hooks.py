@@ -485,6 +485,96 @@ class RunDiffGateHookTests(unittest.TestCase):
         proc_no_budget = self._run_hook("--harness", "claude", "--no-budget")
         self.assertEqual(proc_no_budget.returncode, 0, msg=proc_no_budget.stderr)
 
+    def test_stop_hook_auto_enforces_approved_learned_rules_and_noops_without_store(self) -> None:
+        learn = _load_module("learn_hooks_test", "gates/learn.py")
+
+        # 1. Without .anti-slop/learned/rules.json, currency float edit passes cleanly (fail-safe no-op).
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n"
+            "    total = float(cents) / 100.0\n"
+            "    return int(total) + a + b\n",
+            encoding="utf-8",
+        )
+        proc_no_store = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_no_store.returncode, 0, msg=proc_no_store.stderr)
+
+        # 2. Capture, propose, and verify a rule (NOT YET approved) -> must NOT block.
+        store_path = learn.default_store_path(self.repo)
+        _git(self.repo, "checkout", "--", "src/app.py")
+        entry = learn.capture_pattern(
+            store_path,
+            title="Float math on currency",
+            bad_example="total = float(cents) / 100.0",
+            desired_outcome="Keep currency math in integer cents or Decimal.",
+            valid_neighbouring_case="seconds = float(elapsed_ms) / 1000.0",
+        )
+        learn.propose_prevention(
+            store_path,
+            entry["id"],
+            layer="deterministic_check",
+            severity="error",
+            file_glob="*.py",
+            pattern=r"\bfloat\s*\(\s*\w*(?:cent|price|amount)\w*\s*\)",
+            remediation="Use integer cents or Decimal for currency math.",
+            retirement_trigger="Retire once static Cents typing enforces integer-only math.",
+        )
+        verified = learn.verify_rule(store_path, entry["id"], repo_root=self.repo)
+        self.assertEqual(verified["status"], "verified")
+
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n"
+            "    total = float(cents) / 100.0\n"
+            "    return int(total) + a + b\n",
+            encoding="utf-8",
+        )
+        proc_unapproved = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_unapproved.returncode, 0, msg=proc_unapproved.stderr)
+
+        # 3. Approve as a human -> live Stop hook automatically blocks both Claude (exit 2) and Antigravity (continue).
+        learn.approve_rule(store_path, entry["id"], approved_by="maintainer")
+
+        proc_claude_block = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_claude_block.returncode, 2)
+        self.assertIn("LEARNED-L-001", proc_claude_block.stderr)
+
+        proc_agy_block = self._run_hook(
+            "--harness",
+            "antigravity",
+            "--no-budget",
+            stdin_text=json.dumps({
+                "hookEventName": "Stop",
+                "cwd": str(self.repo),
+                "terminationReason": "NO_TOOL_CALL",
+                "continuationActive": False,
+            }),
+            include_repo_root=False,
+        )
+        self.assertEqual(proc_agy_block.returncode, 0, msg=proc_agy_block.stderr)
+        agy_out = json.loads(proc_agy_block.stdout)
+        self.assertEqual(agy_out["decision"], "continue")
+        self.assertIn("LEARNED-L-001", agy_out["reason"])
+
+        # 4. Valid neighbouring code passes cleanly under the approved rule.
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n"
+            "    seconds = float(elapsed_ms) / 1000.0\n"
+            "    return int(seconds) + a + b\n",
+            encoding="utf-8",
+        )
+        proc_valid = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_valid.returncode, 0, msg=proc_valid.stderr)
+
+        # 5. Retiring the rule stops enforcement cleanly.
+        learn.retire_rule(store_path, entry["id"], reason="Superseded by static Cents typing.")
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n"
+            "    total = float(cents) / 100.0\n"
+            "    return int(total) + a + b\n",
+            encoding="utf-8",
+        )
+        proc_retired = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_retired.returncode, 0, msg=proc_retired.stderr)
+
 
 class HookExamplesIntegrityTests(unittest.TestCase):
     def test_example_hook_json_configs_are_valid_and_wire_wrapper(self) -> None:

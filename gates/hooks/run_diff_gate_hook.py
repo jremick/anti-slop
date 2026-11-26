@@ -437,6 +437,7 @@ def run_diff_gate(
     no_budget: bool = False,
     max_net_loc: Optional[int] = None,
     max_files: Optional[int] = None,
+    learned_rules: Optional[Path | str] = None,
 ) -> Tuple[int, str]:
     """Run gates/diff_check.py on git diff and map violations to code 2."""
     if diff_text is None:
@@ -473,6 +474,16 @@ def run_diff_gate(
             cmd.extend(["--max-net-loc", str(max_net_loc)])
         if max_files is not None:
             cmd.extend(["--max-files", str(max_files)])
+
+    effective_learned_rules: Optional[Path] = None
+    if learned_rules is not None:
+        effective_learned_rules = Path(learned_rules)
+    else:
+        default_store = repo_root / ".anti-slop" / "learned" / "rules.json"
+        if default_store.is_file():
+            effective_learned_rules = default_store
+    if effective_learned_rules is not None:
+        cmd.extend(["--learned-rules", str(effective_learned_rules)])
 
     proc = subprocess.run(
         cmd,
@@ -1026,6 +1037,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Override gates/diff_check.py --max-files budget.",
     )
     parser.add_argument(
+        "--learned-rules",
+        default=None,
+        help=(
+            "Optional path to an approved anti-slop-learn rules JSON store "
+            "(by default, auto-enforces <repo-root>/.anti-slop/learned/rules.json if present)."
+        ),
+    )
+    parser.add_argument(
         "--install",
         choices=INSTALL_CHOICES,
         default=None,
@@ -1092,6 +1111,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             no_budget=args.no_budget,
             max_net_loc=args.max_net_loc,
             max_files=args.max_files,
+            learned_rules=args.learned_rules,
         )
 
     return _emit_result(harness=harness, mode=mode, code=code, message=message)
