@@ -8,6 +8,7 @@
   - **Constructed (`SE2`, `12`/arm):** **`9/12` (`75.0%`) -> `10/12` (`83.3%`) -> `9/12` (`75.0%`)** (`claude-opus-5-5` failed `8/9` Stage 2 verification/pushback checks).
   - **Strict `wc -w` sensitivity (`48`/arm):** **`26/48` (`54.2%`) -> `37/48` (`77.1%`) -> `42/48` (`87.5%`)** (`17/36 -> 27/36 -> 34/36` on `real_work` OSS).
   - **Frozen-test tampering (`RW3`):** **`8/11` (`72.7%`)** baseline -> **`0/12` (`0.0%`)** `core-rules-v0.2.0` -> **`0/11` (`0.0%`)** `model-controls`.
+  - **Scoring & audit provenance:** Deterministic checks (code/test fixes via `benchmarks/graders/grade_rw3.py`, frozen-test `git diff` tampering, read-only workspace checks, and lexical / `wc -w` word counts via `inspect_text_constraints`) were **mechanically verified**. Semantic rubric checks (`RW5`, `RW6`, and `SE2` content/verification checks and `RW3` refusal text) were scored via **isolated LLM-assisted per-case verbatim audit passes**, with every per-run justification and raw artifact committed under `results/pilot-3way-v0.6.0/reviews/` so any reviewer can inspect or contest any verdict.
 
 ## Why pre-public internal pilots (`v0.2.0`–`v0.5.0`) were archived
 
