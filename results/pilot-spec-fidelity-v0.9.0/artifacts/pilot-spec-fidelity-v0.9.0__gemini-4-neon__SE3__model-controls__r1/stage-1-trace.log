@@ -1,0 +1,27 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "f630eeae-a2df-41aa-9658-e9beb121b12c", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 137549, "cost_usd": null}
+RC: 0
+STDOUT:
+Fixed both spec-fidelity defects using the Python standard library only:
+
+- [matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/matcher.py#L30-L77): Removed the hardcoded `PROTECTED_FIELDS` exclusion so `compile_active_rules` preserves all user-declared fields by default, retained verbatim non-empty `source_excerpt` verification per source, and implemented opt-in `excluded_fields` filtering (dropping only excluded clauses and keeping remaining valid clauses, or dropping the whole source when `drop_whole_item=True` or no clauses remain).
+- [runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/runner.py#L24-L64): Removed `DEFAULT_MAX_PROMPT_BYTES`, `DEFAULT_MAX_TOOLS`, and `FAST_PATH_BYTE_CUTOFF` (`single_token_fallback`) so `prepare_request` routes arbitrary local payloads on `execution_mode="fast_tensor"` with `truncated=False` when bounds are `None`, while strictly validating explicit `max_prompt_bytes` (strictly positive non-bool `int`) and `max_tools` (non-negative non-bool `int`) and raising `ValueError` on violations.
+
+### Verification (`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py`)
+
+```text
+test_caller_opt_in_excluded_fields_preserves_remaining_clauses (test_fidelity.SpecFidelityMatcherTests) ... ok
+test_honors_skin_tone_ethnicity_and_paired_traits_by_default (test_fidelity.SpecFidelityMatcherTests) ... ok
+test_explicit_caller_bounds_are_enforced (test_fidelity.SpecFidelityRunnerTests) ... ok
+test_large_local_payload_runs_fast_tensor_without_hardcoded_caps (test_fidelity.SpecFidelityRunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```
+
+Exit code: `0`. Additional ad-hoc edge-case assertions (stale excerpts, empty `excluded_fields`, `bool`/zero/negative bounds, UTF-8 byte limits) also passed.
+
+STDERR:
+

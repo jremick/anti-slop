@@ -1,0 +1,4 @@
+- `matcher.py` honors all declared preference fields by default. Caller-supplied `excluded_fields` removes matching clauses and preserves the rest. With `drop_whole_item=True`, any matching exclusion drops the entire item. Excerpt verification still applies to every clause in the source.
+- `runner.py` uses `fast_tensor` for all valid requests. Callers can set `max_prompt_bytes` to a positive integer and `max_tools` to a non-negative integer. Invalid or exceeded bounds raise `ValueError`.
+
+Zero hardcoded field exclusions or capacity caps remain. `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited `0` with `Ran 4 tests in 0.000s` and `OK`. Additional excerpt, UTF-8 byte limit, and invalid-bound checks passed.

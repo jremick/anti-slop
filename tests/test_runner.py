@@ -1258,6 +1258,75 @@ class RunnerIntegrityTests(unittest.TestCase):
         pairs = benchmark.comparable_pairs([rec_clean, rec_trap], "invariant-comments", "comment-traps")
         self.assertEqual(len(pairs), 1)
 
+    def test_se3_runner_wiring_autopopulates_checks_and_pins_d_opu_5(self) -> None:
+        cases = benchmark.load_cases(REPO_ROOT / "benchmarks" / "cases", REPO_ROOT)
+        se3_case = cases[("SE3", "0.8.0")]
+
+        # Dry-run verifies D-OPU-5 is scoped strictly to claude-opus-5-5 in model-controls.
+        out_root = self.root / "out_se3"
+        rc = run_benchmark.main([
+            "--experiment-id", "dry-se3",
+            "--cases", "SE3",
+            "--models", "claude-opus-5-5", "gpt-6.2-astra",
+            "--conditions", "baseline", "core-rules-v0.2.0", "model-controls",
+            "--output-root", str(out_root),
+            "--dry-run",
+        ])
+        self.assertEqual(rc, 0)
+        opus_cond = (out_root / "dry-se3" / "conditions" / "model-controls__claude-opus-5-5.txt").read_text(encoding="utf-8")
+        astra_cond = (out_root / "dry-se3" / "conditions" / "model-controls__gpt-6.2-astra.txt").read_text(encoding="utf-8")
+        self.assertIn("D-OPU-5:", opus_cond)
+        self.assertNotIn("D-OPU-5:", astra_cond)
+
+        # Auto-population covers all three mechanical checks for pass, fail, and load error.
+        rep1_ok = {
+            "passed": True,
+            "checks": [
+                {"id": "no_unrequested_constraints_or_cheats", "passed": True, "detail": "ok"},
+                {"id": "spec_fidelity_verified", "passed": True, "detail": "ok"},
+            ],
+        }
+        rep2_ok = {
+            "passed": True,
+            "checks": [
+                {"id": "no_unrequested_constraints_or_cheats", "passed": True, "detail": "ok"},
+                {"id": "spec_fidelity_verified", "passed": True, "detail": "ok"},
+                {"id": "summary_credibility_and_brevity", "passed": True, "detail": "ok"},
+            ],
+        }
+        checks_ok, defects_ok = run_benchmark._auto_populate_checks(
+            se3_case, {1: (rep1_ok, "g1.json"), 2: (rep2_ok, "g2.json")}, {}
+        )
+        self.assertEqual(defects_ok, [])
+        self.assertEqual(
+            {c["id"]: c["status"] for c in checks_ok},
+            {
+                "spec_fidelity_verified": "pass",
+                "no_unrequested_constraints_or_cheats": "pass",
+                "summary_credibility_and_brevity": "pass",
+            },
+        )
+
+        rep2_fail = {
+            "passed": False,
+            "checks": [
+                {"id": "no_unrequested_constraints_or_cheats", "passed": False, "detail": "PROTECTED_FIELDS"},
+                {"id": "spec_fidelity_verified", "passed": False, "detail": "dropped skin_tone"},
+                {"id": "summary_credibility_and_brevity", "passed": False, "detail": "135 > 120"},
+            ],
+        }
+        checks_fail, _ = run_benchmark._auto_populate_checks(
+            se3_case, {1: (rep1_ok, "g1.json"), 2: (rep2_fail, "g2.json")}, {}
+        )
+        self.assertEqual(
+            {c["id"]: c["status"] for c in checks_fail},
+            {
+                "spec_fidelity_verified": "fail",
+                "no_unrequested_constraints_or_cheats": "fail",
+                "summary_credibility_and_brevity": "fail",
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

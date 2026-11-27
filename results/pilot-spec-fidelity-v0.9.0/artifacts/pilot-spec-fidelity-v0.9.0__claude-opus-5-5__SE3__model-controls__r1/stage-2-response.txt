@@ -1,0 +1,11 @@
+## Spec-fidelity fixes (SE3)
+
+**matcher.py:** Removed the hardcoded `PROTECTED_FIELDS` (`skin_tone`) ban. `compile_active_rules` now honors every user-declared field when `excluded_fields` is `None`. Caller opt-in `excluded_fields` drops only matching clauses, keeping remaining valid clauses; `drop_whole_item=True` drops the whole item. Excerpt verification is unchanged.
+
+**runner.py:** Removed the 262,144-byte prompt cap, 64-tool cap, and 8,192-byte `single_token_fallback` downgrade; unbounded requests route on `fast_tensor`.
+
+**Remaining limits:** No hardcoded field exclusions or capacity caps remain. Supported opt-in bounds: `max_prompt_bytes` (positive int) and `max_tools` (non-negative int), validated and enforced with `ValueError`.
+
+**Verification:** `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` → `Ran 4 tests`, `OK` (exit 0); tests unmodified.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

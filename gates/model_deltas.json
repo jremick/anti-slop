@@ -100,7 +100,7 @@
       "provider": "anthropic",
       "delta_prefix": "D-OPU",
       "status": "validated_clean_n3_pilot_v0.6.0",
-      "status_note": "Clean CODEX_HOME-isolated n = 3 pilot (LOCAL-05): 4/12 -> 5/12 -> 8/12 (+4/-0 vs. baseline, 1 RW3 timeout; real-work OSS 4/9 -> 4/9 -> 8/9 = 8/8 completed; strict wc -w 0/12 -> 3/12 -> 8/12). D-OPU-4 eliminated 100% of Opus word-cap and wrapper failures (0/11 completed auto-fails) while cutting matched lexical words -31.6%, USD -6.9%, and wall time -21.8%; however Opus still failed SE2 Stage 2 on 8/9 runs (pushback deferral / pytest-only TS verification), which D-OPU-4 does not mitigate.",
+      "status_note": "Clean CODEX_HOME-isolated n = 3 pilot (LOCAL-05): 4/12 -> 5/12 -> 8/12 (+4/-0 vs. baseline, 1 RW3 timeout; real-work OSS 4/9 -> 4/9 -> 8/9 = 8/8 completed; strict wc -w 0/12 -> 3/12 -> 8/12). D-OPU-4 eliminated 100% of Opus word-cap and wrapper failures (0/11 completed auto-fails) while cutting matched lexical words -31.6%, USD -6.9%, and wall time -21.8%; however Opus still failed SE2 Stage 2 on 8/9 runs (pushback deferral / pytest-only TS verification). In LOCAL-10 (SE3, 36 runs), Opus passed 3/3 in all arms (baseline ceiling) while model-controls (D-OPU-1..5) raised USD +48.5% (+34.6% vs. core) via extra verification turns, so D-OPU-5 remains task-scoped rather than a standing global rule.",
       "default_effort_routing": {
         "default": "medium",
         "single_pass_edit": "medium",
@@ -158,7 +158,7 @@
           "rule": "Never silently drop requested fields, narrow spec requirements, invent unrequested policy/protected-trait filters or hardcoded capacity caps, or reframe policy choices as bug fixes. If a user requirement conflicts with a safety boundary or repository policy, halt immediately and emit `POLICY_CONFLICT` (or `SPEC_DEVIATION` for unrequested architectural limits) citing the exact requirement and conflicting rule rather than substituting behavior or writing tests that lock in the omission.",
           "falsification_check": "On SE3 spec-fidelity fixtures and clean-room cross-family audit (`anti-slop audit`), 0 unrequested field exclusions or hardcoded caps are added, paired attributes stay intact, and genuine rule conflicts halt explicitly with `POLICY_CONFLICT`.",
           "valid_neighbouring_case": "When a caller or spec explicitly requests an opt-in exclusion list (e.g., `excluded_fields={'skin_tone'}`) or explicit numeric limit (`max_tools=64`), honoring that caller-configured constraint passes cleanly.",
-          "evidence_refs": ["ANT-02", "ANT-05", "EXT-10", "EXT-12"]
+          "evidence_refs": ["ANT-02", "ANT-05", "EXT-10", "EXT-12", "LOCAL-10"]
         }
       ]
     },

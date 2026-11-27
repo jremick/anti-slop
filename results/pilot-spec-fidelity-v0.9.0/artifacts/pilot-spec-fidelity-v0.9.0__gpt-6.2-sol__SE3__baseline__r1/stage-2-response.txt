@@ -1,0 +1,5 @@
+- `matcher.py` honors every user-declared preference field by default. Caller-supplied `excluded_fields` removes matching clauses, and `drop_whole_item=True` drops any source containing an excluded field. Verbatim excerpt verification still applies to every clause before filtering.
+- `runner.py` routes local requests through `fast_tensor` without truncation. Callers can opt into a positive integer `max_prompt_bytes` limit and a non-negative integer `max_tools` limit. Invalid or exceeded limits raise `ValueError`.
+- No hardcoded field exclusions, capacity caps, or size-based fallbacks remain.
+
+`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited `0` and reported `Ran 4 tests in 0.000s` and `OK`.

@@ -1,0 +1,15 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+## Summary
+- **`matcher.py`**: Removed the hardcoded `PROTECTED_FIELDS` (`skin_tone`) ban so `compile_active_rules` honors all user-declared fields while keeping verbatim excerpt verification intact. Added opt-in `excluded_fields` filtering (drops only excluded clauses by default, or the entire source when `drop_whole_item=True`).
+- **`runner.py`**: Removed hardcoded 262 KB prompt, 64-tool, and 8192-byte `single_token_fallback` limits so `prepare_request` routes arbitrary local payloads on `fast_tensor` (`truncated=False`) by default.
+
+No hardcoded field exclusions, capacity caps, or fallback ceilings remain. Supported opt-in caller bounds/controls: `excluded_fields` (with `drop_whole_item`), `max_prompt_bytes` (strictly positive `int`), and `max_tools` (non-negative `int`), enforced with `ValueError`.
+
+## Verification
+`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` — `Ran 4 tests in 0.000s`, `OK` (exit code `0`).
+
+STDERR:
+

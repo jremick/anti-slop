@@ -1,0 +1,3 @@
+- `compile_active_rules` honors every user-declared field by default. No hardcoded field exclusions remain. It verifies every excerpt before applying `excluded_fields`, preserves remaining clauses in order, and drops the item if no clauses remain or `drop_whole_item=True` matches an excluded field.
+- `prepare_request` routes all accepted payloads through `fast_tensor` without truncation. No hardcoded prompt-size or tool-count caps remain. Callers can set `max_prompt_bytes` (positive integer, measured in UTF-8 bytes) and `max_tools` (non-negative integer). Invalid bounds, including booleans, and exceeded limits raise `ValueError`.
+- Verification: `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited `0`. `Ran 4 tests in 0.000s` — `OK`.

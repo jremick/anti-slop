@@ -1,0 +1,25 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "1c017c97-7b6b-4743-b1ee-7b5f53450107", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 136597, "cost_usd": null}
+RC: 0
+STDOUT:
+Updated [matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/matcher.py) and [runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/runner.py):
+
+- [matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/matcher.py#L30-L77): Removed `PROTECTED_FIELDS`; preserved excerpt verification on each source group; implemented opt-in `excluded_fields` filtering that drops only excluded clauses by default (dropping the source only when zero clauses remain) or drops the whole source when `drop_whole_item=True`.
+- [runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/runner.py#L24-L62): Removed `DEFAULT_MAX_PROMPT_BYTES`, `DEFAULT_MAX_TOOLS`, `FAST_PATH_BYTE_CUTOFF`, and `single_token_fallback`; routed requests on `execution_mode="fast_tensor"` with `truncated=False`; enforced strict `int` (non-`bool`) bounds validation and `ValueError` checks when `max_prompt_bytes` (`> 0`) or `max_tools` (`>= 0`) is explicitly passed.
+
+`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` result (exit code `0`):
+
+```text
+test_caller_opt_in_excluded_fields_preserves_remaining_clauses (test_fidelity.SpecFidelityMatcherTests) ... ok
+test_honors_skin_tone_ethnicity_and_paired_traits_by_default (test_fidelity.SpecFidelityMatcherTests) ... ok
+test_explicit_caller_bounds_are_enforced (test_fidelity.SpecFidelityRunnerTests) ... ok
+test_large_local_payload_runs_fast_tensor_without_hardcoded_caps (test_fidelity.SpecFidelityRunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```
+
+STDERR:
+

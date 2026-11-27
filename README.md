@@ -57,7 +57,7 @@ Compounding Slop Risks (Review Before Merging)
 
 ## Key Value Gains at a Glance
 
-Across `288` isolated public runs on 4 frontier models (`n = 3` per condition, zero word caps on the multi-turn builds), automated checks outperformed standing prompt rules alone in both Python and TypeScript:
+Across `324` isolated public runs on 4 frontier models (`n = 3` per condition, zero word caps on the multi-turn builds), automated checks outperformed standing prompt rules alone in both Python and TypeScript:
 
 | What we tested (4 frontier models, `n = 3`) | Without `anti-slop` | Standing prompts alone | With automated checks | Report |
 |---|---:|---:|---:|---|
@@ -65,6 +65,7 @@ Across `288` isolated public runs on 4 frontier models (`n = 3` per condition, z
 | **TypeScript 4-step feature builds** | `58%` clean (`7/12`, `10` slop) | `67%` clean (`8/12`, `+13%` tokens) | **`100%` clean (`12/12`, `0` slop, `-10%` tokens vs. prompts)** | [TypeScript `EV2`](results/pilot-ts-evolution-v0.8.0/README.md) |
 | **Skipped tests under release pressure** | `73%` tampered (`8/11`) | `0%` tampered (`0/12`) | **`0%` tampered (`0/23` ruled)** | [Integrity `RW3`](results/pilot-3way-v0.6.0/README.md) |
 | **Code comments (2 ablation suites)** | `100%` accuracy (baseline) | Short "why" notes ran fastest (`-4.5%` to `-6.8%` time) | Junk comment traps added `+16%` to `+32%` Opus cost | [CM1](results/pilot-comments-v0.7.0/README.md) · [CM2](results/pilot-comments-v0.8.0/README.md) |
+| **Spec-fidelity bug removal (`SE3`)** | `100%` clean (`12/12`, baseline ceiling) | Extra `model-controls` added `+48.5%` Opus USD (`+0` lift) | Cross-family `anti-slop audit` caught `4` high / `2` med seeded defects at `0` standing prompt tokens | [Spec Fidelity `SE3`](results/pilot-spec-fidelity-v0.9.0/README.md) |
 
 *Why Python scored `92%` with `0` slop:* Every gated Python run finished with working features and zero slop defects (`75 -> 0`), and `11/12` passed the `65%` mutation test-strength bar; one run caught `60%` of injected bugs because diff mutation (`anti-slop mutate`) was not yet wired into the automatic fix loop.
 
@@ -89,7 +90,7 @@ Across `288` isolated public runs on 4 frontier models (`n = 3` per condition, z
   <img alt="Empirical results across 144 runs showing core rules cutting frozen-test tampering from 72.7% to 0%, core matching per-model overlays on 3 of 4 models, and Opus brevity and SE2 findings" src="docs/assets/pilot-v0.6.0-results-light.svg">
 </picture>
 
-- **Isolation and scoring:** All five datasets (`288` total runs) executed in clean temp workspaces outside this repo with isolated `CODEX_HOME`/`HOME` and deterministic sanitization (`0` host paths, usernames, or secrets). Both multi-turn evolution suites (`EV1`, `EV2`) and both comment ablations (`CM1`, `CM2`) are **100% mechanically graded** with zero LLM judging and zero word caps. Full tables, token/cost breakdowns, and raw transcripts live in [results/README.md](results/README.md).
+- **Isolation and scoring:** All six datasets (`324` total runs) executed in clean temp workspaces outside this repo with isolated `CODEX_HOME`/`HOME` and deterministic sanitization (`0` host paths, usernames, or secrets). Both multi-turn evolution suites (`EV1`, `EV2`), both comment ablations (`CM1`, `CM2`), and the spec-fidelity suite (`SE3`) are **100% mechanically graded** with zero LLM judging. Full tables, token/cost breakdowns, and raw transcripts live in [results/README.md](results/README.md).
 
 </details>
 
@@ -196,10 +197,10 @@ Full rule IDs, valid neighbouring cases, and linter comparisons live in [gates/R
 
 ### What backs these claims today
 
-- **Re-checkable public benchmarks (`288` runs):** Five isolated `n = 3` public datasets across 4 frontier models, with mechanical graders, raw transcripts, and verification scripts committed under [results/README.md](results/README.md) and [benchmarks/README.md](benchmarks/README.md).
+- **Re-checkable public benchmarks (`324` runs):** Six isolated `n = 3` public datasets across 4 frontier models, with mechanical graders, raw transcripts, and verification scripts committed under [results/README.md](results/README.md) and [benchmarks/README.md](benchmarks/README.md).
 - **Live-verified research citations (`42` papers and studies):** Every external claim in [docs/evidence.md](docs/evidence.md) and [docs/ai-era-rules.md](docs/ai-era-rules.md) is date-stamped and verified directly against arXiv metadata, publisher records, and upstream pages.
 - **Real OSS precision audits (`150` commits across `urllib3`, `tomlkit`, and `hono`):** `0` false positives on architectural detectors (`ARCH-*`) and commented-out code (`7/7` real runtime circular imports caught in `hono` HEAD), `96.7%` clean pass rate on non-size structural rules, and `0` parser false positives on blocking diff checks ([gates/README.md](gates/README.md#real-world-oss-precision-audit)).
-- **Auditable zero-dependency verification:** Run `python3 -B scripts/check.py` locally (Python 3.11+, plus Node 24+ for JS/TS mutation tests, zero network calls) to validate all `29` cases, `9` pilot manifests, `288` run records, the rule library catalog, and all `225` tests.
+- **Auditable zero-dependency verification:** Run `python3 -B scripts/check.py` locally (Python 3.11+, plus Node 24+ for JS/TS mutation tests, zero network calls) to validate all `29` cases, `10` pilot manifests, `324` run records, the rule library catalog, and all `226` tests.
 
 ### What still needs stronger proof (roadmap toward `v1.0`)
 

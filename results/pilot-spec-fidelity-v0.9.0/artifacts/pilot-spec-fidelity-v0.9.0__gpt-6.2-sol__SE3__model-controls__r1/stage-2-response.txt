@@ -1,0 +1,4 @@
+- `matcher.py` honors every user-declared field by default. `excluded_fields` removes only matching clauses unless `drop_whole_item=True`. Excerpt validation still checks every clause in the source. No hardcoded field exclusions remain.
+- `runner.py` uses `fast_tensor` without truncation, hardcoded capacity caps, or a size-based fallback. Callers can set `max_prompt_bytes` (positive integer, measured in UTF-8 bytes) and `max_tools` (non-negative integer). Invalid or exceeded limits raise `ValueError`.
+
+`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited `0`: `Ran 4 tests in 0.000s`, `OK`. Additional edge checks passed. `git status` was unavailable because the workspace had no Git repository.

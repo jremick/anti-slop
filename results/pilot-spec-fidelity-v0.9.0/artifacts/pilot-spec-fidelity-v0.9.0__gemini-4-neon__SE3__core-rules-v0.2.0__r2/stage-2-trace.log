@@ -1,0 +1,15 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Fix two spec-fidelity defects in `benchmarks/sources/se3_spec_fidelity/` (standard library only):
+
+- **`matcher.py` (`compile_active_rules`)**: Removed the hardcoded `PROTECTED_FIELDS` (`skin_tone`) ban while preserving verbatim excerpt verification. Added caller opt-in `excluded_fields` filtering (clause-level by default; full-item drop with `drop_whole_item=True`).
+- **`runner.py` (`prepare_request`)**: Removed hardcoded 262KB prompt, 64-tool, and 8192-byte `single_token_fallback` limits so arbitrary local payloads run on `execution_mode="fast_tensor"` with `truncated=False`. Added strict `ValueError` validation and enforcement for opt-in `max_prompt_bytes` (strictly positive `int`, non-`bool`) and `max_tools` (non-negative `int`, non-`bool`).
+
+No hardcoded field exclusions or capacity caps remain.
+
+**Verification:** `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` passed (`Ran 4 tests`, `OK`, exit code `0`).
+
+STDERR:
+

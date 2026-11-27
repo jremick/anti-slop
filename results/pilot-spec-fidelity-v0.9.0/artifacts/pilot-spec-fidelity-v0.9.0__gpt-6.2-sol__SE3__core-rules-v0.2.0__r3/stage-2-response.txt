@@ -1,0 +1,3 @@
+- The matcher honors all declared preference fields by default. `excluded_fields` removes only matching clauses unless `drop_whole_item=True`. Excerpt verification still applies to every clause before filtering.
+- The runner routes large local payloads through `fast_tensor` with `truncated=False`. No hardcoded field exclusions, capacity caps, or size-triggered fallbacks remain. Callers can opt into a positive integer UTF-8 `max_prompt_bytes` limit and a non-negative integer `max_tools` limit. Invalid or exceeded limits raise `ValueError`.
+- `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited 0 with `Ran 4 tests in 0.000s` and `OK`. Additional edge checks passed.

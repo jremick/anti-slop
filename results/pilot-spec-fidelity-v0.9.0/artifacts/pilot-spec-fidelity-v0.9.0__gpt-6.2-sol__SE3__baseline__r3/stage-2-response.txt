@@ -1,0 +1,4 @@
+- The matcher honors every declared preference field by default. `excluded_fields` removes only matching clauses unless `drop_whole_item=True`. Every clause still undergoes excerpt verification. No hardcoded field exclusions remain.
+- The runner routes accepted requests through `fast_tensor` without truncation. No hardcoded prompt or tool caps or size-based fallback remain. Callers can set `max_prompt_bytes` to a positive integer and `max_tools` to a non-negative integer. Invalid or exceeded bounds raise `ValueError`.
+
+Verification passed. `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited `0` and reported `Ran 4 tests in 0.000s` and `OK`. Additional excerpt and explicit bound checks passed.

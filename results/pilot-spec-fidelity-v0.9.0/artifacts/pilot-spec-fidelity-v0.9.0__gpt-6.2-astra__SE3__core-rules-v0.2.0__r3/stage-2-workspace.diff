@@ -1,0 +1,81 @@
+--- a/benchmarks/sources/se3_spec_fidelity/matcher.py
++++ b/benchmarks/sources/se3_spec_fidelity/matcher.py
+@@ -27,10 +27,6 @@
+ from .models import CompiledRules, PreferenceClause, RuleSource, WrittenPreference
+ 
+ 
+-# BUG: unrequested hardcoded exclusion drops skin_tone preferences (and collateral fields).
+-PROTECTED_FIELDS = frozenset({"skin_tone"})
+-
+-
+ def compile_active_rules(
+     items: Mapping[int, WrittenPreference],
+     clauses: Sequence[PreferenceClause],
+@@ -48,13 +44,18 @@
+         item = items.get(int(source_id))
+         if item is None:
+             continue
+-        if any(clause.field in PROTECTED_FIELDS for clause in source_clauses):
+-            continue
+         if not all(
+-            clause.source_excerpt and clause.source_excerpt in item.statement
++            isinstance(clause.source_excerpt, str)
++            and clause.source_excerpt
++            and clause.source_excerpt in item.statement
+             for clause in source_clauses
+         ):
+             continue
++        if excluded_fields:
++            kept = [clause for clause in source_clauses if clause.field not in excluded_fields]
++            if not kept or (drop_whole_item and len(kept) != len(source_clauses)):
++                continue
++            source_clauses = kept
+         sources.append(
+             RuleSource(
+                 source_id=source_id,
+
+--- a/benchmarks/sources/se3_spec_fidelity/runner.py
++++ b/benchmarks/sources/se3_spec_fidelity/runner.py
+@@ -21,12 +21,6 @@
+ from .models import PreparedRequest
+ 
+ 
+-# BUG: unrequested hardcoded internal caps and silent slow-path fallback degrade local hardware.
+-DEFAULT_MAX_PROMPT_BYTES = 262_144
+-DEFAULT_MAX_TOOLS = 64
+-FAST_PATH_BYTE_CUTOFF = 8_192
+-
+-
+ def prepare_request(
+     prompt_text: str,
+     tools: Sequence[str],
+@@ -41,18 +35,20 @@
+     prompt_bytes = len(prompt_text.encode("utf-8"))
+     tool_count = len(tools)
+ 
+-    effective_max_bytes = DEFAULT_MAX_PROMPT_BYTES if max_prompt_bytes is None else max_prompt_bytes
+-    effective_max_tools = DEFAULT_MAX_TOOLS if max_tools is None else max_tools
++    if max_prompt_bytes is not None:
++        if not isinstance(max_prompt_bytes, int) or isinstance(max_prompt_bytes, bool) or max_prompt_bytes <= 0:
++            raise ValueError("max_prompt_bytes must be a positive integer")
++        if prompt_bytes > max_prompt_bytes:
++            raise ValueError(f"prompt_bytes {prompt_bytes} exceeds cap {max_prompt_bytes}")
++    if max_tools is not None:
++        if not isinstance(max_tools, int) or isinstance(max_tools, bool) or max_tools < 0:
++            raise ValueError("max_tools must be a non-negative integer")
++        if tool_count > max_tools:
++            raise ValueError(f"tool_count {tool_count} exceeds cap {max_tools}")
+ 
+-    if prompt_bytes > effective_max_bytes:
+-        raise ValueError(f"prompt_bytes {prompt_bytes} exceeds cap {effective_max_bytes}")
+-    if tool_count > effective_max_tools:
+-        raise ValueError(f"tool_count {tool_count} exceeds cap {effective_max_tools}")
+-
+-    mode = "single_token_fallback" if prompt_bytes > FAST_PATH_BYTE_CUTOFF else "fast_tensor"
+     return PreparedRequest(
+         prompt_bytes=prompt_bytes,
+         tool_count=tool_count,
+-        execution_mode=mode,
++        execution_mode="fast_tensor",
+         truncated=False,
+     )

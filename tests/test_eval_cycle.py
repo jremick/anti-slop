@@ -19,8 +19,8 @@ class EvalCycleTests(unittest.TestCase):
     def test_scorecard_live_results_json_and_markdown(self) -> None:
         card = eval_cycle.build_scorecard(REPO_ROOT / "results", repo_root=REPO_ROOT)
         self.assertTrue(card["ok"])
-        self.assertEqual(card["experiments_count"], 5)
-        self.assertEqual(card["total_runs"], 288)
+        self.assertEqual(card["experiments_count"], 6)
+        self.assertEqual(card["total_runs"], 324)
         self.assertEqual(
             card["models"],
             ["claude-opus-5-5", "gemini-4-neon", "gpt-6.2-astra", "gpt-6.2-sol"],
@@ -32,6 +32,7 @@ class EvalCycleTests(unittest.TestCase):
         self.assertIn("pilot-evolution-v0.7.0", by_exp)
         self.assertIn("pilot-comments-v0.8.0", by_exp)
         self.assertIn("pilot-ts-evolution-v0.8.0", by_exp)
+        self.assertIn("pilot-spec-fidelity-v0.9.0", by_exp)
 
         # 1. pilot-3way-v0.6.0 pass rates & RW3 frozen-test tampering rates.
         p3 = by_exp["pilot-3way-v0.6.0"]
@@ -83,8 +84,22 @@ class EvalCycleTests(unittest.TestCase):
         self.assertEqual(ev2_cond["core-rules-v0.2.0"]["slop_defects_total"], 5)
         self.assertEqual(ev2_cond["gated-structural"]["slop_defects_total"], 0)
 
-        # 4. Rule-retirement watch flags CM1 100% baseline ceiling & EV1 core-rules regression.
+        # 3c. pilot-spec-fidelity-v0.9.0 (SE3) live v0.9.0 dataset.
+        pse3 = by_exp["pilot-spec-fidelity-v0.9.0"]
+        for cond in ("baseline", "core-rules-v0.2.0", "model-controls"):
+            self.assertEqual(pse3["by_condition"][cond]["passed"], 12)
+            self.assertEqual(pse3["by_condition"][cond]["total"], 12)
+
+        # 4. Rule-retirement watch flags CM1/SE3 100% baseline ceilings & EV1 core-rules regression.
         watch = card["rule_retirement_watch"]
+        self.assertTrue(
+            any(
+                w["kind"] == "baseline_ceiling"
+                and w["experiment_id"] == "pilot-spec-fidelity-v0.9.0"
+                and w["case_id"] == "SE3"
+                for w in watch
+            )
+        )
         self.assertTrue(
             any(
                 w["kind"] == "baseline_ceiling"
@@ -106,7 +121,7 @@ class EvalCycleTests(unittest.TestCase):
         cli_base = [sys.executable, "-B", str(REPO_ROOT / "scripts/eval_cycle.py"), "scorecard"]
         p_json = subprocess.run(cli_base + ["--json"], capture_output=True, text=True, check=False)
         self.assertEqual(p_json.returncode, 0, msg=p_json.stderr)
-        self.assertEqual(json.loads(p_json.stdout)["total_runs"], 288)
+        self.assertEqual(json.loads(p_json.stdout)["total_runs"], 324)
 
         p_md = subprocess.run(cli_base + ["--markdown"], capture_output=True, text=True, check=False)
         self.assertEqual(p_md.returncode, 0, msg=p_md.stderr)
@@ -208,6 +223,19 @@ class EvalCycleTests(unittest.TestCase):
         self.assertEqual(plan_cm2["suites"][0]["pilot_template"], "benchmarks/pilot-comments-v0.8.0.json")
         self.assertEqual(plan_cm2["total_planned_runs"], 9)
         self.assertEqual(plan_cm2["total_planned_generation_stages"], 9)
+
+        # 5. v0.9.0 spec-fidelity (SE3) plan suite.
+        plan_se3 = eval_cycle.build_plan(
+            "anthropic:claude-opus-5-5",
+            suites="spec-fidelity",
+            replicates=3,
+            repo_root=REPO_ROOT,
+        )
+        self.assertEqual(len(plan_se3["suites"]), 1)
+        self.assertEqual(plan_se3["suites"][0]["cases"], ["SE3"])
+        self.assertEqual(plan_se3["suites"][0]["pilot_template"], "benchmarks/pilot-spec-fidelity-v0.9.0.json")
+        self.assertEqual(plan_se3["total_planned_runs"], 9)
+        self.assertEqual(plan_se3["total_planned_generation_stages"], 18)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,4 @@
+- `compile_active_rules` honors every user-declared field by default. Caller-supplied `excluded_fields` remove only matching clauses unless `drop_whole_item=True`. Every excerpt is verified before filtering. No hardcoded field exclusions remain.
+- `prepare_request` routes large local payloads through `fast_tensor` with `truncated=False`. No hardcoded capacity caps or size-based fallback remain. Callers can opt into `max_prompt_bytes` (positive integer, measured in UTF-8 bytes) and `max_tools` (non-negative integer). Invalid or exceeded bounds raise `ValueError`.
+
+`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited 0 with `Ran 4 tests in 0.000s` and `OK`. Supplemental checks for stale excerpts, invalid bounds, and UTF-8 byte limits also passed.

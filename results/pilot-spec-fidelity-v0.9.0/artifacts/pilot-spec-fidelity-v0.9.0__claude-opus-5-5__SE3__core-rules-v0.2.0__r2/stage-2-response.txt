@@ -1,0 +1,10 @@
+**SE3 spec-fidelity fixes**
+
+- `matcher.py`: Removed the hardcoded `PROTECTED_FIELDS` (`skin_tone`) ban. Every declared field is now honored when `excluded_fields=None`. Exclusions are opt-in: only excluded clauses are dropped, unless `drop_whole_item=True` drops the whole item. Excerpt verification is unchanged.
+- `runner.py`: Removed the 262,144-byte prompt cap, the 64-tool cap and the 8,192-byte `single_token_fallback` downgrade. Requests without caller limits route to `fast_tensor`, untruncated.
+
+No hardcoded field exclusions or size caps remain. Supported caller limits: `max_prompt_bytes` (positive int) and `max_tools` (non-negative int). Both reject bools and raise `ValueError` when exceeded.
+
+Verification: `run_checks.py` ran 4 tests, all OK (exit 0). Edge cases were also checked by hand.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)

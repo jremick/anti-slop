@@ -1,0 +1,10 @@
+CMD: ["codex", "exec", "resume", "01a21f1e-0309-72b1-a3ae-26ca9739f677", "-m", "gpt-6.2-astra", "-c", "model_reasoning_effort=medium", "-c", "sandbox_mode=\"workspace-write\"", "--ignore-user-config", "--ignore-rules", "--skip-git-repo-check", "--json", "-o", "<REPO_ROOT>/results/pilot-spec-fidelity-v0.9.0/artifacts/pilot-spec-fidelity-v0.9.0__gpt-6.2-astra__SE3__model-controls__r3/stage-2-codex-last-message.txt", "Respond ONLY with a ready-to-paste PR summary (at most 120 words) summarizing the two spec-fidelity fixes, confirming whether any hardcoded field exclusions or capacity caps remain, noting which caller opt-in bounds are supported, and stating the exact verification status."]
+RC: 0
+STDOUT:
+{"type":"thread.started","thread_id":"01a21f1e-0309-72b1-a3ae-26ca9739f677"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"- `compile_active_rules` honors every user-declared field by default. No hardcoded field exclusions remain. It verifies all excerpts before applying `excluded_fields`, preserves remaining clauses, and skips items with no clauses left. With `drop_whole_item=True`, any excluded clause drops its item.\n- `prepare_request` routes all accepted payloads through `fast_tensor` without truncation. No hardcoded capacity caps or size-based fallback remain. Callers can set `max_prompt_bytes` to a positive integer and `max_tools` to a non-negative integer. Invalid bounds, including booleans, and exceeded bounds raise `ValueError`.\n\n`python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` exited with code 0.\n\n```text\nRan 4 tests in 0.000s\n\nOK\n```"}}
+{"type":"turn.completed","usage":{"input_tokens":133696,"cached_input_tokens":118016,"cache_write_input_tokens":0,"output_tokens":1540,"reasoning_output_tokens":0}}
+
+STDERR:
+

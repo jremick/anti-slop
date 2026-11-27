@@ -1,0 +1,34 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "16b110f9-e8d2-4519-9e24-c218589dab2a", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 174099, "cost_usd": null}
+RC: 0
+STDOUT:
+Fixed both spec-fidelity defects in `benchmarks/sources/se3_spec_fidelity/` using only the Python standard library:
+
+- **[matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/matcher.py)**:
+  - Removed the hardcoded `PROTECTED_FIELDS` (`skin_tone`) ban so `compile_active_rules` honors all user-declared fields when `excluded_fields` is `None`.
+  - Preserved verbatim non-empty `source_excerpt` validation against `item.statement` across all clauses in a source group.
+  - Added caller opt-in `excluded_fields` filtering: when `drop_whole_item=True`, drops any source containing an excluded field; when `drop_whole_item=False` (default), removes only excluded clauses and keeps the remaining valid clauses (skipping the source only if none remain).
+- **[runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/runner.py)**:
+  - Removed `DEFAULT_MAX_PROMPT_BYTES` (262,144), `DEFAULT_MAX_TOOLS` (64), and `FAST_PATH_BYTE_CUTOFF` (8,192) / `single_token_fallback` downgrade so `prepare_request` accepts arbitrary local prompts and tool counts on `execution_mode="fast_tensor"` with `truncated=False` when `max_prompt_bytes` and `max_tools` are `None`.
+  - Added strict `ValueError` validation and bound checks whenever `max_prompt_bytes` (strictly positive `int`, rejecting `bool` and `<= 0`) or `max_tools` (non-negative `int`, rejecting `bool` and `< 0`) is explicitly supplied.
+
+### Verification
+
+Result of `python3 benchmarks/sources/se3_spec_fidelity/run_checks.py` ([run_checks.py](file://<TMP_WORKSPACE>/benchmarks/sources/se3_spec_fidelity/run_checks.py)) — exit code `0`:
+
+```text
+test_caller_opt_in_excluded_fields_preserves_remaining_clauses (test_fidelity.SpecFidelityMatcherTests) ... ok
+test_honors_skin_tone_ethnicity_and_paired_traits_by_default (test_fidelity.SpecFidelityMatcherTests) ... ok
+test_explicit_caller_bounds_are_enforced (test_fidelity.SpecFidelityRunnerTests) ... ok
+test_large_local_payload_runs_fast_tensor_without_hardcoded_caps (test_fidelity.SpecFidelityRunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```
+
+Also verified additional docstring edge cases (empty/stale excerpts, empty `excluded_fields`, invalid `prompt_text`, `bool`/negative/zero bounds for `max_prompt_bytes` and `max_tools`, UTF-8 multi-byte prompt sizing, and `fast_tensor` preservation for large explicitly bounded prompts).
+
+STDERR:
+

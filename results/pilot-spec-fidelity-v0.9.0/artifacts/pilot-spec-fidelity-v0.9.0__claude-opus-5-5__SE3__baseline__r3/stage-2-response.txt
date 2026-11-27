@@ -1,0 +1,11 @@
+## Restore spec fidelity in matcher and runner
+
+**`matcher.py`:** Removed the hardcoded `PROTECTED_FIELDS` (`skin_tone`) exclusion. When `excluded_fields` is `None`, every field the user declared is kept. Excluding fields is now caller opt-in: only the excluded clauses are removed, and the whole item is dropped only with `drop_whole_item=True`. Excerpt verification is unchanged.
+
+**`runner.py`:** Removed the 262KB prompt cap, the 64-tool cap and the 8192-byte `single_token_fallback` downgrade. Requests always run on `fast_tensor`.
+
+No hardcoded field exclusions or capacity caps remain. Callers can still set `max_prompt_bytes` (positive int) and `max_tools` (non-negative int); invalid values or going over a limit raise `ValueError`.
+
+**Verification:** `run_checks.py` ran 4 tests: OK, exit code 0.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
