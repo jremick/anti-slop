@@ -16,7 +16,7 @@ Outputs written under `docs/assets/`:
   - hook-loop-light.svg
   - hook-loop-dark.svg
 
-Optional flag `--social-svg PATH` also writes a 1280x640 dark technical social
+Optional flag `--social-svg PATH` also writes a 1280x640 editorial light social
 preview SVG (using live metrics across pilots) for PNG rasterization.
 """
 
@@ -41,6 +41,10 @@ from benchmarks.evolution import compare_evolution_arms  # noqa: E402
 
 FONT_SANS = (
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+)
+FONT_SOCIAL_DISPLAY = (
+    "'Avenir Next', -apple-system, BlinkMacSystemFont, 'Segoe UI', "
+    "'Helvetica Neue', Helvetica, Arial, sans-serif"
 )
 FONT_MONO = (
     "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
@@ -1136,8 +1140,8 @@ def render_hook_loop_svg(theme: Theme) -> str:
         "  <!-- Header -->",
         f'  <text x="28" y="36" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">Blocking Agent Turn Loop (Stop Hook)</text>',
         f'  <text x="28" y="55" class="sans" font-size="11" fill="{t.muted}">Enforces diff and approved learned-rule gates before turn completion · zero prompt tokens, zero CI round-trip</text>',
-        f'  <rect x="720" y="23" width="212" height="24" rx="12" fill="{t.neutral_badge_bg}" stroke="{t.neutral_badge_border}"/>',
-        f'  <text x="826" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="{t.neutral_badge_ink}">Claude · Antigravity · Codex</text>',
+        f'  <rect x="698" y="23" width="234" height="24" rx="12" fill="{t.neutral_badge_bg}" stroke="{t.neutral_badge_border}"/>',
+        f'  <text x="815" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="{t.neutral_badge_ink}">Claude Code · Codex · Antigravity</text>',
         f'  <line x1="28" y1="68" x2="{width - 28}" y2="68" stroke="{t.divider}" stroke-width="1"/>',
         "",
         "  <!-- Step 1: Agent turn (x=28..284, w=256) -->",
@@ -1174,7 +1178,7 @@ def render_hook_loop_svg(theme: Theme) -> str:
         f'  <text x="354" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="{t.ink}">Stop hook</text>',
         f'  <rect x="524" y="95" width="110" height="19" rx="9.5" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
         f'  <text x="579" y="108" text-anchor="middle" class="mono" font-size="9.5" font-weight="700" fill="{t.danger_ink}">exit 2 · BLOCKED</text>',
-        f'  <text x="326" y="133" class="sans" font-size="11" fill="{t.ink_secondary}"><tspan class="mono" font-size="10" fill="{t.ink}">anti-slop-hook</tspan> blocks completion and</text>',
+        f'  <text x="326" y="133" class="sans" font-size="11" fill="{t.ink_secondary}"><tspan class="mono" font-size="10" fill="{t.ink}">anti-slop hook</tspan> blocks completion and</text>',
         f'  <text x="326" y="148" class="sans" font-size="11" fill="{t.ink_secondary}">returns actionable stderr to the agent.</text>',
         "",
         f'  <rect x="326" y="162" width="308" height="110" rx="6" fill="{t.code_bg}" stroke="{t.danger_border}"/>',
@@ -1947,9 +1951,8 @@ def render_social_preview_svg(
     ev_stats: EvolutionStats | None = None,
     ts_ev_stats: EvolutionStats | None = None,
 ) -> str:
-    """Render the 1280x640 dark minimalist GitHub social preview SVG."""
+    """Render the 1280x640 editorial light agent-first GitHub social preview SVG."""
     width, height = 1280, 640
-    t = DARK_THEME
 
     b_tamp = stats.rw3_tampered["baseline"]
     b_comp = stats.rw3_completed["baseline"]
@@ -1961,9 +1964,9 @@ def render_social_preview_svg(
         stats.rw3_completed["core-rules-v0.2.0"] + stats.rw3_completed["model-controls"]
     )
     ruled_pct = (ruled_tamp / ruled_comp * 100.0) if ruled_comp else 0.0
-    rw3_arrow = f"{b_pct:.1f}% → {ruled_pct:.0f}%"
+    rw3_arrow = f"{round(b_pct)}% → {round(ruled_pct)}%"
 
-    if ev_stats is not None and ts_ev_stats is not None:
+    if ev_stats is not None:
         ev1_b_pct = (
             ev_stats.cond_pass["baseline"] / ev_stats.cond_total["baseline"] * 100.0
             if ev_stats.cond_total["baseline"]
@@ -1976,9 +1979,15 @@ def render_social_preview_svg(
             if ev_stats.cond_total["gated-structural"]
             else 0.0
         )
-        ev1_arrow = f"{_fmt_pct_clean(ev1_b_pct)} → {_fmt_pct_clean(ev1_g_pct)}"
-        ev1_slop = ev_stats.cond_slop["gated-structural"]
+        left_stat_val = f"{round(ev1_b_pct)}% → {round(ev1_g_pct)}%"
+        left_stat_label = "Python 4-step builds"
+        slop_count = ev_stats.cond_slop["gated-structural"]
+    else:
+        left_stat_val = rw3_arrow
+        left_stat_label = "Skipped tests blocked"
+        slop_count = 0
 
+    if ts_ev_stats is not None:
         ev2_b_pct = (
             ts_ev_stats.cond_pass["baseline"]
             / ts_ev_stats.cond_total["baseline"]
@@ -1993,192 +2002,115 @@ def render_social_preview_svg(
             if ts_ev_stats.cond_total["gated-structural"]
             else 0.0
         )
-        ev2_arrow = f"{_fmt_pct_clean(ev2_b_pct)} → {_fmt_pct_clean(ev2_g_pct)}"
-        ev2_slop = ts_ev_stats.cond_slop["gated-structural"]
-
-        lines: list[str] = [
-            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
-            "  <defs>",
-            '    <pattern id="subtle-grid" width="40" height="40" patternUnits="userSpaceOnUse">',
-            '      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#161b22" stroke-width="1"/>',
-            "    </pattern>",
-            '    <clipPath id="clip-stat-bar"><rect x="76" y="472" width="1128" height="92" rx="10"/></clipPath>',
-            "  </defs>",
-            "  <style>",
-            f"    .sans {{ font-family: {FONT_SANS}; }}",
-            f"    .mono {{ font-family: {FONT_MONO}; }}",
-            "  </style>",
-            "",
-            "  <!-- Background & architectural frame -->",
-            f'  <rect x="0" y="0" width="{width}" height="{height}" fill="{t.canvas_bg}"/>',
-            f'  <rect x="0" y="0" width="{width}" height="{height}" fill="url(#subtle-grid)" opacity="0.7"/>',
-            f'  <rect x="28" y="28" width="{width - 56}" height="{height - 56}" rx="16" fill="{t.canvas_bg}" fill-opacity="0.72" stroke="{t.canvas_border}" stroke-width="1.5"/>',
-            "",
-            "  <!-- Left column: identity -->",
-            '  <g transform="translate(76, 78)">',
-            f'    <rect x="0" y="0" width="268" height="32" rx="16" fill="{t.panel_bg}" stroke="{t.canvas_border}"/>',
-            f'    <circle cx="18" cy="16" r="4.5" fill="{t.controls}"/>',
-            f'    <text x="32" y="20.5" class="mono" font-size="12" font-weight="600" fill="{t.ink_secondary}">AI-ERA CODE QUALITY · 3 PILLARS</text>',
-            "",
-            f'    <text x="0" y="108" class="mono" font-size="70" font-weight="700" letter-spacing="-2.5" fill="{t.ink}">anti-slop</text>',
-            f'    <rect x="0" y="128" width="64" height="3.5" rx="1.75" fill="{t.controls}"/>',
-            "",
-            f'    <text x="0" y="176" class="sans" font-size="21.5" font-weight="500" fill="{t.ink_secondary}">Catch shortcuts and compounding slop,</text>',
-            f'    <text x="0" y="208" class="sans" font-size="21.5" font-weight="500" fill="{t.ink_secondary}">learn verified project rules, and prove</text>',
-            f'    <text x="0" y="240" class="sans" font-size="21.5" font-weight="500" fill="{t.ink_secondary}">which rules improve real software.</text>',
-            "",
-            f'    <line x1="0" y1="278" x2="466" y2="278" stroke="{t.divider}" stroke-width="1.2"/>',
-            f'    <text x="0" y="314" class="mono" font-size="15.5" font-weight="600" fill="{t.ink}">Zero dependencies · Python stdlib · MIT</text>',
-            f'    <text x="0" y="344" class="mono" font-size="12.5" fill="{t.muted}">Plain-English review · Agent hooks · Verified R7 · EV1/EV2</text>',
-            "  </g>",
-            "",
-            "  <!-- Right column: terminal review card -->",
-            f'  <rect x="596" y="78" width="608" height="352" rx="12" fill="#090d13" stroke="{t.canvas_border}" stroke-width="1.5"/>',
-            f'  <path d="M 608 78 H 1192 Q 1204 78 1204 90 V 120 H 596 V 90 Q 596 78 608 78 Z" fill="{t.panel_bg}"/>',
-            f'  <line x1="596" y1="120" x2="1204" y2="120" stroke="{t.divider}" stroke-width="1"/>',
-            '  <circle cx="620" cy="99" r="5" fill="#30363d"/>',
-            '  <circle cx="638" cy="99" r="5" fill="#30363d"/>',
-            '  <circle cx="656" cy="99" r="5" fill="#30363d"/>',
-            f'  <text x="680" y="104" class="mono" font-size="13" fill="{t.muted}">anti-slop-review · shortcuts + structural + learned</text>',
-            "",
-            f'  <text x="622" y="155" class="mono" font-size="13.5" fill="{t.muted}">$ anti-slop-review   # CLI · hooks · pre-commit · CI</text>',
-            "",
-            f'  <text x="622" y="194" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[BLOCK] DIFF-TEST-SKIP</text>',
-            f'  <text x="822" y="194" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:8</text>',
-            f'  <text x="638" y="215" class="mono" font-size="12.8" fill="{t.ink_secondary}">skipped test instead of fixing the underlying bug</text>',
-            "",
-            f'  <text x="622" y="256" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-SILENT-FALLBACK</text>',
-            f'  <text x="880" y="256" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:17</text>',
-            f'  <text x="638" y="277" class="mono" font-size="12.8" fill="{t.ink_secondary}">broad catch returns default 0 (hides failures)</text>',
-            "",
-            f'  <text x="622" y="318" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-TEST-THEATER</text>',
-            f'  <text x="856" y="318" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:19</text>',
-            f'  <text x="638" y="339" class="mono" font-size="12.8" fill="{t.ink_secondary}">0 assertions (stays green even when code breaks)</text>',
-            "",
-            f'  <rect x="618" y="372" width="564" height="36" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
-            f'  <text x="634" y="394.5" class="mono" font-size="12.2" font-weight="600" fill="{t.positive_ink}">+ Human-approved learned rules enforced automatically</text>',
-            "",
-            "  <!-- Full-Width Empirical Stat Bar (Python EV1 · TypeScript EV2 · RW3) -->",
-            f'  <rect x="76" y="472" width="1128" height="92" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}" stroke-width="1.5"/>',
-            f'  <rect x="76" y="472" width="6" height="92" fill="{t.positive}" clip-path="url(#clip-stat-bar)"/>',
-            "",
-            f'  <text x="108" y="511" class="mono" font-size="22" font-weight="700" fill="{t.positive_ink}">{_esc(ev1_arrow)}<tspan dx="10" class="sans" font-size="13.5" font-weight="600" fill="{t.ink}">({ev1_slop} slop)</tspan></text>',
-            f'  <text x="108" y="538" class="sans" font-size="13.5" fill="{t.muted}">Python multi-turn quality · {_esc(ev_stats.case_id)} (n = {ev_stats.n_replicates})</text>',
-            "",
-            f'  <line x1="454" y1="490" x2="454" y2="546" stroke="{t.positive_border}" stroke-width="1.2"/>',
-            "",
-            f'  <text x="484" y="511" class="mono" font-size="22" font-weight="700" fill="{t.positive_ink}">{_esc(ev2_arrow)}<tspan dx="10" class="sans" font-size="13.5" font-weight="600" fill="{t.ink}">({ev2_slop} slop)</tspan></text>',
-            f'  <text x="484" y="538" class="sans" font-size="13.5" fill="{t.muted}">TypeScript multi-turn quality · {_esc(ts_ev_stats.case_id)} (n = {ts_ev_stats.n_replicates})</text>',
-            "",
-            f'  <line x1="846" y1="490" x2="846" y2="546" stroke="{t.positive_border}" stroke-width="1.2"/>',
-            "",
-            f'  <text x="876" y="511" class="mono" font-size="22" font-weight="700" fill="{t.positive_ink}">{_esc(rw3_arrow)}<tspan dx="10" class="sans" font-size="13.5" font-weight="600" fill="{t.ink}">({ruled_tamp}/{ruled_comp})</tspan></text>',
-            f'  <text x="876" y="538" class="sans" font-size="13.5" fill="{t.muted}">Frozen-test tampering · RW3 (n = {stats.n_replicates})</text>',
-            "</svg>",
-            "",
-        ]
-        return "\n".join(lines)
-
-    if ev_stats is not None:
-        ev_b_pct = (
-            ev_stats.cond_pass["baseline"] / ev_stats.cond_total["baseline"] * 100.0
-            if ev_stats.cond_total["baseline"]
-            else 0.0
-        )
-        ev_g_pct = (
-            ev_stats.cond_pass["gated-structural"]
-            / ev_stats.cond_total["gated-structural"]
-            * 100.0
-            if ev_stats.cond_total["gated-structural"]
-            else 0.0
-        )
-        ev_arrow = f"{_fmt_pct_clean(ev_b_pct)} → {_fmt_pct_clean(ev_g_pct)}"
-        ev_slop = ev_stats.cond_slop["gated-structural"]
-        pill_lines = [
-            f'  <text x="620" y="504" class="mono" font-size="20" font-weight="700" fill="{t.positive_ink}">{_esc(ev_arrow)}<tspan dx="8" class="sans" font-size="13" font-weight="600" fill="{t.ink}">({ev_slop} slop)</tspan></text>',
-            f'  <text x="620" y="527" class="sans" font-size="12.5" fill="{t.muted}">multi-turn code quality · {_esc(ev_stats.case_id)} (n = {ev_stats.n_replicates})</text>',
-            f'  <line x1="902" y1="487" x2="902" y2="529" stroke="{t.positive_border}" stroke-width="1.2"/>',
-            f'  <text x="922" y="504" class="mono" font-size="20" font-weight="700" fill="{t.positive_ink}">{_esc(rw3_arrow)}<tspan dx="8" class="sans" font-size="13" font-weight="600" fill="{t.ink}">({ruled_tamp}/{ruled_comp})</tspan></text>',
-            f'  <text x="922" y="527" class="sans" font-size="12.5" fill="{t.muted}">frozen-test tampering · RW3 (n = {stats.n_replicates})</text>',
-        ]
+        right_stat_val = f"{round(ev2_b_pct)}% → {round(ev2_g_pct)}%"
+        right_stat_label = "TypeScript 4-step builds"
+        slop_count = max(slop_count, ts_ev_stats.cond_slop["gated-structural"])
     else:
-        stat_detail = (
-            f"{stats.experiment_id} · {b_tamp}/{b_comp} baseline → "
-            f"{ruled_tamp}/{ruled_comp} ruled (urllib3)"
-        )
-        pill_lines = [
-            f'  <text x="620" y="517" class="mono" font-size="24" font-weight="700" fill="{t.positive_ink}">{_esc(rw3_arrow)}</text>',
-            f'  <line x1="776" y1="487" x2="776" y2="529" stroke="{t.positive_border}" stroke-width="1.2"/>',
-            f'  <text x="794" y="503" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">frozen-test tampering in n = {stats.n_replicates} OSS eval</text>',
-            f'  <text x="794" y="525" class="sans" font-size="12.5" fill="{t.muted}">{_esc(stat_detail)}</text>',
-        ]
+        right_stat_val = rw3_arrow
+        right_stat_label = "Skipped tests under pressure"
+
+    slop_chip = f"✓ {slop_count} slop issues"
 
     lines: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
         "  <defs>",
-        '    <pattern id="subtle-grid" width="40" height="40" patternUnits="userSpaceOnUse">',
-        '      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#161b22" stroke-width="1"/>',
+        '    <linearGradient id="bg-editorial" x1="0" y1="0" x2="1" y2="1">',
+        '      <stop offset="0%" stop-color="#fcfcfa"/>',
+        '      <stop offset="100%" stop-color="#f3f5f2"/>',
+        "    </linearGradient>",
+        '    <pattern id="grid-editorial" width="40" height="40" patternUnits="userSpaceOnUse">',
+        '      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#e2e8f0" stroke-width="0.7" stroke-opacity="0.5"/>',
         "    </pattern>",
-        '    <clipPath id="clip-stat-pill"><rect x="596" y="472" width="608" height="72" rx="10"/></clipPath>',
         "  </defs>",
         "  <style>",
-        f"    .sans {{ font-family: {FONT_SANS}; }}",
+        f"    .sans {{ font-family: {FONT_SOCIAL_DISPLAY}; }}",
         f"    .mono {{ font-family: {FONT_MONO}; }}",
         "  </style>",
         "",
-        "  <!-- Background & architectural frame -->",
-        f'  <rect x="0" y="0" width="{width}" height="{height}" fill="{t.canvas_bg}"/>',
-        f'  <rect x="0" y="0" width="{width}" height="{height}" fill="url(#subtle-grid)" opacity="0.7"/>',
-        f'  <rect x="28" y="28" width="{width - 56}" height="{height - 56}" rx="16" fill="{t.canvas_bg}" fill-opacity="0.72" stroke="{t.canvas_border}" stroke-width="1.5"/>',
+        "  <!-- Canvas -->",
+        f'  <rect width="{width}" height="{height}" fill="url(#bg-editorial)"/>',
+        f'  <rect width="{width}" height="{height}" fill="url(#grid-editorial)"/>',
+        f'  <rect x="24" y="24" width="{width - 48}" height="{height - 48}" rx="24" fill="none" stroke="#d6dde6" stroke-width="1.5"/>',
         "",
-        "  <!-- Left column: identity -->",
-        '  <g transform="translate(76, 114)">',
-        f'    <rect x="0" y="0" width="268" height="32" rx="16" fill="{t.panel_bg}" stroke="{t.canvas_border}"/>',
-        f'    <circle cx="18" cy="16" r="4.5" fill="{t.controls}"/>',
-        f'    <text x="32" y="20.5" class="mono" font-size="12" font-weight="600" fill="{t.ink_secondary}">AI-ERA CODE QUALITY · 3 PILLARS</text>',
-        "",
-        f'    <text x="0" y="114" class="mono" font-size="72" font-weight="700" letter-spacing="-2.5" fill="{t.ink}">anti-slop</text>',
-        f'    <rect x="0" y="136" width="64" height="3.5" rx="1.75" fill="{t.controls}"/>',
-        "",
-        f'    <text x="0" y="188" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">Catch shortcuts and compounding slop,</text>',
-        f'    <text x="0" y="222" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">learn verified project rules, and prove</text>',
-        f'    <text x="0" y="256" class="sans" font-size="22" font-weight="500" fill="{t.ink_secondary}">which rules improve real software.</text>',
-        "",
-        f'    <line x1="0" y1="306" x2="466" y2="306" stroke="{t.divider}" stroke-width="1.2"/>',
-        f'    <text x="0" y="346" class="mono" font-size="15.5" font-weight="600" fill="{t.ink}">Zero dependencies · Python stdlib · MIT</text>',
-        f'    <text x="0" y="378" class="mono" font-size="12.5" fill="{t.muted}">Plain-English review · Agent hooks · Verified R7 · EV1</text>',
+        "  <!-- Left Column: Brand + Headline + Proof -->",
+        '  <g transform="translate(72, 74)">',
+        '    <rect x="0" y="0" width="40" height="40" rx="11" fill="#0f766e"/>',
+        '    <path d="M 20 9 L 29 13 V 20.5 C 29 26 25 29.8 20 31.6 C 15 29.8 11 26 11 20.5 V 13 Z" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>',
+        '    <path d="M 16 20.4 L 19 23.4 L 24.6 17.6" fill="none" stroke="#ffffff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>',
+        '    <text x="52" y="28.5" class="sans" font-size="28" font-weight="700" fill="#0f172a" letter-spacing="-0.5">anti-slop</text>',
+        '    <rect x="192" y="5" width="256" height="30" rx="15" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>',
+        '    <circle cx="210" cy="20" r="4" fill="#0f766e"/>',
+        '    <text x="223" y="24.5" class="mono" font-size="11.5" font-weight="600" fill="#334155" letter-spacing="0.3">AGENT-FIRST · HUMAN-GUIDED</text>',
         "  </g>",
         "",
-        "  <!-- Right column: terminal review card -->",
-        f'  <rect x="596" y="102" width="608" height="348" rx="12" fill="#090d13" stroke="{t.canvas_border}" stroke-width="1.5"/>',
-        f'  <path d="M 608 102 H 1192 Q 1204 102 1204 114 V 144 H 596 V 114 Q 596 102 608 102 Z" fill="{t.panel_bg}"/>',
-        f'  <line x1="596" y1="144" x2="1204" y2="144" stroke="{t.divider}" stroke-width="1"/>',
-        '  <circle cx="620" cy="123" r="5" fill="#30363d"/>',
-        '  <circle cx="638" cy="123" r="5" fill="#30363d"/>',
-        '  <circle cx="656" cy="123" r="5" fill="#30363d"/>',
-        f'  <text x="680" y="128" class="mono" font-size="13" fill="{t.muted}">anti-slop-review · shortcuts + structural + learned</text>',
+        '  <text x="72" y="192" class="sans" font-size="48" font-weight="700" fill="#0f172a" letter-spacing="-1.0">Guardrails built</text>',
+        '  <text x="72" y="250" class="sans" font-size="48" font-weight="700" fill="#0f766e" letter-spacing="-1.0">for AI coding agents.</text>',
         "",
-        f'  <text x="622" y="179" class="mono" font-size="13.5" fill="{t.muted}">$ anti-slop-review   # CLI · hooks · pre-commit · CI</text>',
+        '  <text x="72" y="308" class="sans" font-size="21" font-weight="500" fill="#475569">No CLI to memorize. Install once and</text>',
+        '  <text x="72" y="338" class="sans" font-size="21" font-weight="500" fill="#475569">your agent catches shortcuts, verifies the</text>',
+        '  <text x="72" y="368" class="sans" font-size="21" font-weight="500" fill="#475569">live app, and brings plain-English reviews.</text>',
         "",
-        f'  <text x="622" y="218" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[BLOCK] DIFF-TEST-SKIP</text>',
-        f'  <text x="822" y="218" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:8</text>',
-        f'  <text x="638" y="239" class="mono" font-size="12.8" fill="{t.ink_secondary}">skipped test instead of fixing the underlying bug</text>',
+        "  <!-- High-Contrast Proof Tiles (Option 2 Dark Anchor Aesthetic) -->",
+        '  <g transform="translate(72, 408)">',
+        '    <rect x="0" y="0" width="248" height="84" rx="14" fill="#0f172a"/>',
+        f'    <text x="22" y="39" class="sans" font-size="27" font-weight="700" fill="#2dd4bf">{_esc(left_stat_val)}</text>',
+        f'    <text x="22" y="65" class="sans" font-size="14" font-weight="500" fill="#cbd5e1">{_esc(left_stat_label)}</text>',
         "",
-        f'  <text x="622" y="280" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-SILENT-FALLBACK</text>',
-        f'  <text x="880" y="280" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:17</text>',
-        f'  <text x="638" y="301" class="mono" font-size="12.8" fill="{t.ink_secondary}">broad catch returns default 0 (hides failures)</text>',
+        '    <rect x="264" y="0" width="260" height="84" rx="14" fill="#0f172a"/>',
+        f'    <text x="286" y="39" class="sans" font-size="27" font-weight="700" fill="#2dd4bf">{_esc(right_stat_val)}</text>',
+        f'    <text x="286" y="65" class="sans" font-size="14" font-weight="500" fill="#cbd5e1">{_esc(right_stat_label)}</text>',
+        "  </g>",
         "",
-        f'  <text x="622" y="342" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-TEST-THEATER</text>',
-        f'  <text x="856" y="342" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:19</text>',
-        f'  <text x="638" y="363" class="mono" font-size="12.8" fill="{t.ink_secondary}">0 assertions (stays green even when code breaks)</text>',
+        '  <text x="72" y="540" class="sans" font-size="15.5" font-weight="600" fill="#0f172a">Claude Code · Codex · Antigravity · GitHub Actions</text>',
+        '  <text x="72" y="568" class="mono" font-size="12.5" fill="#64748b">Python &amp; JS/TS · 0 dependencies · MIT License</text>',
         "",
-        f'  <rect x="618" y="394" width="564" height="36" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
-        f'  <text x="634" y="416.5" class="mono" font-size="12.2" font-weight="600" fill="{t.positive_ink}">+ Human-approved learned rules enforced automatically</text>',
+        "  <!-- Right Column: Mid-Turn Flow Card (Editorial Light) -->",
+        '  <rect x="646" y="68" width="558" height="504" rx="20" fill="#ffffff" stroke="#dbe3ec" stroke-width="1.5"/>',
+        '  <text x="676" y="106" class="sans" font-size="15.5" font-weight="700" fill="#475569" letter-spacing="0.4">HOW IT WORKS MID-TURN</text>',
+        '  <rect x="1038" y="86" width="136" height="26" rx="13" fill="#f0fdfa" stroke="#99f6e4"/>',
+        '  <text x="1106" y="103.5" text-anchor="middle" class="mono" font-size="11.5" font-weight="600" fill="#0f766e">0 prompt tokens</text>',
+        '  <line x1="676" y1="126" x2="1174" y2="126" stroke="#e2e8f0" stroke-width="1"/>',
         "",
-        "  <!-- Empirical Stat Pill -->",
-        f'  <rect x="596" y="472" width="608" height="72" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}" stroke-width="1.5"/>',
-        f'  <rect x="596" y="472" width="6" height="72" fill="{t.positive}" clip-path="url(#clip-stat-pill)"/>',
-        *pill_lines,
+        "  <!-- Step 1: Shortcut Attempt -->",
+        '  <g transform="translate(676, 146)">',
+        '    <rect x="0" y="0" width="498" height="106" rx="14" fill="#fef2f2" stroke="#fecaca" stroke-width="1.4"/>',
+        '    <circle cx="24" cy="28" r="7" fill="#dc2626"/>',
+        '    <text x="42" y="34" class="sans" font-size="17" font-weight="700" fill="#991b1b">1. Agent tries to finish with shortcuts</text>',
+        '    <rect x="20" y="54" width="142" height="32" rx="8" fill="#ffffff" stroke="#fca5a5"/>',
+        '    <text x="91" y="75" text-anchor="middle" class="sans" font-size="13.5" font-weight="600" fill="#b91c1c">Skipped test</text>',
+        '    <rect x="174" y="54" width="146" height="32" rx="8" fill="#ffffff" stroke="#fca5a5"/>',
+        '    <text x="247" y="75" text-anchor="middle" class="sans" font-size="13.5" font-weight="600" fill="#b91c1c">Hidden error</text>',
+        '    <rect x="332" y="54" width="146" height="32" rx="8" fill="#ffffff" stroke="#fca5a5"/>',
+        '    <text x="405" y="75" text-anchor="middle" class="sans" font-size="13.5" font-weight="600" fill="#b91c1c">Copy-paste drift</text>',
+        "  </g>",
+        "",
+        "  <!-- Arrow 1 -> 2 -->",
+        '  <path d="M 925 256 V 280 M 918 273 L 925 281 L 932 273" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+        "",
+        "  <!-- Step 2: Block & Explain -->",
+        '  <g transform="translate(676, 288)">',
+        '    <rect x="0" y="0" width="498" height="106" rx="14" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.4"/>',
+        '    <circle cx="24" cy="28" r="7" fill="#2563eb"/>',
+        '    <text x="42" y="34" class="sans" font-size="17" font-weight="700" fill="#1e40af">2. anti-slop blocks &amp; explains why</text>',
+        '    <text x="22" y="64" class="sans" font-size="15.5" font-weight="500" fill="#1e293b">“Don&apos;t skip the failing test. Fix the root bug,</text>',
+        '    <text x="22" y="88" class="sans" font-size="15.5" font-weight="500" fill="#1e293b">reuse the shared helper, and verify the live app.”</text>',
+        "  </g>",
+        "",
+        "  <!-- Arrow 2 -> 3 -->",
+        '  <path d="M 925 398 V 422 M 918 415 L 925 423 L 932 415" fill="none" stroke="#94a3b8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+        "",
+        "  <!-- Step 3: Fix & Verify -->",
+        '  <g transform="translate(676, 430)">',
+        '    <rect x="0" y="0" width="498" height="114" rx="14" fill="#f0fdfa" stroke="#99f6e4" stroke-width="1.4"/>',
+        '    <circle cx="24" cy="28" r="7" fill="#0f766e"/>',
+        '    <text x="42" y="34" class="sans" font-size="17" font-weight="700" fill="#115e59">3. Agent fixes root cause &amp; proves it works</text>',
+        '    <rect x="20" y="56" width="142" height="34" rx="8" fill="#ffffff" stroke="#5eead4"/>',
+        f'    <text x="91" y="78" text-anchor="middle" class="sans" font-size="13.5" font-weight="700" fill="#0f766e">{_esc(slop_chip)}</text>',
+        '    <rect x="174" y="56" width="146" height="34" rx="8" fill="#ffffff" stroke="#5eead4"/>',
+        '    <text x="247" y="78" text-anchor="middle" class="sans" font-size="13.5" font-weight="700" fill="#0f766e">✓ Live app check</text>',
+        '    <rect x="332" y="56" width="146" height="34" rx="8" fill="#ffffff" stroke="#5eead4"/>',
+        '    <text x="405" y="78" text-anchor="middle" class="sans" font-size="13.5" font-weight="700" fill="#0f766e">✓ Real tests pass</text>',
+        "  </g>",
         "</svg>",
         "",
     ]

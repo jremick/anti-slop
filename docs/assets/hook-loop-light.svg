@@ -17,8 +17,8 @@
   <!-- Header -->
   <text x="28" y="36" class="sans" font-size="15.5" font-weight="700" fill="#0f172a">Blocking Agent Turn Loop (Stop Hook)</text>
   <text x="28" y="55" class="sans" font-size="11" fill="#475569">Enforces diff and approved learned-rule gates before turn completion · zero prompt tokens, zero CI round-trip</text>
-  <rect x="720" y="23" width="212" height="24" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
-  <text x="826" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="#334155">Claude · Antigravity · Codex</text>
+  <rect x="698" y="23" width="234" height="24" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="815" y="38.5" text-anchor="middle" class="mono" font-size="10" fill="#334155">Claude Code · Codex · Antigravity</text>
   <line x1="28" y1="68" x2="932" y2="68" stroke="#e2e8f0" stroke-width="1"/>
 
   <!-- Step 1: Agent turn (x=28..284, w=256) -->
@@ -55,7 +55,7 @@
   <text x="354" y="108.5" class="sans" font-size="12.5" font-weight="700" fill="#0f172a">Stop hook</text>
   <rect x="524" y="95" width="110" height="19" rx="9.5" fill="#fef2f2" stroke="#fecaca"/>
   <text x="579" y="108" text-anchor="middle" class="mono" font-size="9.5" font-weight="700" fill="#b91c1c">exit 2 · BLOCKED</text>
-  <text x="326" y="133" class="sans" font-size="11" fill="#334155"><tspan class="mono" font-size="10" fill="#0f172a">anti-slop-hook</tspan> blocks completion and</text>
+  <text x="326" y="133" class="sans" font-size="11" fill="#334155"><tspan class="mono" font-size="10" fill="#0f172a">anti-slop hook</tspan> blocks completion and</text>
   <text x="326" y="148" class="sans" font-size="11" fill="#334155">returns actionable stderr to the agent.</text>
 
   <rect x="326" y="162" width="308" height="110" rx="6" fill="#f8fafc" stroke="#fecaca"/>
