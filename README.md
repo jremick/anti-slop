@@ -5,6 +5,8 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 ![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)
 
+![anti-slop: Guardrails built for AI coding agents, blocking shortcuts mid-turn, verifying live apps, and lifting 4-step build quality from 50% to 92% in Python and 58% to 100% in TypeScript](docs/assets/social-preview.png)
+
 **Agent-first guardrails that stop AI coding shortcuts, fake tests, and compounding slop before they ship.**
 
 AI coding agents write plausible code that passes a quick check while quietly leaving behind skipped tests, swallowed errors, copy-paste drift, and oversized functions. Worse, future agent turns imitate whatever shortcuts already sit in your repository, while piling more prose rules into `AGENTS.md` or `CLAUDE.md` hurts compliance and raises token cost.
