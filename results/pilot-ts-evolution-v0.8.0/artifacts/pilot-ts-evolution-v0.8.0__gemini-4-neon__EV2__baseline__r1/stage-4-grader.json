@@ -1,0 +1,50 @@
+{
+  "case_id": "EV2",
+  "passed": false,
+  "checks": [
+    {
+      "id": "functional_all_turns",
+      "passed": true,
+      "detail": "All hidden TypeScript functional contracts passed through stage 4"
+    },
+    {
+      "id": "mutation_test_strength",
+      "passed": false,
+      "detail": "baseline_tests_passed=True, killed=12/20 (60.0%, min 65%), test_theater=0; survived sample: ['src/config.ts:23 compare (<= -> <)', 'src/corporate.ts:34 compare (<= -> <)', 'src/bookings.ts:74 validation (throw -> noop)']"
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "passed": false,
+      "detail": "2 duplicate block(s): src/bookings.ts:135 duplicates a 6-statement logic block already present at src/corporate.ts:29.; src/bookings.ts:240 duplicates a 6-statement logic block already present at src/bookings.ts:274."
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "passed": true,
+      "detail": "0 dead/legacy paths and clean legacyDepositMode removal"
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "passed": false,
+      "detail": "prod_ts_files=6/8, god_fns=1, god_files=0, circular_imports=0"
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "passed": true,
+      "detail": "0 DIFF-* shortcuts, silent fallbacks, or scattered config reads"
+    }
+  ],
+  "metrics": {
+    "functional_passed": true,
+    "mutation_kill_rate": 0.6,
+    "mutation_killed": 12,
+    "mutation_total": 20,
+    "duplicate_blocks": 2,
+    "dead_compat": 0,
+    "god_functions": 1,
+    "god_files": 0,
+    "circular_imports": 0,
+    "test_theater": 0,
+    "silent_failures_and_shortcuts": 0,
+    "prod_files_count": 6
+  }
+}

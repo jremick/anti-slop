@@ -1,0 +1,14 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved the `STRUCT-GOD-FUNCTION` finding by splitting validation and conflict checks into focused, single-purpose helpers:
+
+- **[corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts)**: Extracted `validateGroupBookingInput` and `assertGroupRoomsAvailable` out of `createGroupBooking`, reducing `createGroupBooking` to a concise orchestration function (~40 lines) with clear single-purpose helpers.
+- **[bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts)**: Proactively extracted `validateCreateBookingInput` from `BookingService.createBooking` so both methods remain compact and well below the line-count threshold.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **17/17 tests passed** (exit code `0`).
+
+STDERR:
+

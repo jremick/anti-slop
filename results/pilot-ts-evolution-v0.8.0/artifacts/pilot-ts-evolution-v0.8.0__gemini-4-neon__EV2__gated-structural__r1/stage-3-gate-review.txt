@@ -1,0 +1,12 @@
+Anti-Slop Plain-English Review
+==============================
+Must-fix shortcuts: 0 | Compounding slop risks: 1
+
+Compounding Slop Risks (Review Before Merging)
+----------------------------------------------
+1. Copy-pasted logic block that will drift out of sync [STRUCT-DUPLICATE-BLOCK] (benchmarks/sources/ev2_ts_bookings/src/bookings.ts:118)
+   What was found: benchmarks/sources/ev2_ts_bookings/src/bookings.ts:118 duplicates a 6-statement logic block already present at benchmarks/sources/ev2_ts_bookings/src/corporate.ts:71.
+   Why engineers flag this: When the same business logic lives in two places, fixing a bug or changing a rule in one place silently leaves the other copy broken.
+   How it compounds across AI turns: AI assistants strongly mimic nearby code. Once a block is duplicated once, later sessions copy it a third time and fix bugs in only whichever file happened to be open.
+   Reference: docs/evidence.md#ext-12, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Extract or reuse one shared canonical helper function for this logic and call it from both places.

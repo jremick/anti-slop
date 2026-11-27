@@ -1,0 +1,18 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved both structural review findings without weakening any tests:
+
+### Fixes
+1. **Eliminated duplicate validation block (`STRUCT-DUPLICATE-BLOCK`)**:
+   - Extracted canonical `validateBookingRequestWindow(input)` (plus `BookingRequestWindow` / `ValidatedBookingWindow` types) in [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts#L16-L46) and reused it in both `BookingService.createBooking` and `createGroupBooking`.
+   - Also extracted `assertNoActiveConflict` and `resolveBookingStatus` in [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts#L148-L181) to keep `createBooking` and `confirmHold` concise and free of repeated conflict checks.
+2. **Decomposed `createGroupBooking` (`STRUCT-GOD-FUNCTION`)**:
+   - Split [corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts) into focused single-purpose helpers: `validateGroupRoomIds`, `assertNoGroupConflicts`, and `commitGroupBookings`, leaving `createGroupBooking` as a 17-line coordinator.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **20/20 tests passed** (exit code `0`).
+
+STDERR:
+

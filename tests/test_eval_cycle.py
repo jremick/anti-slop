@@ -19,8 +19,8 @@ class EvalCycleTests(unittest.TestCase):
     def test_scorecard_live_results_json_and_markdown(self) -> None:
         card = eval_cycle.build_scorecard(REPO_ROOT / "results", repo_root=REPO_ROOT)
         self.assertTrue(card["ok"])
-        self.assertEqual(card["experiments_count"], 3)
-        self.assertEqual(card["total_runs"], 216)
+        self.assertEqual(card["experiments_count"], 5)
+        self.assertEqual(card["total_runs"], 288)
         self.assertEqual(
             card["models"],
             ["claude-opus-5-5", "gemini-4-neon", "gpt-6.2-astra", "gpt-6.2-sol"],
@@ -30,6 +30,8 @@ class EvalCycleTests(unittest.TestCase):
         self.assertIn("pilot-3way-v0.6.0", by_exp)
         self.assertIn("pilot-comments-v0.7.0", by_exp)
         self.assertIn("pilot-evolution-v0.7.0", by_exp)
+        self.assertIn("pilot-comments-v0.8.0", by_exp)
+        self.assertIn("pilot-ts-evolution-v0.8.0", by_exp)
 
         # 1. pilot-3way-v0.6.0 pass rates & RW3 frozen-test tampering rates.
         p3 = by_exp["pilot-3way-v0.6.0"]
@@ -65,6 +67,22 @@ class EvalCycleTests(unittest.TestCase):
             ev1_cond["core-rules-v0.2.0"]["mutation_kill_rate_mean"],
         )
 
+        # 3b. pilot-comments-v0.8.0 (CM2) and pilot-ts-evolution-v0.8.0 (EV2) live v0.8.0 datasets.
+        pcm2 = by_exp["pilot-comments-v0.8.0"]
+        for cond in ("no-comments", "invariant-comments", "comment-traps"):
+            self.assertEqual(pcm2["by_condition"][cond]["passed"], 12)
+            self.assertEqual(pcm2["by_condition"][cond]["total"], 12)
+        self.assertLess(pcm2["cm1_wall_time"]["by_condition"]["invariant-comments"]["delta_vs_no_comments_pct"], 0.0)
+
+        pev2 = by_exp["pilot-ts-evolution-v0.8.0"]
+        self.assertEqual(pev2["by_condition"]["baseline"]["passed"], 7)
+        self.assertEqual(pev2["by_condition"]["core-rules-v0.2.0"]["passed"], 8)
+        self.assertEqual(pev2["by_condition"]["gated-structural"]["passed"], 12)
+        ev2_cond = pev2["ev1_metrics"]["by_condition"]
+        self.assertEqual(ev2_cond["baseline"]["slop_defects_total"], 10)
+        self.assertEqual(ev2_cond["core-rules-v0.2.0"]["slop_defects_total"], 5)
+        self.assertEqual(ev2_cond["gated-structural"]["slop_defects_total"], 0)
+
         # 4. Rule-retirement watch flags CM1 100% baseline ceiling & EV1 core-rules regression.
         watch = card["rule_retirement_watch"]
         self.assertTrue(
@@ -88,7 +106,7 @@ class EvalCycleTests(unittest.TestCase):
         cli_base = [sys.executable, "-B", str(REPO_ROOT / "scripts/eval_cycle.py"), "scorecard"]
         p_json = subprocess.run(cli_base + ["--json"], capture_output=True, text=True, check=False)
         self.assertEqual(p_json.returncode, 0, msg=p_json.stderr)
-        self.assertEqual(json.loads(p_json.stdout)["total_runs"], 216)
+        self.assertEqual(json.loads(p_json.stdout)["total_runs"], 288)
 
         p_md = subprocess.run(cli_base + ["--markdown"], capture_output=True, text=True, check=False)
         self.assertEqual(p_md.returncode, 0, msg=p_md.stderr)

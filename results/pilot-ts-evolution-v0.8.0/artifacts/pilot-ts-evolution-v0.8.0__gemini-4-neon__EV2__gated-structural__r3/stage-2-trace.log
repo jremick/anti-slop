@@ -1,0 +1,25 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 (multi-room corporate/group bookings with canonical discount/tax pricing and strictly acyclic imports):
+
+### Changes
+- **[pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts)**:
+  - Exported `validateBps(value, fieldName)` and `applyDiscountAndTax(grossSubtotalCents, discountBps, taxBps)` returning `{ subtotalCents, discountCents, taxCents, totalCents }` with exact integer half-up rounding and `0..10000` bounds validation (`ValidationError`).
+  - Reused `applyDiscountAndTax` inside `calculateBookingPrice(room, durationMinutes, options?)` with optional `discountBps = 0`.
+- **[models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts)** & **[bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts)**:
+  - Added optional `discountBps` and `groupId` fields to `CreateBookingInput`, reused `validateBps` in `registerRoom`/`createBooking`, and added `BookingService.allocateGroupId()` so group bookings flow through the single canonical `createBooking` pricing/storage path without introducing any import from `corporate.ts`.
+- **[corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts)**:
+  - Exported `createGroupBooking(service, input)` (plus `CreateGroupBookingInput` and `GroupBookingResult`) validating `roomIds.length >= 2`, duplicate room IDs, registered rooms, `discountBps` (`0..10000`), and time range (`ValidationError`).
+  - Checks slot conflicts atomically across all requested rooms using `isBookingActiveAt` and `slotsOverlap` from `bookings.ts` before committing any booking (`ConflictError` with zero partial commits).
+  - Assigns a shared `groupId` and returns `{ groupId, bookings, subtotalCents, discountCents, taxCents, totalCents }`.
+- **[index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts)**: Re-exported `applyDiscountAndTax`, `validateBps`, `createGroupBooking`, and their associated types.
+- **[pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts)** & **[corporate.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/corporate.test.ts)**: Added tests for `applyDiscountAndTax`, discounted `calculateBookingPrice`, multi-room group pricing, atomic conflict rollback (confirmed bookings and active/expired holds), and validation errors.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **20/20 tests passed** (exit code `0`).
+- Verified `src/` imports remain strictly acyclic (`models` ← `config`, `pricing` ← `bookings` ← `corporate` ← `index`).
+
+STDERR:
+

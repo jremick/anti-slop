@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 4
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved the `STRUCT-DUPLICATE-BLOCK` finding by extracting shared canonical helpers in `src/bookings.ts` and reusing them in `src/corporate.ts`:
+
+- **[bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts)**:
+  - Exported `assertNoRoomSlotConflict` (using `isBookingActiveAt` and `slotsOverlap`) and `validateBookingTimeWindow`, delegating `BookingService.assertNoSlotConflict` and `BookingService.validateCreateBookingInput` to them.
+- **[corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts)**:
+  - Updated `assertGroupRoomsAvailable` and `validateGroupBookingInput` to call `assertNoRoomSlotConflict` and `validateBookingTimeWindow` directly from `src/bookings.ts`, eliminating the duplicated conflict-check and time-window validation blocks while preserving strictly acyclic imports.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **21/21 tests passed** (exit code `0`).
+
+STDERR:
+

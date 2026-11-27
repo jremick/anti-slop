@@ -1,0 +1,26 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "e7aaa4af-76e0-4ce7-9958-7e3dbef1591b", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 354876, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (hold expiration, half-open slot-overlap conflict detection, and integer-cent half-up pricing) in `benchmarks/sources/ev2_ts_bookings/`:
+
+### Changes
+- **[pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts)**:
+  - Exported `roundHalfUpDiv(numerator, denominator)` using `Math.floor((numerator * 2 + denominator) / (2 * denominator))` with `ValidationError` checks for non-integer/negative numerators and non-integer/non-positive denominators.
+  - Updated `calculateBookingPrice(room, durationMinutes, options?)` to accept any positive integer `durationMinutes`, computing `subtotalCents = roundHalfUpDiv(room.hourlyRateCents * durationMinutes, 60)` and `taxCents = computeTaxCents(subtotalCents, room.taxBps)`.
+- **[models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts)**:
+  - Added optional `nowMinute?: number` and `holdMinutes?: number` fields to `CreateBookingInput`.
+- **[bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts)**:
+  - Exported `slotsOverlap(startA, endA, startB, endB)` (half-open interval overlap so back-to-back bookings do not conflict) and `isBookingActiveAt(booking, nowMinute)` (`confirmed`, or `held` with `expiresAt !== undefined && nowMinute < expiresAt`).
+  - Updated `BookingService.createBooking(input)` to default `nowMinute = 0`, validate `holdMinutes` (`1..config.maxHoldMinutes`) setting `status: "held"` and `expiresAt = nowMinute + holdMinutes`, and throw `ConflictError` on overlapping active bookings on the same room at `nowMinute`.
+  - Added `BookingService.confirmHold(bookingId, nowMinute)` to transition a non-expired hold to `"confirmed"` with `expiresAt` cleared, throwing `ValidationError` if unknown, not held, or expired (and `ConflictError` if an active conflicting booking exists).
+- **[index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts)**:
+  - Re-exported `roundHalfUpDiv`, `slotsOverlap`, and `isBookingActiveAt`.
+- **Tests**:
+  - Added [pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts) and [holds_and_conflicts.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/holds_and_conflicts.test.ts) covering half-up rounding, arbitrary minute durations, half-open overlap boundaries, hold limits, expiration boundaries, and `confirmHold` transitions.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **13/13 tests passed** (exit code `0`).
+
+STDERR:
+

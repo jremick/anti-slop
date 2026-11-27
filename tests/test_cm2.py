@@ -83,7 +83,7 @@ class CM2MultiFileCommentAblationTests(unittest.TestCase):
         pilot = benchmark.read_json(REPO_ROOT / "benchmarks" / "pilot-comments-v0.8.0.json")
         validated = benchmark.validate_pilot(pilot, cases, "benchmarks/pilot-comments-v0.8.0.json")
         self.assertEqual(validated["experiment_id"], "pilot-comments-v0.8.0")
-        self.assertEqual(validated["status"], "planned")
+        self.assertEqual(validated["status"], "completed")
         self.assertEqual(validated["conditions"], ["no-comments", "invariant-comments", "comment-traps"])
 
         fixture_check = grade_cm2.verify_ablation_fixtures(REPO_ROOT)

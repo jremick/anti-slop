@@ -1,0 +1,31 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 (tiered cancellation refunds and centralized fail-closed cancellation fee config):
+
+### Changes
+- **[src/config.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/config.ts)**:
+  - Exported `CancellationFeeConfig`, `loadCancellationFeeConfig(env = process.env)`, and `selectCancellationFeeBps(minutesBeforeStart, cfg)`.
+  - Reads `BOOKING_CANCEL_FEE_TIERS_JSON` and fails closed with `ConfigError` on missing, empty, invalid JSON, non-object, negative/non-integer `cutoffMinutes`, or invalid/out-of-range `earlyFeeBps`/`lateFeeBps` (`0..10000`).
+  - Returns `earlyFeeBps` when `minutesBeforeStart >= cutoffMinutes`, otherwise `lateFeeBps`.
+  - Kept all `process.env` reads strictly centralized in `src/config.ts`.
+- **[src/pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts)**:
+  - Exported `CancellationRefundBreakdown` and `computeCancellationRefund(totalCents, feeBps)` computing `feeCents = roundHalfUpDiv(totalCents * feeBps, 10000)` and `refundCents = totalCents - feeCents` with `ValidationError` bounds validation.
+- **[src/bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts)**:
+  - Preserved injected `options.env` on `BookingService` (passing `this.env` into `src/config.ts`, where omitted `env` defaults to `process.env`).
+  - Added `BookingService.cancelBooking(bookingId, nowMinute)` returning `{ booking, feeBps, feeCents, refundCents }`:
+    - Rejects invalid `nowMinute`, unknown booking, already `"cancelled"` booking, or `nowMinute > booking.startMinute` with `ValidationError`.
+    - Loads cancellation fee tiers via `loadCancellationFeeConfig(this.env)` before mutating booking state so config errors fail closed without cancelling the booking.
+    - Marks the booking `"cancelled"` (clearing `expiresAt` if present), immediately freeing the room slot for reuse.
+- **[src/index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts)**:
+  - Re-exported `loadCancellationFeeConfig`, `selectCancellationFeeBps`, `CancellationFeeConfig`, `computeCancellationRefund`, `CancellationRefundBreakdown`, and `CancelBookingResult`.
+- **[tests/cancellation.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/cancellation.test.ts)**:
+  - Added `node:test` coverage for config parsing and fail-closed errors, early/late tier selection at the exact cutoff boundary, half-up refund calculation, non-mutating fail-closed behavior in `cancelBooking`, immediate slot reuse, validation errors, and default `process.env` resolution.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: exited `0` with **26/26** tests passing.
+- Verified via `grep -n 'process\.env' benchmarks/sources/ev2_ts_bookings/src/*.ts` that `process.env` is referenced only in `src/config.ts`.
+
+STDERR:
+

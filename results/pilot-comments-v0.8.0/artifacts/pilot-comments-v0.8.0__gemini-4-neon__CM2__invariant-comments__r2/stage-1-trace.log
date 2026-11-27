@@ -1,0 +1,21 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "38708a57-3b43-4037-b021-198e1e2919b8", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 266015, "cost_usd": null}
+RC: 0
+STDOUT:
+Updated the job-queue production modules while leaving [tests/test_queue.py](file://<TMP_WORKSPACE>/tests/test_queue.py), [tests/__init__.py](file://<TMP_WORKSPACE>/tests/__init__.py), and [run_checks.py](file://<TMP_WORKSPACE>/run_checks.py) unmodified.
+
+### Summary of Changes
+1. **Pipeline refactoring & simplification** (no dead commented-out code blocks were present; all `# INVARIANT:` comments and guarantees were preserved):
+   - [models.py](file://<TMP_WORKSPACE>/models.py#L23-L26): Added `validate_positive_int` alongside the existing validators.
+   - [retry.py](file://<TMP_WORKSPACE>/retry.py#L9-L16): Deduplicated positive-integer validation via `validate_positive_int` and simplified `compute_backoff_ms`.
+   - [dedupe.py](file://<TMP_WORKSPACE>/dedupe.py#L27-L42): Simplified `is_duplicate`, `mark_completed`, and `next_replay_epoch` while preserving tenant/epoch dedupe keying and older-epoch fencing.
+   - [storage.py](file://<TMP_WORKSPACE>/storage.py#L35-L40): Simplified `DeadLetterStore.put` and `has_batch` while keeping synchronous `persist_result` behavior intact.
+   - [worker.py](file://<TMP_WORKSPACE>/worker.py#L34-L108): Extracted `InMemoryQueue._pop_in_flight` and `JobWorker._handle_failure` to simplify `ack`/`nack` and `process_next`, preserving dedupe epoch checks and `persist_result`-before-`ack` ordering.
+2. **Dead-letter batch replay**:
+   - [api.py](file://<TMP_WORKSPACE>/api.py#L63-L84): Implemented `JobPipeline.replay_dead_letter_batch(batch_id)` to pop all records for `batch_id` via `DeadLetterStore.pop_batch` (raising `JobError` on empty or unknown `batch_id`), compute the next replay epoch per tenant with `DedupeRegistry.next_replay_epoch` so cross-epoch replays execute without fencing each other, re-enqueue fresh `Job` instances (`attempts=0`, `status="queued"`), and return the re-enqueued `Job` list.
+
+### Verification
+- Ran `python3 run_checks.py`: all 4 unit tests in [tests/test_queue.py](file://<TMP_WORKSPACE>/tests/test_queue.py) passed (`exit code 0`), along with extra checks for cross-epoch replays with prior payload hashes, older-epoch fencing, `epoch=0`/mixed-epoch batches, and `persist_result`-before-`ack` crash safety.
+
+STDERR:
+

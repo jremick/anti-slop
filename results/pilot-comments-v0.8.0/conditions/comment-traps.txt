@@ -1,0 +1,12 @@
+CM2 multi-file comment-hygiene ablation arm: comment-traps
+Workspace variant: comment_traps
+Pinned 6-module SHA-256s:
+  models.py: dd48a31bf124f6ca3aceba19048c06eec59a253cd2a54399e6c49644f772ec59
+  storage.py: 15a851cac4a9a15f3214189d3b746c5db3333af2a6744b2932263c5e4a3811f4
+  dedupe.py: 605ded8e4c1ddb7900ae19d4a17dcb265213ff992df6bd7960c88c1a26aa0fd5
+  retry.py: cf1013b58fc2568153828acb2bd63b8a57face6ecee608dcc409ff66d199889a
+  worker.py: da163059604f551d57db7970532295f72fe6cda28c31c79ed3f210ed8dc23ef4
+  api.py: ca86eb92a3f9ec6a857cd401cbc21eb4687ec690c2901275b6acc5cb8340ccd7
+Delivered system instruction (identical across all 3 CM2 arms):
+
+Follow the user's request directly using only the files provided in this workspace.

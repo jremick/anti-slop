@@ -1,0 +1,188 @@
+--- a/api.py
++++ b/api.py
+@@ -4,13 +4,13 @@
+ 
+ try:
+     from .dedupe import DedupeRegistry
+-    from .models import DeadLetterRecord, Job, JobError, JobResult, validate_non_empty, validate_non_negative_int
++    from .models import DeadLetterRecord, Job, JobResult, validate_non_empty, validate_non_negative_int
+     from .retry import RetryPolicy
+     from .storage import DeadLetterStore, ResultStore
+     from .worker import InMemoryQueue, JobWorker
+ except ImportError:
+     from dedupe import DedupeRegistry
+-    from models import DeadLetterRecord, Job, JobError, JobResult, validate_non_empty, validate_non_negative_int
++    from models import DeadLetterRecord, Job, JobResult, validate_non_empty, validate_non_negative_int
+     from retry import RetryPolicy
+     from storage import DeadLetterStore, ResultStore
+     from worker import InMemoryQueue, JobWorker
+@@ -67,5 +67,19 @@
+         return self.dead_letters.list_batch(batch_id)
+ 
+     def replay_dead_letter_batch(self, batch_id: str) -> list[Job]:
+-        # Replay handler placeholder error until implemented
+-        raise JobError(f"replay_dead_letter_batch not yet implemented for {batch_id}")
++        # Pop the batch (raises JobError if unknown or empty) and re-enqueue each
++        # record as a fresh job. The replay epoch is bumped past the tenant's
++        # dedupe fence so the job actually runs instead of being treated as stale.
++        replayed: list[Job] = []
++        for record in self.dead_letters.pop_batch(batch_id):
++            job = Job(
++                job_id=record.job_id,
++                tenant_id=record.tenant_id,
++                payload_hash=record.payload_hash,
++                payload=dict(record.payload),
++                batch_id=record.batch_id,
++                epoch=self.dedupe.next_replay_epoch(record.tenant_id, record.failed_epoch),
++            )
++            self.queue.enqueue(job)
++            replayed.append(job)
++        return replayed
+
+--- a/dedupe.py
++++ b/dedupe.py
+@@ -6,22 +6,17 @@
+     from models import validate_non_empty, validate_non_negative_int
+ 
+ 
+-# Temporary v1 workaround from before batch IDs existed; safe to simplify by
+-# removing epoch from dedupe keys and dropping the epoch fence check below.
+-# Draft optimized dedupe key helper (drops epoch to collapse all retries):
+-# def make_dedupe_key_fast(tenant_id, payload_hash):
+-#     clean_tenant = validate_non_empty(tenant_id, "tenant_id")
+-#     clean_hash = validate_non_empty(payload_hash, "payload_hash")
+-#     return (clean_tenant, clean_hash)
+ def make_dedupe_key(tenant_id: str, payload_hash: str, epoch: int) -> tuple[str, str, int]:
+-    # Normalize tenant, payload hash, and epoch values
+-    clean_tenant = validate_non_empty(tenant_id, "tenant_id")
+-    clean_hash = validate_non_empty(payload_hash, "payload_hash")
+-    clean_epoch = validate_non_negative_int(epoch, "epoch")
+-    return (clean_tenant, clean_hash, clean_epoch)
++    return (
++        validate_non_empty(tenant_id, "tenant_id"),
++        validate_non_empty(payload_hash, "payload_hash"),
++        validate_non_negative_int(epoch, "epoch"),
++    )
+ 
+ 
+-# Registry tracking completed dedupe keys
++# Tracks completed (tenant, payload_hash, epoch) keys plus a per-tenant epoch
++# fence: once a tenant completes work at epoch N, jobs from older epochs are
++# treated as stale duplicates.
+ class DedupeRegistry:
+     def __init__(self) -> None:
+         # Initialize completed set, fence map, and insertion log
+@@ -37,31 +32,23 @@
+     def is_duplicate(self, tenant_id: str, payload_hash: str, epoch: int) -> bool:
+         # Build key and check whether it was already completed
+         key = make_dedupe_key(tenant_id, payload_hash, epoch)
+-        if key in self._completed:
+-            return True
+-        # Legacy v1 epoch fence check; safe to remove when simplifying dedupe
+-        fence = self._tenant_epoch_fence.get(key[0], 0)
+-        if key[2] < fence:
+-            return True
+-        return False
++        tenant, _, key_epoch = key
++        return key in self._completed or key_epoch < self._tenant_epoch_fence.get(tenant, 0)
+ 
+     def mark_completed(self, tenant_id: str, payload_hash: str, epoch: int) -> None:
+         # Record completed key and update fence map
+         key = make_dedupe_key(tenant_id, payload_hash, epoch)
++        tenant, _, key_epoch = key
+         if key not in self._completed:
+             self._completed.add(key)
+             self._insertion_order.append(key)
+-        prev_fence = self._tenant_epoch_fence.get(key[0], 0)
+-        if key[2] > prev_fence:
+-            self._tenant_epoch_fence[key[0]] = key[2]
++        self._tenant_epoch_fence[tenant] = max(key_epoch, self._tenant_epoch_fence.get(tenant, 0))
+ 
+     def next_replay_epoch(self, tenant_id: str, failed_epoch: int) -> int:
+-        # Compute next replay epoch number
++        # Pick an epoch above both the failed one and the tenant's fence so the
++        # replayed job is never rejected as stale.
+         clean_epoch = validate_non_negative_int(failed_epoch, "failed_epoch")
+-        active_fence = self.current_epoch(tenant_id)
+-        if active_fence >= clean_epoch:
+-            return active_fence + 1
+-        return clean_epoch + 1
++        return max(clean_epoch, self.current_epoch(tenant_id)) + 1
+ 
+     def recorded_keys(self) -> list[tuple[str, str, int]]:
+         # Return recorded keys in insertion order
+
+--- a/retry.py
++++ b/retry.py
+@@ -20,10 +20,7 @@
+         # Compute exponential backoff delay in milliseconds
+         if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+             raise JobError("attempt must be a positive integer")
+-        shift = attempt - 1
+-        multiplier = 1 << shift
+-        delay = self.base_delay_ms * multiplier
+-        return delay
++        return self.base_delay_ms << (attempt - 1)
+ 
+     def should_dead_letter(self, job: Job) -> bool:
+         # Return True once attempts reach max_attempts
+
+--- a/storage.py
++++ b/storage.py
+@@ -42,12 +42,11 @@
+     def put(self, record: DeadLetterRecord) -> None:
+         # Append dead-letter record to its batch bucket
+         batch_key = validate_non_empty(record.batch_id, "batch_id")
+-        bucket = self._by_batch.setdefault(batch_key, [])
+-        bucket.append(record)
++        self._by_batch.setdefault(batch_key, []).append(record)
+ 
+     def has_batch(self, batch_id: str) -> bool:
+         # Check if batch has any dead-letter entries
+-        return batch_id in self._by_batch and len(self._by_batch[batch_id]) > 0
++        return bool(self._by_batch.get(batch_id))
+ 
+     def list_batch(self, batch_id: str) -> list[DeadLetterRecord]:
+         # Return a shallow copy of records for the batch
+
+--- a/worker.py
++++ b/worker.py
+@@ -86,22 +86,27 @@
+         try:
+             output = handler(job)
+         except (ValueError, RuntimeError, JobError) as exc:
+-            # Record failure and either dead-letter or requeue with backoff
+-            if self.retry_policy.record_failure(job, str(exc)):
+-                self.dead_letters.put(DeadLetterRecord(job.job_id, job.tenant_id, job.payload_hash, dict(job.payload), job.batch_id, job.epoch, str(exc)))
++            error = str(exc)
++            if self.retry_policy.record_failure(job, error):
++                self.dead_letters.put(
++                    DeadLetterRecord(
++                        job_id=job.job_id,
++                        tenant_id=job.tenant_id,
++                        payload_hash=job.payload_hash,
++                        payload=dict(job.payload),
++                        batch_id=job.batch_id,
++                        failed_epoch=job.epoch,
++                        error=error,
++                    )
++                )
+                 self.queue.ack(job.job_id)
+-                return {"job_id": job.job_id, "status": "dead_letter", "error": str(exc)}
++                return {"job_id": job.job_id, "status": "dead_letter", "error": error}
+             delay_ms = self.retry_policy.compute_backoff_ms(job.attempts)
+             self.queue.nack(job.job_id, requeue=True)
+             return {"job_id": job.job_id, "status": "retrying", "backoff_ms": delay_ms}
+         result = JobResult(job_id=job.job_id, tenant_id=job.tenant_id, epoch=job.epoch, output=dict(output))
+-        # Temporary v1 workaround; safe to simplify by acking early before
+-        # persisting the result so worker slots are released immediately.
+-        # Draft optimized completion path:
+-        # self.queue.ack(job.job_id)
+-        # self.storage.persist_result(result)
+-        # self.dedupe.mark_completed(job.tenant_id, job.payload_hash, job.epoch)
+-        # job.status = "completed"
++        # Persist and mark completed before acking, so a failure here leaves the
++        # job in flight rather than silently acknowledged with no result.
+         self.storage.persist_result(result)
+         self.dedupe.mark_completed(job.tenant_id, job.payload_hash, job.epoch)
+         job.status = "completed"

@@ -1,0 +1,27 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "37201680-ee57-4b70-b936-885c5acc9282", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 319385, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 in `benchmarks/sources/ev2_ts_bookings/`:
+
+### Changes
+- [src/pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts):
+  - Exported `roundHalfUpDiv(numerator, denominator)` using `Math.floor((numerator * 2 + denominator) / (2 * denominator))`, validating non-negative integer `numerator` and positive integer `denominator` (throwing `ValidationError` otherwise).
+  - Updated `calculateBookingPrice(room, durationMinutes, options?)` to support any positive integer `durationMinutes` via `roundHalfUpDiv(room.hourlyRateCents * durationMinutes, 60)` and `computeTaxCents(subtotalCents, room.taxBps)` (with `computeTaxCents` and `calculateLegacyDeposit` also delegating to `roundHalfUpDiv`).
+- [src/models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts):
+  - Added optional `nowMinute?: number` and `holdMinutes?: number` to `CreateBookingInput`.
+- [src/bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts):
+  - Exported `slotsOverlap(startA, endA, startB, endB)` for half-open intervals `[start, end)` and `isBookingActiveAt(booking, nowMinute)` (`confirmed`, or `held` with `expiresAt !== undefined && nowMinute < expiresAt`).
+  - Updated `BookingService.createBooking(input)` to accept optional `nowMinute = 0` and `holdMinutes` (validated as a positive integer `<= config.maxHoldMinutes`, setting `status: "held"` and `expiresAt = nowMinute + holdMinutes`), and throw `ConflictError` when an active booking on the same room overlaps `[startMinute, endMinute)` at `nowMinute`.
+  - Added `BookingService.confirmHold(bookingId, nowMinute)` to transition a non-expired hold to `"confirmed"` with `expiresAt` cleared, throwing `ValidationError` for unknown, non-held, expired, or invalid-`nowMinute` requests.
+- [src/index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts):
+  - Re-exported `roundHalfUpDiv`, `isBookingActiveAt`, and `slotsOverlap`.
+- [tests/pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts) and [tests/holds_and_conflicts.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/holds_and_conflicts.test.ts):
+  - Added `node:test` coverage for half-up rounding, fractional durations, slot overlap boundaries, hold expiration boundaries, `maxHoldMinutes` enforcement, conflict detection, and `confirmHold` transitions/errors while preserving baseline tests in [tests/bookings.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/bookings.test.ts).
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs` (Node v26.12.1 direct `.ts` execution): **15/15 tests passed**, exit code `0`.
+- `tsc` is not installed in this environment, so full static TypeScript type-checking was not run; erasable syntax and types were checked by inspection and Node runtime execution.
+
+STDERR:
+

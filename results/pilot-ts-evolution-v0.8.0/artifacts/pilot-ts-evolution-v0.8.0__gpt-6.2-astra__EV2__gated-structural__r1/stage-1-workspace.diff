@@ -1,0 +1,225 @@
+--- a/benchmarks/sources/ev2_ts_bookings/src/bookings.ts
++++ b/benchmarks/sources/ev2_ts_bookings/src/bookings.ts
+@@ -1,11 +1,20 @@
+ import { loadBookingConfig } from "./config.ts";
+ import type { BookingConfig } from "./config.ts";
+-import { ValidationError } from "./models.ts";
++import { ConflictError, ValidationError } from "./models.ts";
+ import type { Booking, CreateBookingInput, Room } from "./models.ts";
+ import { calculateBookingPrice, validateNonNegativeInt, validatePositiveInt } from "./pricing.ts";
+ 
+ export interface BookingServiceOptions {
+   readonly env?: Record<string, string | undefined>;
++}
++
++export function slotsOverlap(startA: number, endA: number, startB: number, endB: number): boolean {
++  return startA < endB && startB < endA;
++}
++
++export function isBookingActiveAt(booking: Booking, nowMinute: number): boolean {
++  return booking.status === "confirmed" ||
++    (booking.status === "held" && booking.expiresAt !== undefined && nowMinute < booking.expiresAt);
+ }
+ 
+ export class BookingService {
+@@ -75,6 +84,25 @@
+       throw new ValidationError("endMinute must be strictly greater than startMinute");
+     }
+     const room = this.getRoom(input.roomId);
++    const { nowMinute = 0, holdMinutes } = input;
++    validateNonNegativeInt(nowMinute, "nowMinute");
++    if (holdMinutes !== undefined) {
++      validatePositiveInt(holdMinutes, "holdMinutes");
++      if (holdMinutes > this.config.maxHoldMinutes) {
++        throw new ValidationError("holdMinutes exceeds the configured maximum");
++      }
++    }
++
++    for (const booking of this.bookings.values()) {
++      if (
++        booking.roomId === room.roomId &&
++        isBookingActiveAt(booking, nowMinute) &&
++        slotsOverlap(input.startMinute, input.endMinute, booking.startMinute, booking.endMinute)
++      ) {
++        throw new ConflictError(`Room ${room.roomId} already has a booking in this slot`);
++      }
++    }
++
+     const duration = input.endMinute - input.startMinute;
+     const price = calculateBookingPrice(room, duration, {
+       legacyDepositMode: input.legacyDepositMode,
+@@ -85,7 +113,8 @@
+       customerId: input.customerId.trim(),
+       startMinute: input.startMinute,
+       endMinute: input.endMinute,
+-      status: "confirmed",
++      status: holdMinutes === undefined ? "confirmed" : "held",
++      ...(holdMinutes === undefined ? {} : { expiresAt: nowMinute + holdMinutes }),
+       subtotalCents: price.subtotalCents,
+       discountCents: price.discountCents,
+       taxCents: price.taxCents,
+@@ -95,4 +124,16 @@
+     this.bookings.set(booking.bookingId, booking);
+     return booking;
+   }
++
++  confirmHold(bookingId: string, nowMinute: number): Booking {
++    validateNonNegativeInt(nowMinute, "nowMinute");
++    const booking = this.getBooking(bookingId);
++    if (booking.status !== "held" || !isBookingActiveAt(booking, nowMinute)) {
++      throw new ValidationError(`Booking ${bookingId} is not an active hold`);
++    }
++    const { expiresAt, ...details } = booking;
++    const confirmed: Booking = { ...details, status: "confirmed" };
++    this.bookings.set(bookingId, confirmed);
++    return confirmed;
++  }
+ }
+
+--- a/benchmarks/sources/ev2_ts_bookings/src/index.ts
++++ b/benchmarks/sources/ev2_ts_bookings/src/index.ts
+@@ -21,8 +21,9 @@
+   calculateBookingPrice,
+   calculateLegacyDeposit,
+   computeTaxCents,
++  roundHalfUpDiv,
+   validateNonNegativeInt,
+   validatePositiveInt,
+ } from "./pricing.ts";
+-export { BookingService } from "./bookings.ts";
++export { BookingService, isBookingActiveAt, slotsOverlap } from "./bookings.ts";
+ export type { BookingServiceOptions } from "./bookings.ts";
+
+--- a/benchmarks/sources/ev2_ts_bookings/src/models.ts
++++ b/benchmarks/sources/ev2_ts_bookings/src/models.ts
+@@ -64,5 +64,7 @@
+   readonly customerId: string;
+   readonly startMinute: number;
+   readonly endMinute: number;
++  readonly nowMinute?: number;
++  readonly holdMinutes?: number;
+   readonly legacyDepositMode?: boolean;
+ }
+
+--- a/benchmarks/sources/ev2_ts_bookings/src/pricing.ts
++++ b/benchmarks/sources/ev2_ts_bookings/src/pricing.ts
+@@ -15,6 +15,12 @@
+     throw new ValidationError(`${fieldName} must be a positive integer`);
+   }
+   return value;
++}
++
++export function roundHalfUpDiv(numerator: number, denominator: number): number {
++  validateNonNegativeInt(numerator, "numerator");
++  validatePositiveInt(denominator, "denominator");
++  return Math.floor((numerator * 2 + denominator) / (2 * denominator));
+ }
+ 
+ export function computeTaxCents(taxableCents: number, taxBps: number): number {
+@@ -38,11 +44,7 @@
+ ): PriceBreakdown {
+   validatePositiveInt(room.hourlyRateCents, "hourlyRateCents");
+   validatePositiveInt(durationMinutes, "durationMinutes");
+-  if (durationMinutes % 60 !== 0) {
+-    throw new ValidationError("Starter pricing only supports whole-hour durations");
+-  }
+-  const hours = durationMinutes / 60;
+-  const subtotalCents = room.hourlyRateCents * hours;
++  const subtotalCents = roundHalfUpDiv(room.hourlyRateCents * durationMinutes, 60);
+   const taxCents = computeTaxCents(subtotalCents, room.taxBps);
+   const depositCents = options?.legacyDepositMode === true
+     ? calculateLegacyDeposit(subtotalCents)
+
+--- /dev/null
++++ b/benchmarks/sources/ev2_ts_bookings/tests/availability.test.ts
+@@ -0,0 +1,62 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import {
++  BookingService, ConflictError, ValidationError, isBookingActiveAt, slotsOverlap,
++} from "../src/index.ts";
++
++const room = { roomId: "a", name: "A", hourlyRateCents: 999, taxBps: 500 };
++const slot = { roomId: room.roomId, customerId: "guest", startMinute: 60, endMinute: 90 };
++
++function createService(): BookingService {
++  const service = new BookingService({ env: { BOOKING_MAX_HOLD_MINUTES: "5" } });
++  service.registerRoom(room);
++  return service;
++}
++
++test("only overlapping slots in the same room conflict", () => {
++  const service = createService();
++  service.createBooking(slot);
++  for (const [startMinute, endMinute] of [[59, 61], [89, 91], [60, 90], [59, 91], [61, 89]]) {
++    assert.ok(slotsOverlap(60, 90, startMinute, endMinute));
++    assert.throws(() => service.createBooking({ ...slot, startMinute, endMinute }), ConflictError);
++  }
++  service.createBooking({ ...slot, startMinute: 55, endMinute: 60 });
++  service.createBooking({ ...slot, startMinute: 90, endMinute: 95 });
++  assert.equal(service.listRoomBookings(room.roomId).length, 3);
++  service.registerRoom({ ...room, roomId: "b" });
++  assert.equal(service.createBooking({ ...slot, roomId: "b" }).status, "confirmed");
++});
++
++test("a hold releases its slot at the expiration minute", () => {
++  const service = createService();
++  const hold = service.createBooking({ ...slot, nowMinute: 10, holdMinutes: 5 });
++  assert.equal(hold.status, "held");
++  assert.equal(hold.expiresAt, 15);
++  assert.throws(() => service.createBooking({ ...slot, nowMinute: 14 }), ConflictError);
++  assert.throws(() => service.confirmHold(hold.bookingId, 15), ValidationError);
++  assert.equal(service.getBooking(hold.bookingId).status, "held");
++  assert.equal(service.createBooking({ ...slot, nowMinute: 15 }).status, "confirmed");
++});
++
++test("confirming a hold preserves its slot and price beyond the original expiration", () => {
++  const service = createService();
++  const hold = service.createBooking({ ...slot, holdMinutes: 5 });
++  assert.equal(hold.expiresAt, 5);
++  const confirmed = service.confirmHold(hold.bookingId, 4);
++  assert.equal(confirmed.expiresAt, undefined);
++  assert.deepEqual(confirmed, service.getBooking(hold.bookingId));
++  assert.deepEqual({ ...confirmed, expiresAt: undefined }, { ...hold, status: "confirmed", expiresAt: undefined });
++  assert.throws(() => service.createBooking({ ...slot, holdMinutes: 1, nowMinute: 6 }), ConflictError);
++  assert.throws(() => service.confirmHold(confirmed.bookingId, 6), ValidationError);
++  assert.throws(() => service.confirmHold("missing", 6), ValidationError);
++  assert.equal(isBookingActiveAt({ ...confirmed, status: "held" }, 0), false);
++  assert.equal(isBookingActiveAt({ ...hold, status: "cancelled" }, 0), false);
++});
++
++test("invalid hold durations leave the slot available", () => {
++  const service = createService();
++  for (const holdMinutes of [0, -1, 1.5, 6]) {
++    assert.throws(() => service.createBooking({ ...slot, holdMinutes }), ValidationError);
++  }
++  assert.deepEqual(service.listRoomBookings(room.roomId), []);
++});
+
+--- /dev/null
++++ b/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts
+@@ -0,0 +1,24 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import { calculateBookingPrice, roundHalfUpDiv, ValidationError } from "../src/index.ts";
++
++test("integer division rounds ties up and rejects invalid operands", () => {
++  assert.equal(roundHalfUpDiv(0, 60), 0);
++  assert.equal(roundHalfUpDiv(89, 60), 1);
++  assert.equal(roundHalfUpDiv(90, 60), 2);
++  assert.equal(roundHalfUpDiv(91, 60), 2);
++  for (const [n, d] of [[-1, 2], [1.5, 2], [1, 0], [1, -1], [1, 1.5]]) {
++    assert.throws(() => roundHalfUpDiv(n, d), ValidationError);
++  }
++});
++
++test("partial hours round subtotal before computing tax and deposit", () => {
++  const room = { roomId: "a", name: "A", hourlyRateCents: 90, taxBps: 2500 };
++  assert.deepEqual(calculateBookingPrice(room, 1, { legacyDepositMode: true }), {
++    subtotalCents: 2, discountCents: 0, taxCents: 1, totalCents: 3, depositCents: 1,
++  });
++  assert.equal(calculateBookingPrice(room, 61).subtotalCents, 92);
++  for (const duration of [0, -1, 0.5]) {
++    assert.throws(() => calculateBookingPrice(room, duration), ValidationError);
++  }
++});

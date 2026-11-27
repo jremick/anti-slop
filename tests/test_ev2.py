@@ -886,7 +886,7 @@ class EV2TypeScriptEvolutionTests(unittest.TestCase):
         pilot = benchmark.read_json(REPO_ROOT / "benchmarks" / "pilot-ts-evolution-v0.8.0.json")
         validated = benchmark.validate_pilot(pilot, cases, "benchmarks/pilot-ts-evolution-v0.8.0.json")
         self.assertEqual(validated["experiment_id"], "pilot-ts-evolution-v0.8.0")
-        self.assertEqual(validated["status"], "planned")
+        self.assertEqual(validated["status"], "completed")
         self.assertEqual(validated["conditions"], ["baseline", "core-rules-v0.2.0", "gated-structural"])
 
     def test_starter_fixture_runs_baseline_and_fails_stage4_grader(self) -> None:

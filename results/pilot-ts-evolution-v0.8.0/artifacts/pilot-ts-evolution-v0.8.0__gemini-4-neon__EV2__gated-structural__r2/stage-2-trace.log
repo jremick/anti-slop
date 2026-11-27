@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 for multi-room corporate/group bookings with strictly acyclic imports and shared pricing/overlap logic:
+
+- **Discount + tax pricing** in [pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts):
+  - Added `validateBps(value, fieldName)` and exported `applyDiscountAndTax(grossSubtotalCents, discountBps, taxBps)` computing `discountCents`, `subtotalCents`, `taxCents`, and `totalCents` with exact integer half-up rounding and `ValidationError` bounds checks (`0..10000`).
+  - Updated `calculateBookingPrice(room, durationMinutes, options?)` to accept optional `discountBps = 0` and delegate to `applyDiscountAndTax`.
+- **Group booking support** in [models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts), [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts), [corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts), and [index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts):
+  - Extended `CreateBookingInput` with optional `discountBps` and `groupId`, and added `BookingService.nextGroupId()`.
+  - Added [corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts) (one-way dependency on `bookings.ts`, `models.ts`, and `pricing.ts`) exporting `createGroupBooking(service, input)` and re-exported it from [index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts).
+  - Validates `roomIds.length >= 2`, duplicate rooms, unregistered rooms, `discountBps` (`0..10000`), and time/customer inputs (`ValidationError`), checks conflicts atomically across all rooms using `isBookingActiveAt` and `slotsOverlap` (`ConflictError` with zero partial commits), and prices/commits each room with a shared `groupId`.
+- **Tests & verification**:
+  - Added tests in [pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts) and [corporate.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/corporate.test.ts).
+  - Verified `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs` passes (18/18 tests, exit code `0`).
+
+STDERR:
+

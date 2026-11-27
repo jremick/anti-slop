@@ -1,0 +1,26 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "117b5bac-9806-4689-b3ce-d51f85309a10", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 330261, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (hold expiration, exact slot-overlap conflict detection, and integer-cent half-up pricing) in `benchmarks/sources/ev2_ts_bookings/`:
+
+### Summary of Changes
+- **[pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts)**:
+  - Exported `roundHalfUpDiv(numerator, denominator)` using exact integer half-up rounding (`Math.floor((numerator * 2 + denominator) / (2 * denominator))`) and rejecting invalid inputs with `ValidationError`.
+  - Updated `calculateBookingPrice(room, durationMinutes, options?)` to support any positive integer `durationMinutes` with `subtotalCents = roundHalfUpDiv(room.hourlyRateCents * durationMinutes, 60)` and `taxCents = computeTaxCents(subtotalCents, room.taxBps)`, and unified `computeTaxCents` and `calculateLegacyDeposit` on `roundHalfUpDiv`.
+- **[models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts)**:
+  - Extended `CreateBookingInput` with optional `nowMinute?: number` and `holdMinutes?: number`.
+- **[bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts)**:
+  - Exported `slotsOverlap(startA, endA, startB, endB)` (half-open interval overlap) and `isBookingActiveAt(booking, nowMinute)`.
+  - Updated `BookingService.createBooking(input)` to support `nowMinute = 0`, validate `holdMinutes` (`1..config.maxHoldMinutes`), create held bookings with `expiresAt = nowMinute + holdMinutes`, and reject overlapping active bookings on the same room with `ConflictError`.
+  - Added `BookingService.confirmHold(bookingId, nowMinute)` to transition active holds to `"confirmed"` with `expiresAt` cleared while rejecting unknown, non-held, or expired bookings with `ValidationError`.
+- **[index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts)**:
+  - Re-exported `roundHalfUpDiv`, `slotsOverlap`, and `isBookingActiveAt`.
+- **Tests** ([bookings.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/bookings.test.ts), [pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts)):
+  - Added `node:test` coverage for half-up integer division, fractional-hour pricing, half-open overlap boundaries, hold expiration, conflict checks, and `confirmHold`.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **12/12 tests passed** (exit code `0`).
+
+STDERR:
+

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "pilot-comments-v0.8.0",
-  "status": "planned",
+  "status": "completed",
   "standard_version": "0.2.0",
   "suite": "comment-hygiene-ablation-multifile",
   "cases": [
@@ -81,7 +81,7 @@
     }
   ],
   "limits": [
-    "Planned 36-run multi-file comment-hygiene ablation designed to eliminate CM1's 12/12 accuracy ceiling by withholding the two subtle cross-file invariants from the task prompt.",
+    "Completed 36-run multi-file comment-hygiene ablation (results/pilot-comments-v0.8.0/runs.jsonl, 36/36 completed, 12/12 accuracy across all three arms; invariant-comments fastest at -6.8% wall time and -2.4% Opus USD vs. no-comments, comment-traps +16.4% Opus USD and -20..-67 comment-line churn).",
     "All three variants share 100% identical executable Python AST across all 6 production modules (verified by benchmarks/graders/grade_cm2.py --check-ablation-fixtures).",
     "100% mechanically graded by benchmarks/graders/grade_cm2.py with zero word caps or subjective rubric scoring."
   ]

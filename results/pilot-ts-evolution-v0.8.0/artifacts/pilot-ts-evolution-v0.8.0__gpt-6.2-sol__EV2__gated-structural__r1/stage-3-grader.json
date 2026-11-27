@@ -1,0 +1,50 @@
+{
+  "case_id": "EV2",
+  "passed": true,
+  "checks": [
+    {
+      "id": "functional_all_turns",
+      "passed": true,
+      "detail": "All hidden TypeScript functional contracts passed through stage 3"
+    },
+    {
+      "id": "mutation_test_strength",
+      "passed": true,
+      "detail": "baseline_tests_passed=True, killed=16/20 (80.0%, min 65%), test_theater=0; survived sample: ['src/config.ts:30 compare (<= -> <)', 'src/bookings.ts:59 validation (throw -> noop)', 'src/config.ts:31 validation (throw -> noop)']"
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "passed": true,
+      "detail": "0 duplicated logic blocks across production TS modules"
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "passed": true,
+      "detail": "0 dead/legacy paths"
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "passed": true,
+      "detail": "prod_ts_files=6/8, god_fns=0, god_files=0, circular_imports=0"
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "passed": true,
+      "detail": "0 DIFF-* shortcuts, silent fallbacks, or scattered config reads"
+    }
+  ],
+  "metrics": {
+    "functional_passed": true,
+    "mutation_kill_rate": 0.8,
+    "mutation_killed": 16,
+    "mutation_total": 20,
+    "duplicate_blocks": 0,
+    "dead_compat": 0,
+    "god_functions": 0,
+    "god_files": 0,
+    "circular_imports": 0,
+    "test_theater": 0,
+    "silent_failures_and_shortcuts": 0,
+    "prod_files_count": 6
+  }
+}

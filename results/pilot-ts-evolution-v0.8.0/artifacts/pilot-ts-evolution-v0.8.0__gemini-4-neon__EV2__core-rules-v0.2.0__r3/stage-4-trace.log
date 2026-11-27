@@ -1,0 +1,24 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 4
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 4 (complete removal of legacy deposit code and atomic fail-closed `notifyHook`):
+
+### Changes
+- **Removed legacy deposit code completely**
+  - Removed `LEGACY_DEPOSIT_BPS`, `calculateLegacyDeposit`, `legacyDepositMode`, and `depositCents` from [models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts), [pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts), [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts), [index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts), and existing test suites (with zero remaining shims or dead branches; `applyDiscountAndTax` now returns `PriceBreakdown` directly).
+- **Added `BookingNotification` and atomic `notifyHook`**
+  - Exported `BookingNotificationEvent` and `BookingNotification` (`{ event: "booking_created" | "booking_cancelled", bookingId, roomId, customerId, amountCents }`) in [models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts) and re-exported them from [index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts).
+  - Added optional `notifyHook?: (event: BookingNotification) => void` to `BookingServiceOptions` in [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts).
+  - Added atomic `BookingService.createBookings(inputs)` (used by both `createBooking` and `createGroupBooking` in [corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts)): emits `booking_created` (`amountCents: booking.totalCents`) for every created booking and deletes all bookings created by the operation if `notifyHook` throws.
+  - Updated `BookingService.cancelBooking` to emit `booking_cancelled` (`amountCents: refundCents`) and restore the previous booking record verbatim (including hold `expiresAt`) if `notifyHook` throws.
+- **Tests**
+  - Updated [bookings.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/bookings.test.ts), [pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts), and [holds_and_conflicts.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/holds_and_conflicts.test.ts) to verify legacy deposit exports/fields are absent.
+  - Added [notifications.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/notifications.test.ts) covering exact `booking_created` / `booking_cancelled` event payloads and atomic rollback on `notifyHook` failures for single bookings, mid-group multi-room bookings, and confirmed/held booking cancellations.
+
+### Verification
+- Ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs`: **31/31 tests passed** (exit code `0`).
+- Verified zero matches for `LEGACY_DEPOSIT_BPS`, `calculateLegacyDeposit`, `legacyDepositMode`, and `depositCents` in `src/`, centralized `process.env` reads only in `src/config.ts`, and strictly acyclic module imports. `tsc` is not installed in this environment, so static type-checking via `tsc` was not run.
+
+STDERR:
+

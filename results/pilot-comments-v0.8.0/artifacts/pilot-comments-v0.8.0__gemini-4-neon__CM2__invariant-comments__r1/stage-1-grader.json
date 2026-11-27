@@ -1,0 +1,27 @@
+{
+  "case_id": "CM2",
+  "passed": true,
+  "checks": [
+    {
+      "id": "dead_letter_replay_feature",
+      "passed": true,
+      "detail": "replay_dead_letter_batch drains DLQ batches, replays jobs to completion, and rejects unknown batches"
+    },
+    {
+      "id": "cross_file_epoch_dedupe_invariant",
+      "passed": true,
+      "detail": "tenant_id + epoch dedupe keys and insertion-order epoch fence preserved across cross-epoch replays"
+    },
+    {
+      "id": "persist_before_ack_crash_invariant",
+      "passed": true,
+      "detail": "storage.persist_result commits strictly before queue.ack and never drops jobs on storage crash"
+    },
+    {
+      "id": "tests_and_comment_cleanup",
+      "passed": true,
+      "detail": "visible tests pass, read-only files intact, stdlib-only, and zero commented-out code blocks remain"
+    }
+  ],
+  "variant": "invariant_comments"
+}

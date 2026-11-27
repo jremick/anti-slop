@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "pilot-ts-evolution-v0.8.0",
-  "status": "planned",
+  "status": "completed",
   "standard_version": "0.2.0",
   "suite": "multi-turn-ts-compounding-quality",
   "cases": [
@@ -76,7 +76,7 @@
     }
   ],
   "limits": [
-    "Planned 36-run (144-stage) TypeScript multi-turn evolution pilot; no live model runs executed yet.",
+    "Completed 36-run (144-stage + 4 automated gate-repair turns) TypeScript multi-turn evolution pilot (results/pilot-ts-evolution-v0.8.0/runs.jsonl, 36/36 completed: 7/12 baseline -> 8/12 core-rules-v0.2.0 -> 12/12 gated-structural, 10 -> 5 -> 0 structural slop defects, 74.17% -> 75.00% -> 79.17% JS/TS mutation kill rate).",
     "EV2 uses zero-dependency erasable TypeScript executed natively via Node.js (`node --test`); replicate across bundled frontend/backend TypeScript repositories before generalizing.",
     "Zero word-cap checks are included by design: every acceptance check is 100% mechanical via benchmarks/graders/grade_ev2.py and gates/mutate.py."
   ]

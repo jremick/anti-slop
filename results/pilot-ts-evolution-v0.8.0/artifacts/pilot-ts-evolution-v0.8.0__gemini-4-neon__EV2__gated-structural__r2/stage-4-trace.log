@@ -1,0 +1,18 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 4
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 4 (complete legacy deposit removal and atomic fail-closed `notifyHook`):
+
+- **Complete legacy deposit removal**:
+  - Removed `LEGACY_DEPOSIT_BPS`, `calculateLegacyDeposit`, `legacyDepositMode`, and `depositCents` from [models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts), [pricing.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/pricing.ts), [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts), [index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts), [bookings.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/bookings.test.ts), and [pricing.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/pricing.test.ts).
+  - Simplified `applyDiscountAndTax` and `calculateBookingPrice` to return `PriceBreakdown` directly.
+- **Atomic fail-closed `notifyHook`**:
+  - Added `BookingNotification` / `BookingNotificationEvent` in [models.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/models.ts) (re-exported from [index.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/index.ts)) and optional `notifyHook?: (event: BookingNotification) => void` on `BookingServiceOptions` in [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts).
+  - Emits `booking_created` (`amountCents: booking.totalCents`) on every created booking and `booking_cancelled` (`amountCents: refundCents`) on every cancellation, rolling back single bookings, cancellations, and multi-room group bookings via `BookingService.createBookingsAtomic` in [corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts) if `notifyHook` throws.
+- **Tests & verification**:
+  - Added [notifications.test.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/tests/notifications.test.ts) verifying legacy export/field removal, exact notification payloads, and atomic rollback across single, group, and cancelled bookings.
+  - Verified zero `legacy`/`deposit` symbols remain in `src/`, all `process.env` reads stay in `src/config.ts`, and `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs` passes (27/27 tests, exit code `0`).
+
+STDERR:
+

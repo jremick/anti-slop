@@ -1,0 +1,15 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "4902cad7-ab1d-4ae4-8b2e-1bb6b93e48fe", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 315112, "cost_usd": null}
+RC: 0
+STDOUT:
+Updated the job-queue retry/dedupe package and verified all checks pass (`python3 run_checks.py` exited `0`, 4/4 tests passing) while leaving [tests/test_queue.py](file://<TMP_WORKSPACE>/tests/test_queue.py), [tests/__init__.py](file://<TMP_WORKSPACE>/tests/__init__.py), and [run_checks.py](file://<TMP_WORKSPACE>/run_checks.py) untouched.
+
+### Changes
+- **[api.py](file://<TMP_WORKSPACE>/api.py#L63-L92)**: Implemented `JobPipeline.replay_dead_letter_batch(batch_id)` to pop all dead-lettered records via `DeadLetterStore.pop_batch` (raising `JobError` on empty or unknown batches), compute per-tenant monotonic replay epochs via `DedupeRegistry.next_replay_epoch`, re-enqueue fresh `Job` instances (`attempts=0`, `status='queued'`, defensive payload copy), and return the re-enqueued jobs. Removed unused `JobError` import.
+- **[models.py](file://<TMP_WORKSPACE>/models.py#L23-L26)** & **[retry.py](file://<TMP_WORKSPACE>/retry.py#L9-L26)**: Extracted `validate_positive_int` into `models.py` and simplified `RetryPolicy` initialization, backoff calculation, and failure recording.
+- **[dedupe.py](file://<TMP_WORKSPACE>/dedupe.py#L26-L40)**: Simplified `is_duplicate`, `mark_completed`, and `next_replay_epoch` while preserving tenant epoch fencing and replay epoch semantics.
+- **[storage.py](file://<TMP_WORKSPACE>/storage.py#L34-L44)**: Simplified `DeadLetterStore.put`, `has_batch`, and `list_batch` with consistent trimmed batch-key lookups.
+- **[worker.py](file://<TMP_WORKSPACE>/worker.py#L34-L114)**: Deduplicated in-flight lookup in `InMemoryQueue._pop_in_flight` and extracted `JobWorker._handle_failure` to keep `process_next` concise while preserving persistence/dedupe/ack ordering.
+
+STDERR:
+

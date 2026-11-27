@@ -1,0 +1,14 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved both structural review findings without weakening any tests:
+
+- **Eliminated duplicated request validation & conflict checks (`STRUCT-DUPLICATE-BLOCK`)** in [bookings.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/bookings.ts):
+  - Extracted canonical helpers `validateNonEmptyString`, `validateBookingRequest`, and `assertNoRoomConflict`, plus `BookingService.buildBooking`, and reused them across both `BookingService` and `corporate.ts`.
+- **Decomposed `createGroupBooking` (`STRUCT-GOD-FUNCTION`)** in [corporate.ts](file://<TMP_WORKSPACE>/benchmarks/sources/ev2_ts_bookings/src/corporate.ts):
+  - Split room validation/resolution into `resolveGroupRooms` and atomic conflict checking into `assertRoomsAvailable`, reducing `createGroupBooking` to 37 lines while keeping imports strictly acyclic.
+- **Verification**: Re-ran `node benchmarks/sources/ev2_ts_bookings/run_checks.mjs` (18/18 tests passing, exit code `0`).
+
+STDERR:
+

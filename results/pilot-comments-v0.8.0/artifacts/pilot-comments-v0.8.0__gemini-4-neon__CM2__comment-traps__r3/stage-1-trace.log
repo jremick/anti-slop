@@ -1,0 +1,20 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "7885c644-aaa4-4661-aad6-fe254119ee96", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 276043, "cost_usd": null}
+RC: 0
+STDOUT:
+Updated the job-queue retry/dedupe pipeline while leaving [tests/test_queue.py](file://<TMP_WORKSPACE>/tests/test_queue.py), [tests/__init__.py](file://<TMP_WORKSPACE>/tests/__init__.py), and [run_checks.py](file://<TMP_WORKSPACE>/run_checks.py) unmodified:
+
+### Changes
+- **[models.py](file://<TMP_WORKSPACE>/models.py)**: Added `validate_positive_int` to centralize positive-integer validation and removed redundant comments.
+- **[retry.py](file://<TMP_WORKSPACE>/retry.py)**: Simplified `RetryPolicy` validation via `validate_positive_int` and streamlined `compute_backoff_ms`.
+- **[storage.py](file://<TMP_WORKSPACE>/storage.py)**: Simplified `DeadLetterStore.put` and `has_batch`, and cleaned up redundant comments.
+- **[dedupe.py](file://<TMP_WORKSPACE>/dedupe.py)**: Removed the dead commented-out `make_dedupe_key_fast` block and misleading comments while preserving epoch-scoped dedupe keys and tenant epoch fencing in `is_duplicate`, and simplified `is_duplicate`, `mark_completed`, and `next_replay_epoch`.
+- **[worker.py](file://<TMP_WORKSPACE>/worker.py)**: Removed the dead commented-out completion block while preserving persist-before-ack durability ordering, and extracted `_handle_failure` and `_complete_job` helpers on `JobWorker`.
+- **[api.py](file://<TMP_WORKSPACE>/api.py#L72-L94)**: Implemented `JobPipeline.replay_dead_letter_batch(batch_id)` to pop all dead-lettered records for `batch_id` (raising `JobError` on empty/unknown batches), advance each tenant's replay epoch via `DedupeRegistry.next_replay_epoch`, re-enqueue fresh `Job` instances (`attempts=0`, `status="queued"`), and return them.
+
+### Verification
+- Ran `python3 run_checks.py`: all 4 tests in `VisibleJobQueueTests` passed (`Ran 4 tests ... OK`, exit code `0`).
+- Verified epoch-scoped dedupe/fencing, persist-before-ack ordering on success and storage errors, and multi-record/advanced-epoch dead-letter replays.
+
+STDERR:
+

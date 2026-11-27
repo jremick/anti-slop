@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "4cc262b6-292a-4874-8a1a-141f459cd751", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 267830, "cost_usd": null}
+RC: 0
+STDOUT:
+The job-queue retry/dedupe package has been refactored and `JobPipeline.replay_dead_letter_batch` has been implemented while leaving [tests/test_queue.py](file://<TMP_WORKSPACE>/tests/test_queue.py), [tests/__init__.py](file://<TMP_WORKSPACE>/tests/__init__.py), and [run_checks.py](file://<TMP_WORKSPACE>/run_checks.py) unmodified.
+
+### Summary of Changes
+- **[models.py](file://<TMP_WORKSPACE>/models.py) & [retry.py](file://<TMP_WORKSPACE>/retry.py)**: Added `validate_positive_int` in `models.py` to remove duplicated positive-integer checks in `RetryPolicy`, simplified exponential backoff computation, and removed noisy comments.
+- **[storage.py](file://<TMP_WORKSPACE>/storage.py)**: Simplified `DeadLetterStore.put` and `has_batch` and removed redundant comments.
+- **[dedupe.py](file://<TMP_WORKSPACE>/dedupe.py)**: Removed the dead commented-out `make_dedupe_key_fast` block and misleading comments while preserving epoch-scoped dedupe keys (`(tenant_id, payload_hash, epoch)`) and the per-tenant epoch fence check in `DedupeRegistry.is_duplicate`; simplified `next_replay_epoch`.
+- **[worker.py](file://<TMP_WORKSPACE>/worker.py)**: Removed the dead commented-out early-ack block while preserving persist-before-ack ordering (`storage.persist_result` and `dedupe.mark_completed` before `queue.ack`), and extracted `_handle_failure` and `_complete_job` helpers on `JobWorker`.
+- **[api.py](file://<TMP_WORKSPACE>/api.py)**: Implemented `JobPipeline.replay_dead_letter_batch(batch_id)` to pop all dead-lettered records for `batch_id` (raising `JobError` on empty/unknown batches via `DeadLetterStore.pop_batch`), advance each tenant's replay epoch via `DedupeRegistry.next_replay_epoch`, re-enqueue fresh `Job` instances (`attempts=0`, `status='queued'`), and return them.
+
+### Verification
+- `python3 run_checks.py` ran all 4 unit tests in [tests/test_queue.py](file://<TMP_WORKSPACE>/tests/test_queue.py) and exited with status `0`.
+- Verified epoch-scoped dedupe/fencing, persist-before-ack durability (including on storage failure), and multi-record/multi-tenant dead-letter replay behavior.
+
+STDERR:
+

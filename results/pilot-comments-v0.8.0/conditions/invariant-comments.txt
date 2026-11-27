@@ -1,0 +1,12 @@
+CM2 multi-file comment-hygiene ablation arm: invariant-comments
+Workspace variant: invariant_comments
+Pinned 6-module SHA-256s:
+  models.py: 3f63f16c226d63343db4fb75f9022c34143699ad6e6a9c7d47b45ae82cb22c71
+  storage.py: 78610577cdf4646782a647ee8722bba93cd54818a84f578969a0393edce90d8b
+  dedupe.py: dee18ad9cd756ccaf5b13064626e7ba70917b739729b2013b3f45fd9b88fe20f
+  retry.py: e42fc1dd05534e4a661df709f0ecbc43e7ad45a56d894c39e8d034ff2eb37b42
+  worker.py: 92b5d890499e811fc25fec4823e9e3da82480d1d6c237887c7b1c08b4030866f
+  api.py: 8bafaaa52d72cfa2823750c545dff41aeea59a332e280ac329390e1f533c9786
+Delivered system instruction (identical across all 3 CM2 arms):
+
+Follow the user's request directly using only the files provided in this workspace.

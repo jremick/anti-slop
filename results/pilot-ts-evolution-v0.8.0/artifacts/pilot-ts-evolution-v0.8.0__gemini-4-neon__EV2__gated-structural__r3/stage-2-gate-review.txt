@@ -1,0 +1,19 @@
+Anti-Slop Plain-English Review
+==============================
+Must-fix shortcuts: 0 | Compounding slop risks: 2
+
+Compounding Slop Risks (Review Before Merging)
+----------------------------------------------
+1. Function is growing too long or tangled to reason about safely [STRUCT-GOD-FUNCTION] (benchmarks/sources/ev2_ts_bookings/src/corporate.ts:25)
+   What was found: benchmarks/sources/ev2_ts_bookings/src/corporate.ts:25 function 'createGroupBooking' has 74 code lines > 60 [Heuristic].
+   Why engineers flag this: Functions with dozens of lines and deeply nested branches pack multiple responsibilities together, making edge cases easy to miss and hard to unit-test.
+   How it compounds across AI turns: AI models degrade fastest when patching long, high-branch functions: each new turn bolts on another 'if' branch instead of clarifying the structure.
+   Reference: docs/evidence.md#ext-07, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Split this function into smaller single-purpose helpers with clear names and focused tests.
+
+2. Copy-pasted logic block that will drift out of sync [STRUCT-DUPLICATE-BLOCK] (benchmarks/sources/ev2_ts_bookings/src/bookings.ts:115)
+   What was found: benchmarks/sources/ev2_ts_bookings/src/bookings.ts:115 duplicates a 6-statement logic block already present at benchmarks/sources/ev2_ts_bookings/src/corporate.ts:30.
+   Why engineers flag this: When the same business logic lives in two places, fixing a bug or changing a rule in one place silently leaves the other copy broken.
+   How it compounds across AI turns: AI assistants strongly mimic nearby code. Once a block is duplicated once, later sessions copy it a third time and fix bugs in only whichever file happened to be open.
+   Reference: docs/evidence.md#ext-12, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Extract or reuse one shared canonical helper function for this logic and call it from both places.

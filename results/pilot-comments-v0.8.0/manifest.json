@@ -1,0 +1,228 @@
+{
+  "experiment_id": "pilot-comments-v0.8.0",
+  "created_at_utc": "2026-11-27T06:56:58Z",
+  "source_snapshot_id": "git-37c85c41e2ac",
+  "seed": 20261127,
+  "timeout_seconds": 360,
+  "max_workers": 3,
+  "child_max_rss_mb": 1536,
+  "cases": [
+    "CM2"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gemini-4-neon"
+  ],
+  "conditions": {
+    "no-comments": {
+      "path": "results/pilot-comments-v0.8.0/conditions/no-comments.txt",
+      "sha256": "574b18bef3fb24c41088ad0007a8565ebae0c2c15ba36d3e5c8649c59ce2db03"
+    },
+    "invariant-comments": {
+      "path": "results/pilot-comments-v0.8.0/conditions/invariant-comments.txt",
+      "sha256": "6b16f3e2f84b0dc71089bf2078fef3ed525c2d00b38418fcc5bfc43f95a5ee60"
+    },
+    "comment-traps": {
+      "path": "results/pilot-comments-v0.8.0/conditions/comment-traps.txt",
+      "sha256": "3401d96a3d8578299a1a46f146e5b2bcff4f47ea76735375b177c17100569fd9"
+    }
+  },
+  "cli_versions": {
+    "claude-opus-5-5": "2.1.330 (Claude Code)",
+    "gpt-6.2-astra": "codex-cli 0.171.0",
+    "gpt-6.2-sol": "codex-cli 0.171.0",
+    "gemini-4-neon": "1.5.18"
+  },
+  "schedule": {
+    "claude-opus-5-5": [
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 3
+      }
+    ],
+    "gpt-6.2-astra": [
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 3
+      }
+    ],
+    "gpt-6.2-sol": [
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 3
+      }
+    ],
+    "gemini-4-neon": [
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 1
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 2
+      },
+      {
+        "case_id": "CM2",
+        "condition": "no-comments",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "invariant-comments",
+        "replicate": 3
+      },
+      {
+        "case_id": "CM2",
+        "condition": "comment-traps",
+        "replicate": 3
+      }
+    ]
+  }
+}
