@@ -77,6 +77,7 @@ class RunDiffGateHookTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("ANTI_SLOP_ALLOW_TEST_EDIT", None)
         env.pop("ANTI_SLOP_BENCHMARK_SUBJECT", None)
+        env.pop("ANTI_SLOP_TELEMETRY", None)
         if env_extra:
             env.update(env_extra)
         cmd = [sys.executable, "-B", str(HOOK_SCRIPT)]
@@ -633,6 +634,198 @@ class RunDiffGateHookTests(unittest.TestCase):
         self.assertEqual(proc_corrupt_agy.returncode, 1, msg=proc_corrupt_agy.stdout + proc_corrupt_agy.stderr)
         self.assertEqual(proc_corrupt_agy.stdout, "")
         self.assertIn("non-blocking", proc_corrupt_agy.stderr)
+
+    def test_telemetry_opt_in_only_and_never_creates_dir_unasked(self) -> None:
+        antislop_dir = self.repo / ".anti-slop"
+        self.assertFalse(antislop_dir.exists())
+
+        # Blocked PreToolUse without .anti-slop/ or ANTI_SLOP_TELEMETRY=1 -> no .anti-slop created.
+        pre_payload = json.dumps({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Edit",
+            "tool_input": {"file_path": "tests/test_app.py"},
+        })
+        proc_pre = self._run_hook("--stdin-tool-json", stdin_text=pre_payload)
+        self.assertEqual(proc_pre.returncode, 2)
+        self.assertFalse(antislop_dir.exists())
+
+        # Blocked Stop hook without opt-in -> no .anti-slop created.
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n    breakpoint()\n    return a + b\n",
+            encoding="utf-8",
+        )
+        proc_stop = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_stop.returncode, 2)
+        self.assertFalse(antislop_dir.exists())
+
+    def test_telemetry_exact_schema_privacy_and_opt_in_modes(self) -> None:
+        # 1. Opt-in via existing .anti-slop/ directory (without ANTI_SLOP_TELEMETRY env var).
+        (self.repo / ".anti-slop").mkdir()
+        telemetry_path = self.repo / ".anti-slop" / "telemetry.jsonl"
+
+        secret_sentinel = "SUPER_SECRET_TOKEN_XYZ_98765"
+        secret_filename = "secret_billing_module.py"
+        (self.repo / "src" / secret_filename).write_text(
+            f'TOKEN = "{secret_sentinel}"\n'
+            "def charge():\n"
+            "    breakpoint()\n",
+            encoding="utf-8",
+        )
+        _git(self.repo, "add", f"src/{secret_filename}")
+
+        proc_stop_block = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_stop_block.returncode, 2)
+
+        # Clean edit (unblocked) stop hook.
+        (self.repo / "src" / secret_filename).write_text(
+            "def charge(cents: int) -> int:\n    return cents\n",
+            encoding="utf-8",
+        )
+        _git(self.repo, "add", f"src/{secret_filename}")
+        proc_stop_clean = self._run_hook("--harness", "codex", "--no-budget")
+        self.assertEqual(proc_stop_clean.returncode, 0, msg=proc_stop_clean.stderr)
+
+        # Blocked Antigravity PreToolUse hook.
+        agy_deny = json.dumps({
+            "hookEventName": "PreToolUse",
+            "cwd": str(self.repo),
+            "toolCall": {
+                "id": "toolu_tel_1",
+                "name": "edit_file",
+                "args": {"Path": str(self.repo / "tests" / "test_app.py")},
+            },
+        })
+        proc_pre_block = self._run_hook(
+            "--stdin-tool-json",
+            stdin_text=agy_deny,
+            include_repo_root=False,
+        )
+        self.assertEqual(proc_pre_block.returncode, 0, msg=proc_pre_block.stderr)
+        self.assertEqual(json.loads(proc_pre_block.stdout)["decision"], "deny")
+
+        # Allowed PreToolUse hook.
+        pre_allow = json.dumps({
+            "tool_name": "Edit",
+            "tool_input": {"file_path": f"src/{secret_filename}"},
+        })
+        proc_pre_allow = self._run_hook("--harness", "claude", "--stdin-tool-json", stdin_text=pre_allow)
+        self.assertEqual(proc_pre_allow.returncode, 0, msg=proc_pre_allow.stderr)
+
+        raw_log = telemetry_path.read_text(encoding="utf-8")
+        # Strict privacy guarantee: zero secrets, zero filenames, zero absolute host paths.
+        self.assertNotIn(secret_sentinel, raw_log)
+        self.assertNotIn(secret_filename, raw_log)
+        self.assertNotIn("test_app.py", raw_log)
+        self.assertNotIn(str(self.repo), raw_log)
+        self.assertNotIn("breakpoint", raw_log)
+
+        rows = [json.loads(line) for line in raw_log.splitlines() if line.strip()]
+        self.assertEqual(len(rows), 4)
+        expected_keys = {"ts", "event", "harness", "blocked", "codes", "file_exts"}
+        for row in rows:
+            self.assertEqual(set(row.keys()), expected_keys)
+            self.assertRegex(row["ts"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+        self.assertEqual(rows[0]["event"], "stop_hook")
+        self.assertEqual(rows[0]["harness"], "claude")
+        self.assertTrue(rows[0]["blocked"])
+        self.assertEqual(rows[0]["codes"], ["DIFF-DEBUG-LEFTOVER"])
+        self.assertEqual(rows[0]["file_exts"], [".py"])
+
+        self.assertEqual(rows[1]["event"], "stop_hook")
+        self.assertEqual(rows[1]["harness"], "codex")
+        self.assertFalse(rows[1]["blocked"])
+        self.assertEqual(rows[1]["codes"], [])
+        self.assertEqual(rows[1]["file_exts"], [".py"])
+
+        self.assertEqual(rows[2]["event"], "pretool_hook")
+        self.assertEqual(rows[2]["harness"], "antigravity")
+        self.assertTrue(rows[2]["blocked"])
+        self.assertEqual(rows[2]["codes"], ["DIFF-UNAUTHORIZED-TEST-EDIT"])
+        self.assertEqual(rows[2]["file_exts"], [".py"])
+
+        self.assertEqual(rows[3]["event"], "pretool_hook")
+        self.assertEqual(rows[3]["harness"], "claude")
+        self.assertFalse(rows[3]["blocked"])
+        self.assertEqual(rows[3]["codes"], [])
+        self.assertEqual(rows[3]["file_exts"], [".py"])
+
+        # 2. Opt-in via ANTI_SLOP_TELEMETRY=1 creates .anti-slop/telemetry.jsonl when dir absent.
+        with tempfile.TemporaryDirectory() as fresh_tmp:
+            fresh = Path(fresh_tmp)
+            _git(fresh, "init", "-q")
+            _git(fresh, "config", "user.email", "test@example.com")
+            _git(fresh, "config", "user.name", "Test User")
+            (fresh / "mod.py").write_text("X = 1\n", encoding="utf-8")
+            _git(fresh, "add", ".")
+            _git(fresh, "commit", "-q", "-m", "init")
+            (fresh / "mod.py").write_text("breakpoint()\n", encoding="utf-8")
+
+            proc_env = self._run_hook(
+                "--repo-root", str(fresh), "--harness", "claude", "--no-budget",
+                env_extra={"ANTI_SLOP_TELEMETRY": "1"},
+                include_repo_root=False,
+            )
+            self.assertEqual(proc_env.returncode, 2)
+            fresh_tel = fresh / ".anti-slop" / "telemetry.jsonl"
+            self.assertTrue(fresh_tel.is_file())
+            fresh_rows = [json.loads(ln) for ln in fresh_tel.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            self.assertEqual(len(fresh_rows), 1)
+            self.assertEqual(fresh_rows[0]["codes"], ["DIFF-DEBUG-LEFTOVER"])
+            self.assertEqual(fresh_rows[0]["file_exts"], [".py"])
+
+    def test_telemetry_non_blocking_on_oserror_and_suppressed_for_benchmark_subject(self) -> None:
+        # 1. Directory at .anti-slop/telemetry.jsonl forces OSError on open() -> hook still functions identically.
+        (self.repo / ".anti-slop" / "telemetry.jsonl").mkdir(parents=True)
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n    breakpoint()\n    return a + b\n",
+            encoding="utf-8",
+        )
+        proc_blocked = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_blocked.returncode, 2)
+        self.assertIn("DIFF-DEBUG-LEFTOVER", proc_blocked.stderr)
+
+        proc_agy = self._run_hook(
+            "--harness", "antigravity", "--no-budget",
+            stdin_text=json.dumps({
+                "hookEventName": "Stop",
+                "cwd": str(self.repo),
+                "terminationReason": "NO_TOOL_CALL",
+                "continuationActive": False,
+            }),
+            include_repo_root=False,
+        )
+        self.assertEqual(proc_agy.returncode, 0, msg=proc_agy.stderr)
+        self.assertEqual(json.loads(proc_agy.stdout)["decision"], "continue")
+
+        # 2. Regular file blocking .anti-slop/ mkdir under ANTI_SLOP_TELEMETRY=1 -> still non-blocking.
+        with tempfile.TemporaryDirectory() as blocked_tmp:
+            blocked_repo = Path(blocked_tmp)
+            _git(blocked_repo, "init", "-q")
+            _git(blocked_repo, "config", "user.email", "test@example.com")
+            _git(blocked_repo, "config", "user.name", "Test User")
+            (blocked_repo / "app.py").write_text("X = 1\n", encoding="utf-8")
+            _git(blocked_repo, "add", ".")
+            _git(blocked_repo, "commit", "-q", "-m", "init")
+            (blocked_repo / ".anti-slop").write_text("not-a-dir", encoding="utf-8")
+            (blocked_repo / "app.py").write_text("X = 2\n", encoding="utf-8")
+
+            proc_clean = self._run_hook(
+                "--repo-root", str(blocked_repo), "--harness", "claude", "--no-budget",
+                env_extra={"ANTI_SLOP_TELEMETRY": "1"},
+                include_repo_root=False,
+            )
+            self.assertEqual(proc_clean.returncode, 0, msg=proc_clean.stderr)
+            self.assertEqual(proc_clean.stderr, "")
+
+        # 3. ANTI_SLOP_BENCHMARK_SUBJECT=1 suppresses telemetry even when .anti-slop/ and ANTI_SLOP_TELEMETRY=1 exist.
+        (self.repo / ".anti-slop" / "telemetry.jsonl").rmdir()
+        proc_bench = self._run_hook(
+            "--harness", "claude", "--no-budget",
+            env_extra={"ANTI_SLOP_BENCHMARK_SUBJECT": "1", "ANTI_SLOP_TELEMETRY": "1"},
+        )
+        self.assertEqual(proc_bench.returncode, 0, msg=proc_bench.stderr)
+        self.assertFalse((self.repo / ".anti-slop" / "telemetry.jsonl").exists())
 
 
 class HookExamplesIntegrityTests(unittest.TestCase):

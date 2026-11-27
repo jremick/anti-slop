@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.resources
 import json
 import os
 from pathlib import Path
@@ -45,6 +46,7 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertTrue(pyproject_path.is_file())
         raw_text = pyproject_path.read_text(encoding="utf-8")
         expected_scripts = {
+            "anti-slop": "gates.cli:main",
             "anti-slop-diff": "gates.diff_check:main",
             "anti-slop-review": "gates.review:main",
             "anti-slop-learn": "gates.learn:main",
@@ -56,6 +58,7 @@ class PackagingMetadataTests(unittest.TestCase):
             data = tomllib.loads(raw_text)
             project = data["project"]
             self.assertEqual(project["name"], "anti-slop")
+            self.assertEqual(project["version"], "0.7.0")
             self.assertEqual(project["requires-python"], ">=3.11")
             self.assertEqual(project["dependencies"], [])
 
@@ -65,6 +68,7 @@ class PackagingMetadataTests(unittest.TestCase):
             else:
                 self.assertEqual(lic, "MIT")
 
+            self.assertEqual(len(project["scripts"]), 7)
             self.assertEqual(project["scripts"], expected_scripts)
 
             setuptools_cfg = data.get("tool", {}).get("setuptools", {})
@@ -72,12 +76,15 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertIn("gates", packages)
             self.assertIn("gates.hooks", packages)
             self.assertIn("library", packages)
+            self.assertIn("skills", packages)
 
             pkg_data = setuptools_cfg.get("package-data", {})
             self.assertIn("catalog.json", pkg_data.get("library", []))
+            self.assertIn("anti-slop/SKILL.md", pkg_data.get("skills", []))
         else:
             # Python < 3.11 fallback (stdlib-only verification without skipping)
             self.assertRegex(raw_text, r'(?m)^name\s*=\s*"anti-slop"\s*$')
+            self.assertRegex(raw_text, r'(?m)^version\s*=\s*"0\.7\.0"\s*$')
             self.assertRegex(raw_text, r'(?m)^requires-python\s*=\s*">=3\.11"\s*$')
             self.assertRegex(raw_text, r"(?m)^dependencies\s*=\s*\[\s*\]\s*$")
             self.assertRegex(raw_text, r'(?m)^license\s*=\s*(?:\{\s*text\s*=\s*"MIT"\s*\}|"MIT")\s*$')
@@ -86,12 +93,26 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertIn('"gates"', raw_text)
             self.assertIn('"gates.hooks"', raw_text)
             self.assertIn('"library"', raw_text)
+            self.assertIn('"skills"', raw_text)
             self.assertRegex(raw_text, r'(?m)^library\s*=\s*\[\s*"catalog\.json"\s*\]\s*$')
+            self.assertIn('"anti-slop/SKILL.md"', raw_text)
 
         self.assertTrue((REPO_ROOT / "gates/__init__.py").is_file())
         self.assertTrue((REPO_ROOT / "gates/hooks/__init__.py").is_file())
         self.assertTrue((REPO_ROOT / "library/__init__.py").is_file())
         self.assertTrue((REPO_ROOT / "library/catalog.json").is_file())
+        self.assertTrue((REPO_ROOT / "skills/__init__.py").is_file())
+        self.assertTrue((REPO_ROOT / "skills/anti-slop/SKILL.md").is_file())
+        self.assertTrue((REPO_ROOT / "skills/README.md").is_file())
+
+        # Verify bundled skill loads cleanly through importlib.resources.
+        bundled_skill = (
+            importlib.resources.files("skills")
+            .joinpath("anti-slop")
+            .joinpath("SKILL.md")
+            .read_text(encoding="utf-8")
+        )
+        self.assertIn("name: anti-slop", bundled_skill)
 
         # Verify every declared console script imports cleanly and resolves a callable.
         for script_name, target in expected_scripts.items():
@@ -402,7 +423,8 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertIn("uvx", cmd)
 
         ci_text = (REPO_ROOT / "gates/ci-ratchet.yml").read_text(encoding="utf-8")
-        self.assertIn("uses: jremick/anti-slop@v0.6.0", ci_text)
+        repo_version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertIn(f"uses: jremick/anti-slop@v{repo_version}", ci_text)
         self.assertIn("uvx", ci_text)
         self.assertIn("gates/diff_check.py", ci_text)
 

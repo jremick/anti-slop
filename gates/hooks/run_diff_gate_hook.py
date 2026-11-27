@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -101,6 +102,10 @@ PATCH_PATH_RE = re.compile(
     r"^(?:(?:\+\+\+|---)\s+(?:[ab]/)?|\*\*\*\s+(?:(?:Update|Add|Delete)\s+File|Move\s+to):\s+)(.+?)(?:\t.*)?$"
 )
 
+TELEMETRY_EVENTS = frozenset({"stop_hook", "pretool_hook"})
+TELEMETRY_CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{1,63}$")
+TELEMETRY_EXT_RE = re.compile(r"^\.[a-z0-9]{1,16}$")
+
 
 def _extract_patch_paths(patch_text: str, out: List[str]) -> None:
     for line in patch_text.splitlines():
@@ -113,6 +118,109 @@ def _extract_patch_paths(patch_text: str, out: List[str]) -> None:
 
 def _env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_falsy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("0", "false", "no", "off")
+
+
+def _sanitize_telemetry_codes(raw_codes: Sequence[str]) -> List[str]:
+    cleaned: Set[str] = set()
+    for raw in raw_codes:
+        if isinstance(raw, str):
+            token = raw.strip()
+            if TELEMETRY_CODE_RE.match(token):
+                cleaned.add(token)
+    return sorted(cleaned)
+
+
+def _sanitize_telemetry_exts(file_exts: Sequence[str]) -> List[str]:
+    cleaned: Set[str] = set()
+    for item in file_exts:
+        if isinstance(item, str):
+            norm = item.strip().lower()
+            if TELEMETRY_EXT_RE.match(norm):
+                cleaned.add(norm)
+    return sorted(cleaned)
+
+
+def _extract_file_exts_from_paths(paths: Sequence[str]) -> List[str]:
+    raw_exts: List[str] = []
+    for raw in paths:
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        cleaned = raw.strip().replace("\\", "/")
+        if cleaned not in ("", "/dev/null"):
+            raw_exts.append(Path(cleaned).suffix)
+    return _sanitize_telemetry_exts(raw_exts)
+
+
+def _extract_diff_file_exts(diff_text: str, extra_paths: Sequence[str] = ()) -> List[str]:
+    paths: List[str] = list(extra_paths)
+    for line in diff_text.splitlines():
+        if line.startswith("+++ ") or line.startswith("--- "):
+            target = line[4:].split("\t", 1)[0].strip()
+            if target and target != "/dev/null":
+                if target.startswith("a/") or target.startswith("b/"):
+                    target = target[2:]
+                paths.append(target)
+        elif line.startswith("diff --git "):
+            parts = line.split()
+            if len(parts) >= 4:
+                b_path = parts[3]
+                if b_path.startswith("b/"):
+                    b_path = b_path[2:]
+                paths.append(b_path)
+    return _extract_file_exts_from_paths(paths)
+
+
+def record_hook_telemetry(
+    *,
+    repo_root: Path,
+    event: str,
+    harness: str,
+    blocked: bool,
+    codes: Sequence[str],
+    file_exts: Sequence[str],
+) -> bool:
+    """Append one strictly local, privacy-safe JSONL telemetry event when opted in.
+
+    Activates ONLY when `<repo_root>/.anti-slop` already exists OR
+    `ANTI_SLOP_TELEMETRY=1` is set. Never runs for benchmark subjects, never
+    creates `.anti-slop/` unasked, and never blocks or fails a hook on OSError.
+    """
+    if event not in TELEMETRY_EVENTS or _is_benchmark_subject(repo_root) or _env_falsy("ANTI_SLOP_TELEMETRY"):
+        return False
+
+    env_opt_in = _env_truthy("ANTI_SLOP_TELEMETRY")
+    antislop_dir = repo_root / ".anti-slop"
+    try:
+        dir_exists = antislop_dir.is_dir()
+    except OSError:
+        return False
+
+    if not dir_exists and not env_opt_in:
+        return False
+
+    eff_harness = harness if harness in ("claude", "codex", "antigravity") else "claude"
+    record: Dict[str, Any] = {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "event": event,
+        "harness": eff_harness,
+        "blocked": bool(blocked),
+        "codes": _sanitize_telemetry_codes(codes),
+        "file_exts": _sanitize_telemetry_exts(file_exts),
+    }
+
+    try:
+        if env_opt_in and not dir_exists:
+            antislop_dir.mkdir(parents=True, exist_ok=True)
+        telemetry_path = antislop_dir / "telemetry.jsonl"
+        with telemetry_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, separators=(",", ":"), ensure_ascii=True) + "\n")
+    except OSError:
+        return False
+    return True
 
 
 def _read_stdin_safely(*, always_read: bool = False) -> str:
@@ -323,29 +431,32 @@ def extract_tool_edit_paths(payload: Dict[str, Any]) -> List[str]:
     return unique
 
 
-def run_pretooluse_check(
+def _run_pretooluse_detailed(
     raw_json: str,
     *,
     repo_root: Path,
     allow_test_edit: bool = False,
-) -> Tuple[int, str]:
-    """Inspect PreToolUse stdin JSON and block unauthorized test edits with code 2."""
+) -> Tuple[int, str, Dict[str, Any]]:
+    empty_meta: Dict[str, Any] = {"ran": False, "codes": [], "file_exts": []}
     if not raw_json.strip():
-        return 0, ""
+        return 0, "", empty_meta
 
     try:
         payload = json.loads(raw_json)
     except json.JSONDecodeError as exc:
-        return 1, f"[anti-slop hook] Failed to parse PreToolUse JSON: {exc}"
+        return 1, f"[anti-slop hook] Failed to parse PreToolUse JSON: {exc}", empty_meta
 
     if not isinstance(payload, dict):
-        return 0, ""
+        return 0, "", empty_meta
+
+    edit_paths = extract_tool_edit_paths(payload)
+    file_exts = _extract_file_exts_from_paths(edit_paths)
 
     if allow_test_edit:
-        return 0, ""
+        return 0, "", {"ran": True, "codes": [], "file_exts": file_exts}
 
     blocked: List[str] = []
-    for raw_path in extract_tool_edit_paths(payload):
+    for raw_path in edit_paths:
         norm = _normalize_candidate_path(raw_path, repo_root)
         if _is_test_path(norm) and norm not in blocked:
             blocked.append(norm)
@@ -357,9 +468,24 @@ def run_pretooluse_check(
             "Remediation: Fix the production code instead of weakening tests. "
             "Pass --allow-test-edit or set ANTI_SLOP_ALLOW_TEST_EDIT=1 only when test changes are explicitly authorized."
         )
-        return 2, msg
+        return 2, msg, {"ran": True, "codes": ["DIFF-UNAUTHORIZED-TEST-EDIT"], "file_exts": file_exts}
 
-    return 0, ""
+    return 0, "", {"ran": True, "codes": [], "file_exts": file_exts}
+
+
+def run_pretooluse_check(
+    raw_json: str,
+    *,
+    repo_root: Path,
+    allow_test_edit: bool = False,
+) -> Tuple[int, str]:
+    """Inspect PreToolUse stdin JSON and block unauthorized test edits with code 2."""
+    code, message, _ = _run_pretooluse_detailed(
+        raw_json,
+        repo_root=repo_root,
+        allow_test_edit=allow_test_edit,
+    )
+    return code, message
 
 
 def _collect_git_diff(repo_root: Path, *, staged_only: bool = False) -> Tuple[int, str, str]:
@@ -428,7 +554,7 @@ def _format_remediation(payload: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run_diff_gate(
+def _run_diff_gate_detailed(
     *,
     repo_root: Path,
     diff_text: Optional[str] = None,
@@ -438,23 +564,27 @@ def run_diff_gate(
     max_net_loc: Optional[int] = None,
     max_files: Optional[int] = None,
     learned_rules: Optional[Path | str] = None,
-) -> Tuple[int, str]:
-    """Run gates/diff_check.py on git diff and map violations to code 2."""
+) -> Tuple[int, str, Dict[str, Any]]:
+    """Run gates/diff_check.py on git diff, returning (exit_code, message, telemetry_meta)."""
     toplevel = _resolve_git_toplevel(repo_root)
     if diff_text is None:
         if toplevel is None:
-            return 0, ""
+            return 0, "", {"ran": False, "repo_root": repo_root, "codes": [], "file_exts": []}
         repo_root = toplevel
         rc, collected, git_err = _collect_git_diff(repo_root, staged_only=staged_only)
         if rc != 0:
             detail = git_err.strip() or f"git diff exited {rc}"
-            return 1, f"[anti-slop hook] Unable to read git diff in {repo_root}: {detail}"
+            return (
+                1,
+                f"[anti-slop hook] Unable to read git diff in {repo_root}: {detail}",
+                {"ran": False, "repo_root": repo_root, "codes": [], "file_exts": []},
+            )
         diff_text = collected
     elif toplevel is not None:
         repo_root = toplevel
 
     if not diff_text.strip():
-        return 0, ""
+        return 0, "", {"ran": False, "repo_root": repo_root, "codes": [], "file_exts": []}
 
     diff_check_script = Path(__file__).resolve().parents[1] / "diff_check.py"
     cmd = [
@@ -495,34 +625,79 @@ def run_diff_gate(
         check=False,
     )
 
+    unrun_meta: Dict[str, Any] = {"ran": False, "repo_root": repo_root, "codes": [], "file_exts": []}
     try:
         payload = json.loads(proc.stdout)
     except json.JSONDecodeError:
         if proc.returncode == 0:
-            return 0, ""
+            return 0, "", unrun_meta
         detail = (proc.stderr or proc.stdout).strip() or f"diff_check.py exited {proc.returncode}"
-        return 1, f"[anti-slop hook] Diff gate error (non-blocking): {detail}"
+        return 1, f"[anti-slop hook] Diff gate error (non-blocking): {detail}", unrun_meta
 
     if not isinstance(payload, dict):
         if proc.returncode == 0:
-            return 0, ""
-        return 1, f"[anti-slop hook] Diff gate error (non-blocking): unexpected JSON payload from diff_check.py"
+            return 0, "", unrun_meta
+        return (
+            1,
+            "[anti-slop hook] Diff gate error (non-blocking): unexpected JSON payload from diff_check.py",
+            unrun_meta,
+        )
 
     if "error" in payload and "errors" not in payload:
-        return 1, f"[anti-slop hook] Diff gate error (non-blocking): {payload['error']}"
+        return 1, f"[anti-slop hook] Diff gate error (non-blocking): {payload['error']}", unrun_meta
+
+    errors_list = payload.get("errors") or []
+    warnings_list = payload.get("warnings") or []
+    all_findings = [
+        item for item in list(errors_list) + list(warnings_list) if isinstance(item, dict)
+    ]
+    codes = _sanitize_telemetry_codes([str(item.get("code") or "") for item in all_findings])
+    finding_files = [
+        str(item["file"]) for item in all_findings if isinstance(item.get("file"), str)
+    ]
+    meta: Dict[str, Any] = {
+        "ran": True,
+        "repo_root": repo_root,
+        "codes": codes,
+        "file_exts": _extract_diff_file_exts(diff_text, finding_files),
+    }
 
     if not payload.get("ok") or proc.returncode != 0:
-        return 2, _format_remediation(payload)
+        return 2, _format_remediation(payload), meta
 
-    warnings = payload.get("warnings") or []
-    if warnings:
+    if warnings_list:
         warn_lines = [
             f"[anti-slop hook] warning [{w.get('code', 'DIFF-WARN')}]: {w.get('message', '')}"
-            for w in warnings
+            for w in warnings_list
         ]
-        return 0, "\n".join(warn_lines)
+        return 0, "\n".join(warn_lines), meta
 
-    return 0, ""
+    return 0, "", meta
+
+
+def run_diff_gate(
+    *,
+    repo_root: Path,
+    diff_text: Optional[str] = None,
+    staged_only: bool = False,
+    allow_test_edit: bool = False,
+    no_budget: bool = False,
+    max_net_loc: Optional[int] = None,
+    max_files: Optional[int] = None,
+    learned_rules: Optional[Path | str] = None,
+) -> Tuple[int, str]:
+    """Run gates/diff_check.py on git diff and map violations to code 2."""
+    code, message, _ = _run_diff_gate_detailed(
+        repo_root=repo_root,
+        diff_text=diff_text,
+        staged_only=staged_only,
+        allow_test_edit=allow_test_edit,
+        no_budget=no_budget,
+        max_net_loc=max_net_loc,
+        max_files=max_files,
+        learned_rules=learned_rules,
+    )
+    return code, message
 
 
 UVX_HOOK_BASE_COMMAND = "uvx --from git+https://github.com/jremick/anti-slop anti-slop-hook"
@@ -1101,11 +1276,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.stdin_tool_json:
         effective_root = _resolve_git_toplevel(target_dir) or target_dir
-        code, message = run_pretooluse_check(
+        code, message, meta = _run_pretooluse_detailed(
             raw_stdin,
             repo_root=effective_root,
             allow_test_edit=allow_test_edit,
         )
+        if meta["ran"] and code in (0, 2):
+            record_hook_telemetry(
+                repo_root=effective_root,
+                event="pretool_hook",
+                harness=harness,
+                blocked=(code == 2),
+                codes=meta["codes"],
+                file_exts=meta["file_exts"],
+            )
     else:
         diff_text: Optional[str] = None
         if args.diff is not None:
@@ -1113,7 +1297,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 diff_text = sys.stdin.read()
             else:
                 diff_text = Path(args.diff).read_text(encoding="utf-8")
-        code, message = run_diff_gate(
+        code, message, meta = _run_diff_gate_detailed(
             repo_root=target_dir,
             diff_text=diff_text,
             staged_only=args.staged_only,
@@ -1123,6 +1307,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             max_files=args.max_files,
             learned_rules=args.learned_rules,
         )
+        if meta["ran"] and code in (0, 2):
+            record_hook_telemetry(
+                repo_root=meta["repo_root"],
+                event="stop_hook",
+                harness=harness,
+                blocked=(code == 2),
+                codes=meta["codes"],
+                file_exts=meta["file_exts"],
+            )
 
     return _emit_result(harness=harness, mode=mode, code=code, message=message)
 

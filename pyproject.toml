@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anti-slop"
-version = "0.6.0"
+version = "0.7.0"
 description = "Catch and prevent AI coding shortcuts and compounding software slop with automated checks, plain-English reviews, a verified learning loop, and real code-quality tests."
 readme = "README.md"
 license = { text = "MIT" }
@@ -43,6 +43,7 @@ Issues = "https://github.com/jremick/anti-slop/issues"
 Changelog = "https://github.com/jremick/anti-slop/blob/main/CHANGELOG.md"
 
 [project.scripts]
+anti-slop = "gates.cli:main"
 anti-slop-diff = "gates.diff_check:main"
 anti-slop-review = "gates.review:main"
 anti-slop-learn = "gates.learn:main"
@@ -51,9 +52,10 @@ anti-slop-api = "gates.api_checks:main"
 anti-slop-mutate = "gates.mutate:main"
 
 [tool.setuptools]
-packages = ["gates", "gates.hooks", "library"]
+packages = ["gates", "gates.hooks", "library", "skills"]
 
 [tool.setuptools.package-data]
 gates = ["model_deltas.json"]
 "gates.hooks" = ["*.example.json", "*.example.md"]
 library = ["catalog.json"]
+skills = ["anti-slop/SKILL.md", "README.md"]
