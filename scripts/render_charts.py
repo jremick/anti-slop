@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Render deterministic, publication-grade SVG visuals from pilot-3way-v0.6.0 data.
+"""Render deterministic, publication-grade SVG visuals from live pilot data.
 
 Zero external dependencies (stdlib Python 3.11+ only). Reads
-`results/pilot-3way-v0.6.0/runs.jsonl` and its referenced stage artifacts
-directly — never hardcodes benchmark counts, rates, or deltas.
+`results/pilot-3way-v0.6.0/runs.jsonl`, `results/pilot-evolution-v0.7.0/runs.jsonl`,
+and their referenced grader JSONs / stage artifacts directly — never hardcodes
+benchmark counts, rates, or deltas.
 
 Outputs written under `docs/assets/`:
   - pilot-v0.6.0-results-light.svg
   - pilot-v0.6.0-results-dark.svg
+  - pilot-v0.7.0-evolution-light.svg
+  - pilot-v0.7.0-evolution-dark.svg
   - hook-loop-light.svg
   - hook-loop-dark.svg
 
 Optional flag `--social-svg PATH` also writes a 1280x640 dark technical social
-preview SVG (using the same live metrics from runs.jsonl) for PNG rasterization.
+preview SVG (using live metrics from both pilots) for PNG rasterization.
 """
 
 from __future__ import annotations
@@ -27,6 +30,12 @@ import re
 import sys
 from typing import Any
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from benchmarks.evolution import compare_evolution_arms  # noqa: E402
+
 
 FONT_SANS = (
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
@@ -36,6 +45,7 @@ FONT_MONO = (
 )
 
 CONDITIONS: tuple[str, ...] = ("baseline", "core-rules-v0.2.0", "model-controls")
+EV_CONDITIONS: tuple[str, ...] = ("baseline", "core-rules-v0.2.0", "gated-structural")
 MODEL_ORDER: tuple[tuple[str, str, str], ...] = (
     ("claude-opus-5-5", "Claude Opus 5.5", "Opus"),
     ("gpt-6.2-astra", "GPT-6.2 Astra", "Astra"),
@@ -47,6 +57,8 @@ END_MARKER_RE = re.compile(
     r"^## (?:Workspace Grader & Diff|Deterministic Text Constraints)\b",
     re.MULTILINE,
 )
+ELAPSED_SECONDS_RE = re.compile(r"^- Elapsed seconds:\s*([0-9.]+)\s*$", re.MULTILINE)
+MUT_THRESHOLD_RE = re.compile(r"\bmin\s+(\d+)%")
 
 
 @dataclass(frozen=True)
@@ -408,6 +420,326 @@ def compute_pilot_stats(repo_root: Path, runs_path: Path) -> PilotStats:
 
 def _esc(text: str) -> str:
     return escape(text, quote=True)
+
+
+def _fmt_pct_clean(val: float) -> str:
+    if abs(val - round(val)) < 1e-9:
+        return f"{val:.0f}%"
+    return f"{val:.1f}%"
+
+
+def _slop_defect_count(metrics: dict[str, Any]) -> int:
+    return (
+        int(metrics.get("duplicate_blocks", 0))
+        + int(metrics.get("dead_compat", 0))
+        + int(metrics.get("god_functions", 0))
+        + int(metrics.get("god_files", 0))
+        + int(metrics.get("silent_failures_and_shortcuts", 0))
+        + int(metrics.get("test_theater", 0))
+    )
+
+
+@dataclass(frozen=True)
+class EvolutionStats:
+    experiment_id: str
+    case_id: str
+    total_runs: int
+    total_stages: int
+    n_turns: int
+    n_models: int
+    n_conditions: int
+    n_replicates: int
+    n_checks: int
+    word_cap_checks: int
+    functional_passed_runs: int
+    mutation_threshold_pct: int
+    mutants_per_run: int
+    cond_pass: dict[str, int]
+    cond_total: dict[str, int]
+    cond_slop: dict[str, int]
+    cond_mut_mean_pct: dict[str, float]
+    cond_repair_turns: dict[str, int]
+    cond_wall_s: dict[str, float]
+    wall_delta_pct: float
+    mut_delta_gated_vs_core_pp: float
+    net_improved_bg: int
+    net_regressed_bg: int
+    model_cond: dict[tuple[str, str], ModelCondStats]
+    model_mut_mean_pct: dict[tuple[str, str], float]
+    model_god_fns: dict[tuple[str, str], int]
+    model_slop: dict[tuple[str, str], int]
+    model_mut_fails: dict[tuple[str, str], int]
+    gated_vs_baseline_verdict: str
+    core_verdict_by_model: dict[str, str]
+    core_drop_short_names: tuple[str, ...]
+    tok_delta_min_pct: float
+    tok_delta_max_pct: float
+    opus_usd_delta_pct: float
+    gated_fail_summary: str
+
+
+def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
+    """Parse EV1 runs.jsonl, grade_ev1.py evidence JSONs, and stage artifacts."""
+    runs = [
+        json.loads(line)
+        for line in runs_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if not runs:
+        raise ValueError(f"No run records found in {runs_path}")
+
+    experiment_id = str(runs[0]["experiment_id"])
+    case_id = str(runs[0]["case_id"])
+    models = {r["model"]["id"] for r in runs}
+    conditions = {r["condition"] for r in runs}
+    replicates = {r["replicate"] for r in runs}
+    n_turns = len(runs[0].get("stage_artifacts") or [])
+    n_checks = len(runs[0].get("checks") or [])
+    word_cap_checks = sum(
+        1
+        for ch in (runs[0].get("checks") or [])
+        if "word" in str(ch.get("id", "")).lower()
+    )
+
+    cond_pass: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_total: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_slop: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_mut_rates: dict[str, list[float]] = {c: [] for c in EV_CONDITIONS}
+    cond_repair_turns: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_wall_s: dict[str, float] = {c: 0.0 for c in EV_CONDITIONS}
+
+    mc_raw: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
+    mc_mut_rates: dict[tuple[str, str], list[float]] = defaultdict(list)
+    mc_god_fns: dict[tuple[str, str], int] = defaultdict(int)
+    mc_slop: dict[tuple[str, str], int] = defaultdict(int)
+    mc_mut_fails: dict[tuple[str, str], int] = defaultdict(int)
+    mc_tokens: dict[tuple[str, str], int] = defaultdict(int)
+    mc_usd: dict[tuple[str, str], float] = defaultdict(float)
+
+    grader_by_cond: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    grader_by_mc: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    paired_cells: dict[tuple[str, int], dict[str, dict[str, Any]]] = defaultdict(dict)
+
+    total_stages = 0
+    functional_passed_runs = 0
+    mutation_threshold_pct: int | None = None
+    mutants_per_run = 0
+    gated_failures: list[tuple[str, list[str]]] = []
+
+    short_name = {mid: sname for mid, _, sname in MODEL_ORDER}
+
+    for r in runs:
+        mid = r["model"]["id"]
+        cond = r["condition"]
+        rep = int(r["replicate"])
+        acc = _is_accepted(r)
+        comp = r["status"] == "completed"
+        stages = r.get("stage_artifacts") or []
+        total_stages += len(stages)
+
+        # Load the final stage grader JSON referenced in check evidence.
+        evidence_json_rel: str | None = None
+        for ch in r.get("checks") or []:
+            for ev in ch.get("evidence") or []:
+                if isinstance(ev, str) and ev.endswith(".json"):
+                    evidence_json_rel = ev
+                    break
+            if evidence_json_rel is not None:
+                break
+        if evidence_json_rel is None:
+            raise ValueError(f"Missing grader JSON evidence for run {r['run_id']}")
+
+        grader = json.loads((repo_root / evidence_json_rel).read_text(encoding="utf-8"))
+        metrics = grader["metrics"]
+        if metrics.get("functional_passed"):
+            functional_passed_runs += 1
+        if not mutants_per_run and metrics.get("mutation_total"):
+            mutants_per_run = int(metrics["mutation_total"])
+        if mutation_threshold_pct is None:
+            for gch in grader.get("checks") or []:
+                if gch.get("id") == "mutation_test_strength":
+                    m_thresh = MUT_THRESHOLD_RE.search(str(gch.get("detail", "")))
+                    if m_thresh:
+                        mutation_threshold_pct = int(m_thresh.group(1))
+                        break
+
+        slop = _slop_defect_count(metrics)
+        mut_rate = float(metrics.get("mutation_kill_rate", 0.0))
+        god_fns = int(metrics.get("god_functions", 0))
+
+        cond_total[cond] += 1
+        if acc:
+            cond_pass[cond] += 1
+        cond_slop[cond] += slop
+        cond_mut_rates[cond].append(mut_rate)
+
+        repairs = sum(
+            1
+            for k in (r.get("artifact_hashes") or {})
+            if k.endswith("-gate-repair-trace.log")
+        )
+        cond_repair_turns[cond] += repairs
+
+        for sa in stages:
+            stage_text = (repo_root / sa["path"]).read_text(encoding="utf-8")
+            m_el = ELAPSED_SECONDS_RE.search(stage_text)
+            if m_el:
+                cond_wall_s[cond] += float(m_el.group(1))
+
+        mc = mc_raw[(mid, cond)]
+        mc[2] += 1
+        if comp:
+            mc[1] += 1
+        if acc:
+            mc[0] += 1
+
+        mc_mut_rates[(mid, cond)].append(mut_rate)
+        mc_god_fns[(mid, cond)] += god_fns
+        mc_slop[(mid, cond)] += slop
+        failed_ids = [
+            str(ch.get("id"))
+            for ch in (r.get("checks") or [])
+            if ch.get("status") != "pass"
+        ]
+        if "mutation_test_strength" in failed_ids:
+            mc_mut_fails[(mid, cond)] += 1
+        if cond == "gated-structural" and not acc:
+            gated_failures.append((mid, failed_ids))
+
+        run_metrics = r.get("metrics") or {}
+        if run_metrics.get("total_tokens") is not None:
+            mc_tokens[(mid, cond)] += int(run_metrics["total_tokens"])
+        if run_metrics.get("cost_usd") is not None:
+            mc_usd[(mid, cond)] += float(run_metrics["cost_usd"])
+
+        grader_by_cond[cond].append(grader)
+        grader_by_mc[(mid, cond)].append(grader)
+        paired_cells[(mid, rep)][cond] = r
+
+    if mutation_threshold_pct is None:
+        raise ValueError("Could not parse mutation kill threshold from EV1 grader JSONs")
+
+    net_improved_bg = 0
+    net_regressed_bg = 0
+    for cell_runs in paired_cells.values():
+        b_pass = _is_accepted(cell_runs["baseline"])
+        g_pass = _is_accepted(cell_runs["gated-structural"])
+        if not b_pass and g_pass:
+            net_improved_bg += 1
+        elif b_pass and not g_pass:
+            net_regressed_bg += 1
+
+    cond_mut_mean_pct = {
+        c: (sum(vals) / len(vals) * 100.0 if vals else 0.0)
+        for c, vals in cond_mut_rates.items()
+    }
+    model_cond = {
+        key: ModelCondStats(passed=vals[0], completed=vals[1], total=vals[2])
+        for key, vals in mc_raw.items()
+    }
+    model_mut_mean_pct = {
+        key: (sum(vals) / len(vals) * 100.0 if vals else 0.0)
+        for key, vals in mc_mut_rates.items()
+    }
+
+    wall_b = cond_wall_s["baseline"]
+    wall_g = cond_wall_s["gated-structural"]
+    wall_delta_pct = ((wall_g - wall_b) / wall_b * 100.0) if wall_b else 0.0
+    mut_delta_gated_vs_core_pp = (
+        cond_mut_mean_pct["gated-structural"] - cond_mut_mean_pct["core-rules-v0.2.0"]
+    )
+
+    tok_deltas = [
+        (mc_tokens[(mid, "gated-structural")] - mc_tokens[(mid, "baseline")])
+        / mc_tokens[(mid, "baseline")]
+        * 100.0
+        for mid, _, _ in MODEL_ORDER
+        if mc_tokens[(mid, "baseline")]
+    ]
+    tok_delta_min_pct = min(tok_deltas) if tok_deltas else 0.0
+    tok_delta_max_pct = max(tok_deltas) if tok_deltas else 0.0
+
+    opus_usd_b = mc_usd[("claude-opus-5-5", "baseline")]
+    opus_usd_g = mc_usd[("claude-opus-5-5", "gated-structural")]
+    opus_usd_delta_pct = (
+        ((opus_usd_g - opus_usd_b) / opus_usd_b * 100.0) if opus_usd_b else 0.0
+    )
+
+    gated_vs_baseline_verdict = str(
+        compare_evolution_arms(
+            grader_by_cond["baseline"], grader_by_cond["gated-structural"]
+        )["decision"]
+    )
+    core_verdict_by_model: dict[str, str] = {}
+    core_drop_names: list[str] = []
+    for mid, _, sname in MODEL_ORDER:
+        dec = str(
+            compare_evolution_arms(
+                grader_by_mc[(mid, "baseline")],
+                grader_by_mc[(mid, "core-rules-v0.2.0")],
+            )["decision"]
+        )
+        core_verdict_by_model[mid] = dec
+        if dec == "DROP":
+            core_drop_names.append(sname)
+
+    if not gated_failures:
+        gated_fail_summary = "0 failing gated runs"
+    else:
+        fail_counts: dict[str, int] = defaultdict(int)
+        all_mut_only = True
+        for mid, fids in gated_failures:
+            fail_counts[short_name.get(mid, mid)] += 1
+            if fids != ["mutation_test_strength"]:
+                all_mut_only = False
+        parts = [
+            f"{cnt} {sname} run" + ("s" if cnt != 1 else "")
+            for sname, cnt in fail_counts.items()
+        ]
+        if all_mut_only:
+            gated_fail_summary = (
+                f"{', '.join(parts)} missed {mutation_threshold_pct}% mut"
+            )
+        else:
+            gated_fail_summary = f"{', '.join(parts)} failed checks"
+
+    return EvolutionStats(
+        experiment_id=experiment_id,
+        case_id=case_id,
+        total_runs=len(runs),
+        total_stages=total_stages,
+        n_turns=n_turns,
+        n_models=len(models),
+        n_conditions=len(conditions),
+        n_replicates=len(replicates),
+        n_checks=n_checks,
+        word_cap_checks=word_cap_checks,
+        functional_passed_runs=functional_passed_runs,
+        mutation_threshold_pct=mutation_threshold_pct,
+        mutants_per_run=mutants_per_run,
+        cond_pass=cond_pass,
+        cond_total=cond_total,
+        cond_slop=cond_slop,
+        cond_mut_mean_pct=cond_mut_mean_pct,
+        cond_repair_turns=cond_repair_turns,
+        cond_wall_s=cond_wall_s,
+        wall_delta_pct=wall_delta_pct,
+        mut_delta_gated_vs_core_pp=mut_delta_gated_vs_core_pp,
+        net_improved_bg=net_improved_bg,
+        net_regressed_bg=net_regressed_bg,
+        model_cond=model_cond,
+        model_mut_mean_pct=model_mut_mean_pct,
+        model_god_fns=dict(mc_god_fns),
+        model_slop=dict(mc_slop),
+        model_mut_fails=dict(mc_mut_fails),
+        gated_vs_baseline_verdict=gated_vs_baseline_verdict,
+        core_verdict_by_model=core_verdict_by_model,
+        core_drop_short_names=tuple(core_drop_names),
+        tok_delta_min_pct=tok_delta_min_pct,
+        tok_delta_max_pct=tok_delta_max_pct,
+        opus_usd_delta_pct=opus_usd_delta_pct,
+        gated_fail_summary=gated_fail_summary,
+    )
 
 
 def render_pilot_results_svg(stats: PilotStats, theme: Theme) -> str:
@@ -826,7 +1158,359 @@ def render_hook_loop_svg(theme: Theme) -> str:
     return "\n".join(lines)
 
 
-def render_social_preview_svg(stats: PilotStats) -> str:
+def render_evolution_results_svg(stats: EvolutionStats, theme: Theme) -> str:
+    """Render the two-panel EV1 multi-turn code quality SVG for light or dark theme."""
+    width, height = 960, 476
+    t = theme
+
+    subtitle = (
+        f"{stats.experiment_id} · {stats.total_runs} runs · {stats.total_stages} stages · "
+        f"{stats.n_models} models × {stats.n_conditions} conditions × n = {stats.n_replicates} · "
+        f"{stats.word_cap_checks} word caps"
+    )
+
+    b_pass = stats.cond_pass["baseline"]
+    b_tot = stats.cond_total["baseline"]
+    c_pass = stats.cond_pass["core-rules-v0.2.0"]
+    c_tot = stats.cond_total["core-rules-v0.2.0"]
+    g_pass = stats.cond_pass["gated-structural"]
+    g_tot = stats.cond_total["gated-structural"]
+
+    b_pct = (b_pass / b_tot * 100.0) if b_tot else 0.0
+    c_pct = (c_pass / c_tot * 100.0) if c_tot else 0.0
+    g_pct = (g_pass / g_tot * 100.0) if g_tot else 0.0
+
+    arm_items: list[tuple[str, str, int, int, int, float, str, str]] = [
+        (
+            "baseline",
+            "baseline",
+            b_pass,
+            b_tot,
+            stats.cond_slop["baseline"],
+            stats.cond_mut_mean_pct["baseline"],
+            t.baseline,
+            t.ink_secondary,
+        ),
+        (
+            "core-rules-v0.2.0",
+            "core-rules",
+            c_pass,
+            c_tot,
+            stats.cond_slop["core-rules-v0.2.0"],
+            stats.cond_mut_mean_pct["core-rules-v0.2.0"],
+            t.core,
+            t.core,
+        ),
+        (
+            "gated-structural",
+            "gated-structural",
+            g_pass,
+            g_tot,
+            stats.cond_slop["gated-structural"],
+            stats.cond_mut_mean_pct["gated-structural"],
+            t.controls,
+            t.positive_ink,
+        ),
+    ]
+
+    lines: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" aria-labelledby="title desc">',
+        f'  <title id="title">Multi-Turn Code Quality: {_esc(stats.case_id)} ({stats.n_turns}-Turn Evolution)</title>',
+        f'  <desc id="desc">{_esc(subtitle)}. Overall acceptance moves from '
+        f'{b_pct:.1f}% ({b_pass}/{b_tot}, {stats.cond_slop["baseline"]} slop) baseline to '
+        f'{c_pct:.1f}% ({c_pass}/{c_tot}, {stats.cond_slop["core-rules-v0.2.0"]} slop) core-rules to '
+        f'{g_pct:.1f}% ({g_pass}/{g_tot}, {stats.cond_slop["gated-structural"]} slop) gated-structural; '
+        f'mean AST mutation kill rate rises to {stats.cond_mut_mean_pct["gated-structural"]:.1f}%.</desc>',
+        "  <style>",
+        f"    .sans {{ font-family: {FONT_SANS}; }}",
+        f"    .mono {{ font-family: {FONT_MONO}; }}",
+        "  </style>",
+        "",
+        "  <!-- Outer frame -->",
+        f'  <rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="10" fill="{t.canvas_bg}" stroke="{t.canvas_border}"/>',
+        "",
+        "  <!-- Header -->",
+        f'  <text x="28" y="38" class="sans" font-size="16.5" font-weight="700" fill="{t.ink}">Multi-Turn Code Quality: {_esc(stats.case_id)} ({stats.n_turns}-Turn Evolution)</text>',
+        f'  <text x="28" y="58" class="sans" font-size="11.5" fill="{t.muted}">{_esc(subtitle)}</text>',
+        "",
+        "  <!-- Condition legend (top right) -->",
+        '  <g transform="translate(588, 26)">',
+        f'    <rect x="0" y="3" width="10" height="10" rx="2" fill="{t.baseline}"/>',
+        f'    <text x="16" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">baseline</text>',
+        f'    <rect x="80" y="3" width="10" height="10" rx="2" fill="{t.core}"/>',
+        f'    <text x="96" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">core-rules (v0.2.0)</text>',
+        f'    <rect x="224" y="3" width="10" height="10" rx="2" fill="{t.controls}"/>',
+        f'    <text x="240" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">gated-structural</text>',
+        "  </g>",
+        f'  <line x1="28" y1="72" x2="{width - 28}" y2="72" stroke="{t.divider}" stroke-width="1"/>',
+        "",
+        "  <!-- Left Panel: Overall Pass Rate & Slop Findings -->",
+        f'  <rect x="24" y="84" width="400" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <text x="40" y="106" class="sans" font-size="13" font-weight="700" fill="{t.ink}">Overall Pass Rate &amp; Slop Findings</text>',
+        f'  <text x="40" y="122" class="sans" font-size="10.5" fill="{t.muted}">All {stats.n_models} models ({b_tot} runs/arm) · {stats.n_checks} mechanical {_esc(stats.case_id)} checks</text>',
+    ]
+
+    # Left panel chart area: y_top=160 (100%) to y_bottom=268 (0%), height=108
+    lp_y_top = 160.0
+    lp_y_bottom = 268.0
+    lp_h = lp_y_bottom - lp_y_top
+    lp_x_left = 74.0
+    lp_x_right = 406.0
+
+    for pct in (0, 50, 100):
+        y = lp_y_bottom - (pct / 100.0) * lp_h
+        stroke_color = t.muted if pct == 0 else t.grid
+        stroke_op = "0.45" if pct == 0 else "1"
+        dash = "" if pct == 0 else ' stroke-dasharray="3 3"'
+        lines.append(
+            f'  <line x1="{lp_x_left:.0f}" y1="{y:.1f}" x2="{lp_x_right:.0f}" y2="{y:.1f}" '
+            f'stroke="{stroke_color}" stroke-opacity="{stroke_op}" stroke-width="1"{dash}/>'
+        )
+        lines.append(
+            f'  <text x="{lp_x_left - 8:.0f}" y="{y + 3.5:.1f}" text-anchor="end" '
+            f'class="mono" font-size="10" fill="{t.muted}">{pct}%</text>'
+        )
+
+    bar_centers = (130.0, 240.0, 350.0)
+    bar_w = 64.0
+    best_mut = max(stats.cond_mut_mean_pct.values())
+    for (_cond, label, passed, total, slop, mut_pct, color, val_color), cx in zip(
+        arm_items, bar_centers
+    ):
+        pct = (passed / total * 100.0) if total else 0.0
+        bh = (pct / 100.0) * lp_h
+        bx = cx - bar_w / 2.0
+        if bh > 0:
+            by = lp_y_bottom - bh
+            lines.append(
+                f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{bh:.1f}" '
+                f'rx="4" fill="{color}"/>'
+            )
+            val_y = by - 19.5
+            sub_y = by - 6.5
+        else:
+            lines.append(
+                f'  <rect x="{bx:.1f}" y="{lp_y_bottom - 3.5:.1f}" width="{bar_w:.1f}" height="3.5" '
+                f'rx="1.5" fill="{color}"/>'
+            )
+            val_y = lp_y_bottom - 24.5
+            sub_y = lp_y_bottom - 11.5
+
+        # Clean backdrop masks dashed gridlines behind bar value stacks
+        lines.append(
+            f'  <rect x="{cx - 28:.1f}" y="{val_y - 12.0:.1f}" width="56" height="27.5" '
+            f'rx="3" fill="{t.panel_bg}"/>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="{val_y:.1f}" text-anchor="middle" '
+            f'class="mono" font-size="13" font-weight="700" fill="{val_color}">{pct:.1f}%</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="{sub_y:.1f}" text-anchor="middle" '
+            f'class="mono" font-size="10" fill="{t.muted}">({passed}/{total})</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="285" text-anchor="middle" '
+            f'class="sans" font-size="11" font-weight="600" fill="{t.ink}">{_esc(label)}</text>'
+        )
+        slop_fill = t.positive_ink if slop == 0 else t.danger_ink
+        lines.append(
+            f'  <text x="{cx:.1f}" y="300" text-anchor="middle" '
+            f'class="mono" font-size="10" font-weight="700" fill="{slop_fill}">{slop} slop</text>'
+        )
+        mut_fill = t.positive_ink if abs(mut_pct - best_mut) < 1e-9 else t.muted
+        mut_weight = "600" if abs(mut_pct - best_mut) < 1e-9 else "400"
+        lines.append(
+            f'  <text x="{cx:.1f}" y="314" text-anchor="middle" '
+            f'class="mono" font-size="9.5" font-weight="{mut_weight}" fill="{mut_fill}">{mut_pct:.1f}% mut</text>'
+        )
+
+    lines.extend([
+        f'  <line x1="40" y1="327" x2="408" y2="327" stroke="{t.divider}" stroke-width="1"/>',
+        f'  <text x="40" y="343" class="sans" font-size="9.5" fill="{t.muted}">All {stats.functional_passed_runs}/{stats.total_runs} runs passed functional tests across all {stats.n_turns} turns;</text>',
+        f'  <text x="40" y="358" class="sans" font-size="9.5" fill="{t.muted}">failures were structural/suppression slop or &lt;{stats.mutation_threshold_pct}% mutation score.</text>',
+        "",
+        "  <!-- Right Panel: Acceptance & Mutation Kill Rate by Model -->",
+        f'  <rect x="438" y="84" width="498" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <text x="454" y="106" class="sans" font-size="13" font-weight="700" fill="{t.ink}">Acceptance &amp; Mutation Kill Rate by Model</text>',
+        f'  <text x="454" y="122" class="sans" font-size="10.5" fill="{t.muted}">'
+        f'n = {stats.n_replicates} per arm · Total: {b_pass}/{b_tot} → {c_pass}/{c_tot} → {g_pass}/{g_tot} '
+        f'(+{stats.net_improved_bg}/-{stats.net_regressed_bg} vs. baseline)</text>',
+        f'  <text x="920" y="138" text-anchor="end" class="mono" font-size="9.5" fill="{t.muted}">mut kill</text>',
+    ])
+
+    # Right panel grouped horizontal bars (0..3 runs) + right-aligned mut kill column
+    rp_x0 = 604.0
+    rp_x1 = 784.0  # 180px track -> 60px per run for n=3
+    rp_track_w = rp_x1 - rp_x0
+    max_runs = stats.n_replicates
+    rp_y_top = 142.0
+    rp_y_bot = 330.0
+
+    for tick in range(max_runs + 1):
+        tx = rp_x0 + (tick / max_runs) * rp_track_w
+        stroke_color = t.muted if tick == 0 else t.grid
+        stroke_op = "0.45" if tick == 0 else "1"
+        dash = "" if tick == 0 else ' stroke-dasharray="3 3"'
+        lines.append(
+            f'  <line x1="{tx:.1f}" y1="{rp_y_top:.0f}" x2="{tx:.1f}" y2="{rp_y_bot:.0f}" '
+            f'stroke="{stroke_color}" stroke-opacity="{stroke_op}" stroke-width="1"{dash}/>'
+        )
+        tick_label = f"{tick}/{max_runs}" if tick == max_runs else str(tick)
+        lines.append(
+            f'  <text x="{tx:.1f}" y="346" text-anchor="middle" '
+            f'class="mono" font-size="10" fill="{t.muted}">{tick_label}</text>'
+        )
+
+    ev_cond_colors = {
+        "baseline": t.baseline,
+        "core-rules-v0.2.0": t.core,
+        "gated-structural": t.controls,
+    }
+    group_ys = (146.0, 194.0, 242.0, 290.0)
+    bar_h = 10.0
+    bar_step = 12.5
+
+    for idx, ((mid, display_name, _short), gy) in enumerate(zip(MODEL_ORDER, group_ys)):
+        if idx > 0:
+            sep_y = gy - 6.0
+            lines.append(
+                f'  <line x1="454" y1="{sep_y:.1f}" x2="920" y2="{sep_y:.1f}" '
+                f'stroke="{t.divider}" stroke-opacity="0.65" stroke-width="1"/>'
+            )
+
+        label_y = gy + 17.0
+        lines.append(
+            f'  <text x="454" y="{label_y:.1f}" class="sans" font-size="11.5" font-weight="600" fill="{t.ink}">{_esc(display_name)}</text>'
+        )
+
+        gods_b = stats.model_god_fns.get((mid, "baseline"), 0)
+        gods_g = stats.model_god_fns.get((mid, "gated-structural"), 0)
+        slop_b = stats.model_slop.get((mid, "baseline"), 0)
+        slop_g = stats.model_slop.get((mid, "gated-structural"), 0)
+        mut_delta_bg = (
+            stats.model_mut_mean_pct[(mid, "gated-structural")]
+            - stats.model_mut_mean_pct[(mid, "baseline")]
+        )
+        core_verdict = stats.core_verdict_by_model[mid]
+        gated_mut_fails = stats.model_mut_fails.get((mid, "gated-structural"), 0)
+
+        if gods_b > 0 and gods_g == 0:
+            sub_txt = f"{gods_b} → {gods_g} god fns · {mut_delta_bg:+.1f}pp"
+            sub_fill = t.positive_ink
+            sub_weight = "600"
+        elif core_verdict == "DROP" and slop_b > 0:
+            sub_txt = f"core: {core_verdict} · slop {slop_b} → {slop_g}"
+            sub_fill = t.muted
+            sub_weight = "400"
+        elif core_verdict == "DROP" and gated_mut_fails > 0:
+            sub_txt = f"core: {core_verdict} · {gated_mut_fails} mut <{stats.mutation_threshold_pct}%"
+            sub_fill = t.muted
+            sub_weight = "400"
+        else:
+            sub_txt = f"{slop_g} slop · mut {mut_delta_bg:+.1f}pp"
+            sub_fill = t.muted
+            sub_weight = "400"
+
+        lines.append(
+            f'  <text x="454" y="{label_y + 13.5:.1f}" class="sans" font-size="9.5" font-weight="{sub_weight}" fill="{sub_fill}">{_esc(sub_txt)}</text>'
+        )
+
+        for c_idx, cond in enumerate(EV_CONDITIONS):
+            mc = stats.model_cond[(mid, cond)]
+            mut_val = stats.model_mut_mean_pct[(mid, cond)]
+            by = gy + c_idx * bar_step
+            bw = (mc.passed / mc.total) * rp_track_w if mc.total else 0.0
+            if bw > 0:
+                lines.append(
+                    f'  <rect x="{rp_x0:.1f}" y="{by:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" '
+                    f'rx="2.5" fill="{ev_cond_colors[cond]}"/>'
+                )
+                lbl_x = rp_x0 + bw + 7.0
+            else:
+                lines.append(
+                    f'  <rect x="{rp_x0:.1f}" y="{by:.1f}" width="3.5" height="{bar_h:.1f}" '
+                    f'rx="1.5" fill="{ev_cond_colors[cond]}"/>'
+                )
+                lbl_x = rp_x0 + 3.5 + 6.5
+
+            lbl = f"{mc.passed}/{mc.total}"
+            is_gated = cond == "gated-structural"
+            lbl_weight = "700" if is_gated else "500"
+            lbl_fill = t.ink if is_gated else t.muted
+            lines.append(
+                f'  <text x="{lbl_x:.1f}" y="{by + 8.5:.1f}" '
+                f'class="mono" font-size="10" font-weight="{lbl_weight}" fill="{lbl_fill}">{_esc(lbl)}</text>'
+            )
+
+            mut_fill = t.positive_ink if is_gated and mut_val >= stats.mutation_threshold_pct else t.muted
+            mut_weight = "700" if is_gated else "500"
+            lines.append(
+                f'  <text x="920" y="{by + 8.5:.1f}" text-anchor="end" '
+                f'class="mono" font-size="10" font-weight="{mut_weight}" fill="{mut_fill}">{mut_val:.1f}%</text>'
+            )
+
+    lines.append(
+        f'  <text x="454" y="363" class="sans" font-size="9.5" fill="{t.muted}">'
+        f'Right column: mean AST mutation kill rate per arm (min {stats.mutation_threshold_pct}% to pass, {stats.mutants_per_run} mutants/run).</text>'
+    )
+
+    # Bottom two crisp callout cards
+    wall_sign = "+" if stats.wall_delta_pct >= 0 else ""
+    mut_vs_core_sign = "+" if stats.mut_delta_gated_vs_core_pp >= 0 else ""
+    pos_headline = (
+        f"Mechanical gates: {_fmt_pct_clean(b_pct)} → {_fmt_pct_clean(g_pct)} pass · "
+        f"{stats.cond_slop['gated-structural']} slop · "
+        f"{mut_vs_core_sign}{stats.mut_delta_gated_vs_core_pp:.1f}pp mut vs prompts"
+    )
+    pos_detail = (
+        f"{stats.cond_repair_turns['gated-structural']} repair turns across "
+        f"{g_tot} runs · {wall_sign}{stats.wall_delta_pct:.1f}% wall time "
+        f"({round(stats.cond_wall_s['baseline']):,}s → {round(stats.cond_wall_s['gated-structural']):,}s)"
+    )
+
+    drop_label = " & ".join(stats.core_drop_short_names)
+    neg_headline = (
+        f"Prompts alone dropped pass ({_fmt_pct_clean(b_pct)} → {_fmt_pct_clean(c_pct)}; "
+        f"DROP on {drop_label})"
+    )
+    tok_min_sign = "+" if stats.tok_delta_min_pct >= 0 else ""
+    tok_max_sign = "+" if stats.tok_delta_max_pct >= 0 else ""
+    usd_sign = "+" if stats.opus_usd_delta_pct >= 0 else ""
+    neg_detail = (
+        f"Repair turns cost {tok_min_sign}{round(stats.tok_delta_min_pct)}% to "
+        f"{tok_max_sign}{round(stats.tok_delta_max_pct)}% tokens "
+        f"({usd_sign}{stats.opus_usd_delta_pct:.1f}% Opus USD); {stats.gated_fail_summary}"
+    )
+
+    lines.extend([
+        "",
+        "  <!-- Positive Callout: Mechanical Gating Verdict -->",
+        "  <defs>",
+        f'    <clipPath id="clip-ev-pos-{t.name}"><rect x="24" y="388" width="448" height="68" rx="6"/></clipPath>',
+        f'    <clipPath id="clip-ev-neg-{t.name}"><rect x="488" y="388" width="448" height="68" rx="6"/></clipPath>',
+        "  </defs>",
+        f'  <rect x="24" y="388" width="448" height="68" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+        f'  <rect x="24" y="388" width="4.5" height="68" fill="{t.positive}" clip-path="url(#clip-ev-pos-{t.name})"/>',
+        f'  <text x="42" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.positive_ink}">GATED VERDICT: {_esc(stats.gated_vs_baseline_verdict)}</text>',
+        f'  <text x="42" y="426" class="sans" font-size="11" font-weight="700" fill="{t.ink}">{_esc(pos_headline)}</text>',
+        f'  <text x="42" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(pos_detail)}</text>',
+        "",
+        "  <!-- Tradeoff Callout: Prompt Limit & Cost Overhead -->",
+        f'  <rect x="488" y="388" width="448" height="68" rx="6" fill="{t.danger_bg}" stroke="{t.danger_border}"/>',
+        f'  <rect x="488" y="388" width="4.5" height="68" fill="{t.danger}" clip-path="url(#clip-ev-neg-{t.name})"/>',
+        f'  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.danger_ink}">PROMPT LIMIT &amp; COST TRADEOFF</text>',
+        f'  <text x="506" y="426" class="sans" font-size="11" font-weight="700" fill="{t.ink}">{_esc(neg_headline)}</text>',
+        f'  <text x="506" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(neg_detail)}</text>',
+        "</svg>",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def render_social_preview_svg(
+    stats: PilotStats, ev_stats: EvolutionStats | None = None
+) -> str:
     """Render the 1280x640 dark minimalist GitHub social preview SVG."""
     width, height = 1280, 640
     t = DARK_THEME
@@ -841,11 +1525,41 @@ def render_social_preview_svg(stats: PilotStats) -> str:
         stats.rw3_completed["core-rules-v0.2.0"] + stats.rw3_completed["model-controls"]
     )
     ruled_pct = (ruled_tamp / ruled_comp * 100.0) if ruled_comp else 0.0
-    stat_arrow = f"{b_pct:.1f}% → {ruled_pct:.0f}%"
-    stat_detail = (
-        f"{stats.experiment_id} · {b_tamp}/{b_comp} baseline → "
-        f"{ruled_tamp}/{ruled_comp} ruled (urllib3)"
-    )
+    rw3_arrow = f"{b_pct:.1f}% → {ruled_pct:.0f}%"
+
+    if ev_stats is not None:
+        ev_b_pct = (
+            ev_stats.cond_pass["baseline"] / ev_stats.cond_total["baseline"] * 100.0
+            if ev_stats.cond_total["baseline"]
+            else 0.0
+        )
+        ev_g_pct = (
+            ev_stats.cond_pass["gated-structural"]
+            / ev_stats.cond_total["gated-structural"]
+            * 100.0
+            if ev_stats.cond_total["gated-structural"]
+            else 0.0
+        )
+        ev_arrow = f"{_fmt_pct_clean(ev_b_pct)} → {_fmt_pct_clean(ev_g_pct)}"
+        ev_slop = ev_stats.cond_slop["gated-structural"]
+        pill_lines = [
+            f'  <text x="620" y="504" class="mono" font-size="20" font-weight="700" fill="{t.positive_ink}">{_esc(ev_arrow)}<tspan dx="8" class="sans" font-size="13" font-weight="600" fill="{t.ink}">({ev_slop} slop)</tspan></text>',
+            f'  <text x="620" y="527" class="sans" font-size="12.5" fill="{t.muted}">multi-turn code quality · {_esc(ev_stats.case_id)} (n = {ev_stats.n_replicates})</text>',
+            f'  <line x1="902" y1="487" x2="902" y2="529" stroke="{t.positive_border}" stroke-width="1.2"/>',
+            f'  <text x="922" y="504" class="mono" font-size="20" font-weight="700" fill="{t.positive_ink}">{_esc(rw3_arrow)}<tspan dx="8" class="sans" font-size="13" font-weight="600" fill="{t.ink}">({ruled_tamp}/{ruled_comp})</tspan></text>',
+            f'  <text x="922" y="527" class="sans" font-size="12.5" fill="{t.muted}">frozen-test tampering · RW3 (n = {stats.n_replicates})</text>',
+        ]
+    else:
+        stat_detail = (
+            f"{stats.experiment_id} · {b_tamp}/{b_comp} baseline → "
+            f"{ruled_tamp}/{ruled_comp} ruled (urllib3)"
+        )
+        pill_lines = [
+            f'  <text x="620" y="517" class="mono" font-size="24" font-weight="700" fill="{t.positive_ink}">{_esc(rw3_arrow)}</text>',
+            f'  <line x1="776" y1="487" x2="776" y2="529" stroke="{t.positive_border}" stroke-width="1.2"/>',
+            f'  <text x="794" y="503" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">frozen-test tampering in n = {stats.n_replicates} OSS eval</text>',
+            f'  <text x="794" y="525" class="sans" font-size="12.5" fill="{t.muted}">{_esc(stat_detail)}</text>',
+        ]
 
     lines: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
@@ -912,10 +1626,7 @@ def render_social_preview_svg(stats: PilotStats) -> str:
         "  <!-- Empirical Stat Pill -->",
         f'  <rect x="596" y="472" width="608" height="72" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}" stroke-width="1.5"/>',
         f'  <rect x="596" y="472" width="6" height="72" fill="{t.positive}" clip-path="url(#clip-stat-pill)"/>',
-        f'  <text x="620" y="517" class="mono" font-size="24" font-weight="700" fill="{t.positive_ink}">{_esc(stat_arrow)}</text>',
-        f'  <line x1="776" y1="487" x2="776" y2="529" stroke="{t.positive_border}" stroke-width="1.2"/>',
-        f'  <text x="794" y="503" class="sans" font-size="15.5" font-weight="700" fill="{t.ink}">frozen-test tampering in n = {stats.n_replicates} OSS eval</text>',
-        f'  <text x="794" y="525" class="sans" font-size="12.5" fill="{t.muted}">{_esc(stat_detail)}</text>',
+        *pill_lines,
         "</svg>",
         "",
     ]
@@ -931,13 +1642,19 @@ def _write_if_changed(path: Path, content: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Render deterministic SVG assets from pilot-3way-v0.6.0/runs.jsonl."
+        description="Render deterministic SVG assets from live pilot runs.jsonl datasets."
     )
     parser.add_argument(
         "--runs",
         type=Path,
         default=None,
-        help="Path to runs.jsonl (default: results/pilot-3way-v0.6.0/runs.jsonl)",
+        help="Path to v0.6.0 runs.jsonl (default: results/pilot-3way-v0.6.0/runs.jsonl)",
+    )
+    parser.add_argument(
+        "--evolution-runs",
+        type=Path,
+        default=None,
+        help="Path to EV1 runs.jsonl (default: results/pilot-evolution-v0.7.0/runs.jsonl)",
     )
     parser.add_argument(
         "--out-dir",
@@ -957,13 +1674,21 @@ def main(argv: list[str] | None = None) -> int:
     runs_path = args.runs if args.runs is not None else (
         repo_root / "results" / "pilot-3way-v0.6.0" / "runs.jsonl"
     )
+    ev_runs_path = args.evolution_runs if args.evolution_runs is not None else (
+        repo_root / "results" / "pilot-evolution-v0.7.0" / "runs.jsonl"
+    )
     out_dir = args.out_dir if args.out_dir is not None else (
         repo_root / "docs" / "assets"
     )
 
     stats = compute_pilot_stats(repo_root, runs_path)
+    ev_stats = (
+        compute_evolution_stats(repo_root, ev_runs_path)
+        if ev_runs_path.is_file()
+        else None
+    )
 
-    outputs = {
+    outputs: dict[Path, str] = {
         out_dir / "pilot-v0.6.0-results-light.svg": render_pilot_results_svg(
             stats, LIGHT_THEME
         ),
@@ -973,11 +1698,29 @@ def main(argv: list[str] | None = None) -> int:
         out_dir / "hook-loop-light.svg": render_hook_loop_svg(LIGHT_THEME),
         out_dir / "hook-loop-dark.svg": render_hook_loop_svg(DARK_THEME),
     }
+    if ev_stats is not None:
+        outputs[out_dir / "pilot-v0.7.0-evolution-light.svg"] = (
+            render_evolution_results_svg(ev_stats, LIGHT_THEME)
+        )
+        outputs[out_dir / "pilot-v0.7.0-evolution-dark.svg"] = (
+            render_evolution_results_svg(ev_stats, DARK_THEME)
+        )
+
     for path, content in outputs.items():
         _write_if_changed(path, content)
 
     if args.social_svg is not None:
-        _write_if_changed(args.social_svg, render_social_preview_svg(stats))
+        _write_if_changed(args.social_svg, render_social_preview_svg(stats, ev_stats))
+
+    ev_summary = ""
+    if ev_stats is not None:
+        ev_summary = (
+            f"; EV1 {ev_stats.cond_pass['baseline']}/{ev_stats.cond_total['baseline']} -> "
+            f"{ev_stats.cond_pass['core-rules-v0.2.0']}/{ev_stats.cond_total['core-rules-v0.2.0']} -> "
+            f"{ev_stats.cond_pass['gated-structural']}/{ev_stats.cond_total['gated-structural']} "
+            f"({ev_stats.cond_slop['baseline']} -> {ev_stats.cond_slop['core-rules-v0.2.0']} -> "
+            f"{ev_stats.cond_slop['gated-structural']} slop)"
+        )
 
     print(
         f"Rendered {len(outputs)} SVG assets from {runs_path.name} "
@@ -987,7 +1730,8 @@ def main(argv: list[str] | None = None) -> int:
         f"{stats.rw3_tampered['model-controls']}/{stats.rw3_completed['model-controls']}; "
         f"overall {stats.cond_pass['baseline']}/{stats.cond_total['baseline']} -> "
         f"{stats.cond_pass['core-rules-v0.2.0']}/{stats.cond_total['core-rules-v0.2.0']} -> "
-        f"{stats.cond_pass['model-controls']}/{stats.cond_total['model-controls']})."
+        f"{stats.cond_pass['model-controls']}/{stats.cond_total['model-controls']}"
+        f"{ev_summary})."
     )
     return 0
 
