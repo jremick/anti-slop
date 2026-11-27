@@ -62,7 +62,7 @@ EXCLUDED_SCAN_DIRS = frozenset({
 })
 
 LEGACY_NAME_RE = re.compile(
-    r"(?:^|_)(?:legacy|compat|deprecated|old|v\d+_compat|fallback_old)(?:$|_)",
+    r"(?:^|_)(?:legacy|compat|deprecated|v\d+_compat|fallback_old)(?:$|_)|^old_|_old$",
     re.IGNORECASE,
 )
 LEGACY_FLAG_PARAM_RE = re.compile(
@@ -150,7 +150,7 @@ PYTEST_ASSERT_CALLS = frozenset({
 
 JS_TEST_START_RE = re.compile(r"\b(?:it|test)\s*\([^,]+,\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{|\b(?:it|test)\s*\([^,]+,\s*(?:async\s*)?function\b[^{]*\{")
 JS_ASSERT_RE = re.compile(
-    r"\b(?:expect(?:\.\w+)?\s*\(|expectTypeOf\s*(?:<|\()|assertType\s*(?:<|\()|assert(?:\.\w+)?\s*\()"
+    r"\b(?:expect(?:\.\w+)?\s*\(|expectTypeOf\s*(?:<|\()|assertType\s*(?:<|\()|assert(?:[A-Z]\w*|_\w+|\.\w+)?\s*(?:<|\())"
 )
 JS_TAUTOLOGY_RE = re.compile(
     r"\bexpect\s*\(\s*(true|false|\d+|'[^']*'|\"[^\"]*\"|[A-Za-z_$][\w$]*)\s*\)\s*\.\s*(?:toBe|toEqual|toStrictEqual)\s*\(\s*\1\s*\)"
@@ -169,6 +169,9 @@ JS_ENV_FALLBACK_RE = re.compile(
 JS_LOG_OR_THROW_RE = re.compile(r"\b(?:throw|console\.(?:error|warn|log)|logger\.|log\.)\b")
 JS_FUNC_START_RE = re.compile(
     r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s+([A-Za-z_$][\w$]*)\s*\(|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>\s*\{)"
+)
+JS_DECL_START_RE = re.compile(
+    r"^\s*(?:export\s+|declare\s+|default\s+|async\s+)*(?:function|const|let|var|class|interface|type|enum)\b"
 )
 GO_FUNC_START_RE = re.compile(
     r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\("
@@ -299,6 +302,7 @@ def _call_is_real_assertion(
     aliases: Dict[str, str],
     verified_fn_helpers: Set[str],
     verified_method_helpers: Set[str],
+    verified_mod_helpers: Optional[Dict[str, Set[str]]] = None,
 ) -> Tuple[bool, bool]:
     """Return (is_real_assertion, is_tautological_assertion) for a Python ast.Call."""
     dotted = _dc._dotted_name(call.func)
@@ -331,8 +335,14 @@ def _call_is_real_assertion(
         )
     ):
         return True, False
-    elif isinstance(call.func, ast.Attribute) and attr.startswith(("assert_", "_assert_")):
-        return True, False
+    elif isinstance(call.func, ast.Attribute):
+        if attr.startswith(("assert_", "_assert_")):
+            return True, False
+        if verified_mod_helpers:
+            for candidate_dotted in (dotted, resolved):
+                prefix, sep, fn_name = candidate_dotted.rpartition(".")
+                if sep and fn_name in verified_mod_helpers.get(prefix, ()):
+                    return True, False
     return False, False
 
 
@@ -341,6 +351,7 @@ def _body_has_real_assertion(
     aliases: Dict[str, str],
     verified_fn_helpers: Set[str],
     verified_method_helpers: Set[str],
+    verified_mod_helpers: Optional[Dict[str, Set[str]]] = None,
 ) -> bool:
     for stmt in body:
         for sub in ast.walk(stmt):
@@ -348,7 +359,11 @@ def _body_has_real_assertion(
                 return True
             if isinstance(sub, ast.Call):
                 is_real, _ = _call_is_real_assertion(
-                    sub, aliases, verified_fn_helpers, verified_method_helpers
+                    sub,
+                    aliases,
+                    verified_fn_helpers,
+                    verified_method_helpers,
+                    verified_mod_helpers,
                 )
                 if is_real:
                     return True
@@ -359,6 +374,7 @@ def _collect_verified_assertion_helpers(
     tree: ast.Module,
     aliases: Dict[str, str],
     seed_fn_helpers: Optional[Set[str]] = None,
+    seed_mod_helpers: Optional[Dict[str, Set[str]]] = None,
 ) -> Tuple[Set[str], Set[str]]:
     """Find same-module helper functions and class methods proven by AST to execute real assertions."""
     mod_funcs: Dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
@@ -377,13 +393,15 @@ def _collect_verified_assertion_helpers(
         changed = False
         for name, fn in mod_funcs.items():
             if name not in verified_fns and _body_has_real_assertion(
-                fn.body, aliases, verified_fns, verified_methods
+                fn.body, aliases, verified_fns, verified_methods, seed_mod_helpers
             ):
                 verified_fns.add(name)
                 changed = True
         for name, methods in cls_methods.items():
             if name not in verified_methods and any(
-                _body_has_real_assertion(m.body, aliases, verified_fns, verified_methods)
+                _body_has_real_assertion(
+                    m.body, aliases, verified_fns, verified_methods, seed_mod_helpers
+                )
                 for m in methods
             ):
                 verified_methods.add(name)
@@ -396,85 +414,148 @@ def _collect_verified_assertion_helpers(
 _TEST_HELPER_CACHE: Dict[Tuple[str, int, int], Set[str]] = {}
 
 
+def _resolve_module_candidate_file(
+    parts: Sequence[str],
+    *,
+    root: Path,
+    rel_dir: Path,
+    level: int = 0,
+) -> Optional[Path]:
+    candidate_paths: List[Path] = []
+    if level > 0:
+        base = rel_dir
+        for _ in range(level - 1):
+            base = base.parent
+        if parts:
+            candidate_paths.append(base.joinpath(*parts).with_suffix(".py"))
+            candidate_paths.append(base.joinpath(*parts) / "__init__.py")
+        else:
+            candidate_paths.append(base / "__init__.py")
+    elif parts:
+        first = parts[0].lower()
+        if first in ("tests", "test") or any(p.lower() in ("tests", "test") for p in parts):
+            candidate_paths.append(root.joinpath(*parts).with_suffix(".py"))
+            candidate_paths.append(root.joinpath(*parts) / "__init__.py")
+        else:
+            candidate_paths.append(rel_dir.joinpath(*parts).with_suffix(".py"))
+            candidate_paths.append(rel_dir.joinpath(*parts) / "__init__.py")
+
+    for cand in candidate_paths:
+        try:
+            rcand = cand.resolve()
+            rcand.relative_to(root)
+        except (OSError, ValueError):
+            continue
+        if rcand.is_file():
+            return rcand
+    return None
+
+
+def _load_verified_helpers_from_file(
+    resolved_file: Path,
+    root: Path,
+    *,
+    depth: int = 0,
+) -> Set[str]:
+    try:
+        st = resolved_file.stat()
+    except OSError:
+        return set()
+    cache_key = (str(resolved_file), st.st_mtime_ns, st.st_size)
+    cached = _TEST_HELPER_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        helper_src = resolved_file.read_text(encoding="utf-8")
+        helper_tree = ast.parse(helper_src)
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        helper_names: Set[str] = set()
+    else:
+        helper_aliases = _dc._python_import_aliases(helper_tree)
+        seed_fns: Set[str] = set()
+        seed_mods: Dict[str, Set[str]] = {}
+        if depth < 1:
+            try:
+                rel_helper = str(resolved_file.relative_to(root)).replace("\\", "/")
+            except ValueError:
+                rel_helper = resolved_file.name
+            seed_fns, seed_mods = _resolve_imported_test_assertion_helpers(
+                rel_helper, helper_tree, root, _depth=depth + 1
+            )
+        helper_names, _ = _collect_verified_assertion_helpers(
+            helper_tree,
+            helper_aliases,
+            seed_fn_helpers=seed_fns,
+            seed_mod_helpers=seed_mods,
+        )
+
+    if len(_TEST_HELPER_CACHE) > 256:
+        _TEST_HELPER_CACHE.clear()
+    _TEST_HELPER_CACHE[cache_key] = helper_names
+    return helper_names
+
+
 def _resolve_imported_test_assertion_helpers(
     rel_path: str,
     tree: ast.Module,
     repo_root: Optional[Path],
-) -> Set[str]:
-    """Resolve functions imported from local test-helper modules and verify via AST that they assert."""
+    *,
+    _depth: int = 0,
+) -> Tuple[Set[str], Dict[str, Set[str]]]:
+    """Resolve functions and modules imported from local test helpers and verify via AST that they assert."""
     if repo_root is None:
-        return set()
+        return set(), {}
     root = repo_root.resolve()
     rel_dir = (root / rel_path).parent
     verified_imported: Set[str] = set()
+    verified_mod_helpers: Dict[str, Set[str]] = {}
 
     for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                resolved_file = _resolve_module_candidate_file(parts, root=root, rel_dir=rel_dir)
+                if resolved_file is None:
+                    continue
+                helper_names = _load_verified_helpers_from_file(resolved_file, root, depth=_depth)
+                if helper_names:
+                    local_mod = alias.asname or alias.name
+                    verified_mod_helpers.setdefault(local_mod, set()).update(helper_names)
+                    verified_mod_helpers.setdefault(alias.name, set()).update(helper_names)
+            continue
+
         if not isinstance(node, ast.ImportFrom):
             continue
         mod = node.module or ""
-        candidate_paths: List[Path] = []
-        if node.level > 0:
-            base = rel_dir
-            for _ in range(node.level - 1):
-                base = base.parent
-            if mod:
-                parts = mod.split(".")
-                candidate_paths.append(base.joinpath(*parts).with_suffix(".py"))
-                candidate_paths.append(base.joinpath(*parts) / "__init__.py")
-            else:
-                candidate_paths.append(base / "__init__.py")
-        elif mod:
-            parts = mod.split(".")
-            first = parts[0].lower()
-            if first in ("tests", "test") or any(p.lower() in ("tests", "test") for p in parts):
-                candidate_paths.append(root.joinpath(*parts).with_suffix(".py"))
-                candidate_paths.append(root.joinpath(*parts) / "__init__.py")
-            else:
-                candidate_paths.append(rel_dir.joinpath(*parts).with_suffix(".py"))
-        else:
-            continue
-
-        resolved_file: Optional[Path] = None
-        for cand in candidate_paths:
-            try:
-                rcand = cand.resolve()
-                rcand.relative_to(root)
-            except (OSError, ValueError):
-                continue
-            if rcand.is_file():
-                resolved_file = rcand
-                break
-        if resolved_file is None:
-            continue
-
-        try:
-            st = resolved_file.stat()
-        except OSError:
-            continue
-        cache_key = (str(resolved_file), st.st_mtime_ns, st.st_size)
-        helper_names = _TEST_HELPER_CACHE.get(cache_key)
-        if helper_names is None:
-            try:
-                helper_src = resolved_file.read_text(encoding="utf-8")
-                helper_tree = ast.parse(helper_src)
-            except (OSError, UnicodeDecodeError, SyntaxError):
-                helper_names = set()
-            else:
-                helper_aliases = _dc._python_import_aliases(helper_tree)
-                helper_names, _ = _collect_verified_assertion_helpers(
-                    helper_tree, helper_aliases
-                )
-            if len(_TEST_HELPER_CACHE) > 256:
-                _TEST_HELPER_CACHE.clear()
-            _TEST_HELPER_CACHE[cache_key] = helper_names
+        parts = mod.split(".") if mod else []
+        resolved_file = _resolve_module_candidate_file(
+            parts, root=root, rel_dir=rel_dir, level=node.level
+        )
+        helper_names = (
+            _load_verified_helpers_from_file(resolved_file, root, depth=_depth)
+            if resolved_file is not None
+            else set()
+        )
 
         for alias in node.names:
             if alias.name == "*":
                 verified_imported.update(helper_names)
             elif alias.name in helper_names:
                 verified_imported.add(alias.asname or alias.name)
+            else:
+                # Handle `from tests import util` or `from . import util` where `util` is a submodule.
+                sub_parts = list(parts) + [alias.name]
+                sub_file = _resolve_module_candidate_file(
+                    sub_parts, root=root, rel_dir=rel_dir, level=node.level
+                )
+                if sub_file is not None:
+                    sub_helpers = _load_verified_helpers_from_file(sub_file, root, depth=_depth)
+                    if sub_helpers:
+                        local_mod = alias.asname or alias.name
+                        verified_mod_helpers.setdefault(local_mod, set()).update(sub_helpers)
 
-    return verified_imported
+    return verified_imported, verified_mod_helpers
 
 
 def check_test_theater_in_source(
@@ -484,6 +565,7 @@ def check_test_theater_in_source(
     added_lines: Optional[Set[int]] = None,
     repo_root: Optional[Path] = None,
     severity: str = "warning",
+    truncated_hunk: bool = False,
 ) -> List[Dict[str, Any]]:
     """Detect assertion-free, tautological, or over-mocked tests."""
     if not _dc._is_test_file(rel_path):
@@ -496,12 +578,16 @@ def check_test_theater_in_source(
             tree = ast.parse(source)
         except SyntaxError:
             return []
+        total_lines = len(source.splitlines())
         aliases = _dc._python_import_aliases(tree)
-        imported_helpers = _resolve_imported_test_assertion_helpers(
+        imported_helpers, imported_mod_helpers = _resolve_imported_test_assertion_helpers(
             rel_path, tree, repo_root
         )
         verified_fn_helpers, verified_method_helpers = _collect_verified_assertion_helpers(
-            tree, aliases, seed_fn_helpers=imported_helpers
+            tree,
+            aliases,
+            seed_fn_helpers=imported_helpers,
+            seed_mod_helpers=imported_mod_helpers,
         )
 
         for node in ast.walk(tree):
@@ -511,6 +597,10 @@ def check_test_theater_in_source(
                 continue
             if not _function_overlaps_added(node, added_lines):
                 continue
+            if truncated_hunk:
+                end_ln = getattr(node, "end_lineno", node.lineno) or node.lineno
+                if end_ln >= total_lines:
+                    continue
 
             real_assertions = 0
             tautological_assertions = 0
@@ -552,6 +642,7 @@ def check_test_theater_in_source(
                                 aliases,
                                 verified_fn_helpers,
                                 verified_method_helpers,
+                                imported_mod_helpers,
                             )
                             if is_taut:
                                 tautological_assertions += 1
@@ -623,7 +714,7 @@ def check_test_theater_in_source(
                 overlaps = added_lines is None or any(
                     start_lineno <= ln <= end_lineno for ln in added_lines
                 )
-                if overlaps:
+                if depth == 0 and overlaps:
                     assert_count = len(JS_ASSERT_RE.findall(body_text))
                     taut_count = len(JS_TAUTOLOGY_RE.findall(body_text))
                     if taut_count > 0 and taut_count >= assert_count:
@@ -928,7 +1019,7 @@ def check_silent_fallbacks_in_source(
                     if depth > 0 and cur.strip():
                         body_lines.append(cur.strip())
                     j += 1
-                if body_lines and len(body_lines) <= 2:
+                if depth == 0 and body_lines and len(body_lines) <= 2:
                     joined = " ".join(body_lines)
                     if not JS_LOG_OR_THROW_RE.search(joined) and JS_LITERAL_RETURN_RE.search(joined):
                         end_ln = j
@@ -1419,11 +1510,15 @@ def check_dead_compat_in_source(
 
         # Legacy/compat named symbol with zero callers in module or repo.
         if LEGACY_NAME_RE.search(name):
-            if not external_in_module and not _repo_mentions_symbol(
-                name,
-                exclude_rel=rel_path,
-                repo_root=repo_root,
-                extra_sources=extra_sources,
+            if (
+                name not in exported
+                and not external_in_module
+                and not _repo_mentions_symbol(
+                    name,
+                    exclude_rel=rel_path,
+                    repo_root=repo_root,
+                    extra_sources=extra_sources,
+                )
             ):
                 findings.append(
                     _finding(
@@ -1703,20 +1798,59 @@ def check_god_growth_in_source(
                 fn_name = (m.group(1) or m.group(2) or "<anonymous>") if m else ""
             if m:
                 start_ln = i + 1
-                depth = code_lines[i].count("{") - code_lines[i].count("}")
-                j = i + 1
-                # Handle Go signatures where `{` is on the next line.
-                while j < n and depth == 0 and "{" not in code_lines[i]:
-                    depth += code_lines[j].count("{") - code_lines[j].count("}")
-                    j += 1
-                    if depth > 0:
-                        break
+                header_line = code_lines[i]
+                if not is_go and re.match(r"^\s*(?:export\s+)?declare\b", header_line):
+                    i += 1
+                    continue
+
+                if is_go:
+                    depth = header_line.count("{") - header_line.count("}")
+                    j = i + 1
+                    # Handle Go signatures where `{` is on the next line.
+                    while j < n and depth == 0 and "{" not in header_line:
+                        if GO_FUNC_START_RE.match(code_lines[j]):
+                            break
+                        depth += code_lines[j].count("{") - code_lines[j].count("}")
+                        j += 1
+                        if depth > 0:
+                            break
+                    if depth <= 0 and "{" not in header_line:
+                        i += 1
+                        continue
+                else:
+                    # Find the function body `{` without swallowing TypeScript overload
+                    # signatures or `declare function` statements that have no body.
+                    paren_depth = header_line.count("(") - header_line.count(")")
+                    sig_idx = i
+                    body_open_line = -1
+                    depth = 0
+                    while sig_idx < n:
+                        cur = code_lines[sig_idx]
+                        if sig_idx > i:
+                            if paren_depth <= 0 and JS_DECL_START_RE.match(cur):
+                                break
+                            paren_depth += cur.count("(") - cur.count(")")
+                        if paren_depth <= 0:
+                            after_paren = cur.rfind(")")
+                            slice_part = cur[after_paren + 1 :] if after_paren != -1 else cur
+                            if "{" in slice_part:
+                                body_open_line = sig_idx
+                                depth = slice_part.count("{") - slice_part.count("}")
+                                break
+                            if cur.rstrip().endswith(";"):
+                                break
+                        sig_idx += 1
+                    if body_open_line == -1:
+                        i += 1
+                        continue
+                    j = body_open_line + 1
+
                 while j < n and depth > 0:
                     depth += code_lines[j].count("{") - code_lines[j].count("}")
                     j += 1
                 end_ln = j
                 overlaps = added_lines is None or any(start_ln <= ln <= end_ln for ln in added_lines)
-                if overlaps:
+                if depth == 0 and overlaps:
                     fn_non_blank = sum(1 for ln in code_lines[i:j] if ln.strip())
                     if max_func_lines > 0 and fn_non_blank > max_func_lines:
                         findings.append(
@@ -1875,7 +2009,11 @@ def check_structural_diff(
                 raw: List[Dict[str, Any]] = []
                 raw.extend(
                     check_test_theater_in_source(
-                        path, hunk_text, added_lines=added_1based, severity=severity
+                        path,
+                        hunk_text,
+                        added_lines=added_1based,
+                        severity=severity,
+                        truncated_hunk=True,
                     )
                 )
                 raw.extend(

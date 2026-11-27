@@ -197,7 +197,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
         ),
         "fix_prompt": (
             "Rewrite this test to call the real code with concrete inputs and assert specific outputs, state changes, "
-            "or error conditions — verify it fails if you break the logic."
+            "or error conditions; verify it fails if you break the logic."
         ),
     },
     "STRUCT-SILENT-FALLBACK": {
@@ -234,7 +234,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "and make it unclear which path is actually active."
         ),
         "how_it_compounds": (
-            "Future AI sessions cannot easily tell dead paths from live ones — they frequently edit or copy the abandoned "
+            "Future AI sessions cannot easily tell dead paths from live ones: they frequently edit or copy the abandoned "
             "legacy helper instead of the real code path."
         ),
         "fix_prompt": "Delete the unreachable branch, unused helper, or obsolete legacy shim cleanly and re-run tests.",
@@ -246,7 +246,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "making edge cases easy to miss and hard to unit-test."
         ),
         "how_it_compounds": (
-            "AI models degrade fastest when patching long, high-branch functions — each new turn bolts on another 'if' branch "
+            "AI models degrade fastest when patching long, high-branch functions: each new turn bolts on another 'if' branch "
             "instead of clarifying the structure."
         ),
         "fix_prompt": "Split this function into smaller single-purpose helpers with clear names and focused tests.",
@@ -556,6 +556,23 @@ def _synthesize_untracked_diffs(repo_root: Path) -> str:
     return "".join(chunks)
 
 
+def _resolve_git_toplevel(target_dir: Path) -> Optional[Path]:
+    """Return resolved git worktree root for target_dir, or None if not in a git repo."""
+    if not target_dir.is_dir():
+        return None
+    proc = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=target_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    top = proc.stdout.strip()
+    return Path(top).resolve() if top else None
+
+
 def _collect_git_diff(
     repo_root: Path,
     *,
@@ -587,25 +604,40 @@ def _collect_git_diff(
             text=True,
             check=False,
         )
+        if proc.returncode != 0:
+            return proc.returncode, proc.stdout, proc.stderr
+        diff_text = proc.stdout
+        git_err = proc.stderr
     else:
-        proc = subprocess.run(
+        staged = subprocess.run(
             ["git", "diff", "--cached", "--unified=3"],
             cwd=repo_root,
             capture_output=True,
             text=True,
             check=False,
         )
-    if proc.returncode != 0:
-        return proc.returncode, proc.stdout, proc.stderr
+        if staged.returncode != 0:
+            return staged.returncode, staged.stdout, staged.stderr
+        unstaged = subprocess.run(
+            ["git", "diff", "--unified=3"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if unstaged.returncode != 0:
+            return unstaged.returncode, unstaged.stdout, unstaged.stderr
+        chunks = [chunk for chunk in (staged.stdout, unstaged.stdout) if chunk.strip()]
+        diff_text = "\n".join(chunks)
+        git_err = unstaged.stderr or staged.stderr
 
-    diff_text = proc.stdout
     if include_untracked:
         untracked = _synthesize_untracked_diffs(repo_root)
         if untracked:
             if diff_text and not diff_text.endswith("\n"):
                 diff_text += "\n"
             diff_text += untracked
-    return 0, diff_text, proc.stderr
+    return 0, diff_text, git_err
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -632,13 +664,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("paths", nargs="*", metavar="PATH", help="Optional positional file paths.")
     args = parser.parse_args(argv)
 
-    root = Path(args.repo_root).resolve()
+    raw_root = Path(args.repo_root).resolve()
+    toplevel = _resolve_git_toplevel(raw_root) if args.repo_root == "." else None
+    root = toplevel if toplevel is not None else raw_root
     try:
         pr_body = args.pr_body
         if args.pr_body_file is not None:
             pr_body = Path(args.pr_body_file).read_text(encoding="utf-8")
 
-        target_files = list(args.files or []) + list(args.paths or [])
+        raw_target_files = list(args.files or []) + list(args.paths or [])
+        target_files: List[str] = []
+        for raw_f in raw_target_files:
+            p = Path(raw_f)
+            if not p.is_absolute() and toplevel is not None and raw_root != toplevel:
+                cand = (raw_root / p).resolve()
+                if cand.is_file():
+                    try:
+                        target_files.append(str(cand.relative_to(toplevel)).replace("\\", "/"))
+                        continue
+                    except ValueError:
+                        pass
+            target_files.append(raw_f)
         allow_test_edit = not args.lock_tests
 
         if target_files:

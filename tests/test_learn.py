@@ -418,7 +418,26 @@ class SelfLearningLoopTests(unittest.TestCase):
         self.assertFalse(hack_res["ok"])
         self.assertIn("LEARNED-L-002", _codes(hack_res["errors"]))
 
-        # 4. Negative max_repo_hits and missing --bad-file fail cleanly with LearnError / exit 2.
+        # 4. JS/TS private class field `#` in bad_example is NOT stripped as a Python comment.
+        ts_store = self.root / ".anti-slop/learned/ts_rules.json"
+        (self.root / "src/commented.ts").write_text("// avoid this.#secret here\nexport const ok = 1;\n", encoding="utf-8")
+        ts_ent = learn.capture_pattern(
+            ts_store,
+            title="Ban private secret field",
+            bad_example="this.#secret = 'dev'",
+            desired_outcome="Read secret from KMS",
+            valid_neighbouring_case="this.config = loadKms()",
+            file_glob="*.ts",
+        )
+        learn.propose_prevention(
+            ts_store, ts_ent["id"], layer="deterministic_check", severity="error",
+            file_glob="*.ts", pattern=r"this\.#secret",
+            remediation="Load from KMS.", retirement_trigger="KMS migration complete.",
+        )
+        ver_ts = learn.verify_rule(ts_store, ts_ent["id"], repo_root=self.root)
+        self.assertTrue(ver_ts["verification"]["passed"], msg=ver_ts["verification"])
+
+        # 5. Negative max_repo_hits and missing --bad-file fail cleanly with LearnError / exit 2.
         with self.assertRaises(learn.LearnError):
             learn.verify_rule(store2, "L-001", repo_root=self.root, max_repo_hits=-1)
         bad_cli = subprocess.run(

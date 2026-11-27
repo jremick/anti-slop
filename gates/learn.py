@@ -554,15 +554,41 @@ def _strip_comments_for_path(text: str, rel_path: str) -> str:
     return text
 
 
+def _glob_targets_languages(file_glob: str) -> Tuple[bool, bool]:
+    """Return (strip_python_comments, strip_c_like_comments) inferred from file_glob."""
+    pats = [p.strip().lower() for p in (file_glob or "").split(",") if p.strip()]
+    if not pats:
+        return True, True
+    py = False
+    clike = False
+    clike_exts = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go")
+    for p in pats:
+        if p.endswith(".py"):
+            py = True
+        elif any(p.endswith(ext) for ext in clike_exts):
+            clike = True
+        elif p.endswith((".md", ".markdown", ".txt", ".json", ".yml", ".yaml", ".toml")):
+            continue
+        else:
+            py = True
+            clike = True
+    return py, clike
+
+
 def _should_ignore_code_comments(
     bad_example: str,
     compiled: re.Pattern[str],
     match_mode: str,
+    file_glob: str = "*.py",
 ) -> bool:
     """Ignore comments on code scans unless the captured bad example itself targets a comment."""
-    stripped_py = _strip_py_comments_preserve_lines(bad_example)
-    stripped_both = _strip_c_like_comments_preserve_lines(stripped_py)
-    return bool(_find_pattern_hits_in_text(stripped_both, compiled, match_mode))
+    strip_py, strip_clike = _glob_targets_languages(file_glob)
+    cleaned = bad_example
+    if strip_py:
+        cleaned = _strip_py_comments_preserve_lines(cleaned)
+    if strip_clike:
+        cleaned = _strip_c_like_comments_preserve_lines(cleaned)
+    return bool(_find_pattern_hits_in_text(cleaned, compiled, match_mode))
 
 
 def _find_pattern_hits_in_text(
@@ -655,7 +681,10 @@ def verify_rule(
     if layer == "deterministic_check":
         compiled = _validate_regex_pattern(proposal["pattern"], proposal["match_mode"])
         ignore_comments = _should_ignore_code_comments(
-            captured["bad_example"], compiled, proposal["match_mode"]
+            captured["bad_example"],
+            compiled,
+            proposal["match_mode"],
+            file_glob=str(proposal.get("file_glob") or "*.py"),
         )
         bad_hits = _find_pattern_hits_in_text(
             captured["bad_example"], compiled, proposal["match_mode"]
@@ -904,7 +933,10 @@ def load_active_deterministic_rules(
             continue
         captured = entry.get("captured") or {}
         ignore_comments = _should_ignore_code_comments(
-            str(captured.get("bad_example") or ""), compiled, match_mode
+            str(captured.get("bad_example") or ""),
+            compiled,
+            match_mode,
+            file_glob=str(proposal.get("file_glob") or "*.py"),
         )
         active.append({
             "entry": entry,

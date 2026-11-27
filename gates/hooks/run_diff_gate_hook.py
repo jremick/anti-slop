@@ -440,8 +440,8 @@ def run_diff_gate(
     learned_rules: Optional[Path | str] = None,
 ) -> Tuple[int, str]:
     """Run gates/diff_check.py on git diff and map violations to code 2."""
+    toplevel = _resolve_git_toplevel(repo_root)
     if diff_text is None:
-        toplevel = _resolve_git_toplevel(repo_root)
         if toplevel is None:
             return 0, ""
         repo_root = toplevel
@@ -450,6 +450,8 @@ def run_diff_gate(
             detail = git_err.strip() or f"git diff exited {rc}"
             return 1, f"[anti-slop hook] Unable to read git diff in {repo_root}: {detail}"
         diff_text = collected
+    elif toplevel is not None:
+        repo_root = toplevel
 
     if not diff_text.strip():
         return 0, ""
@@ -499,7 +501,15 @@ def run_diff_gate(
         if proc.returncode == 0:
             return 0, ""
         detail = (proc.stderr or proc.stdout).strip() or f"diff_check.py exited {proc.returncode}"
-        return 2, f"[anti-slop hook] Blocked by diff gate: {detail}"
+        return 1, f"[anti-slop hook] Diff gate error (non-blocking): {detail}"
+
+    if not isinstance(payload, dict):
+        if proc.returncode == 0:
+            return 0, ""
+        return 1, f"[anti-slop hook] Diff gate error (non-blocking): unexpected JSON payload from diff_check.py"
+
+    if "error" in payload and "errors" not in payload:
+        return 1, f"[anti-slop hook] Diff gate error (non-blocking): {payload['error']}"
 
     if not payload.get("ok") or proc.returncode != 0:
         return 2, _format_remediation(payload)

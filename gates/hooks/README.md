@@ -4,7 +4,7 @@ Zero-dependency CLI hook templates wrapping `gates/diff_check.py` outside the mo
 
 ## One-Command Portable Install
 
-Install the zero-dependency console scripts (`anti-slop-diff`, `anti-slop-hook`, `anti-slop-api`) once, then wire user-level hooks for Claude Code (`~/.claude/settings.json`), Antigravity (`~/.gemini/config/hooks.json`), or Codex CLI (`~/.codex/hooks.json`):
+Install the zero-dependency console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-learn`, `anti-slop-hook`, `anti-slop-api`) once, then wire user-level hooks for Claude Code (`~/.claude/settings.json`), Antigravity (`~/.gemini/config/hooks.json`), or Codex CLI (`~/.codex/hooks.json`):
 
 ```bash
 # Option A: Install console scripts globally with uv or pip
@@ -43,7 +43,7 @@ When installed globally across repositories, `anti-slop-hook` applies five safet
 - **Workspace resolution:** When `--repo-root` is `.` or omitted, reads `cwd` or `workspacePaths[0]` from stdin JSON and resolves `git rev-parse --show-toplevel` (essential because Antigravity runs hook commands from the directory containing hooks.json).
 - **Non-git graceful no-op:** In diff-gate (`Stop` / `PostToolUse`) mode, non-git directories cleanly pass (`exit 0`, or `{"decision": "allow"}` for Antigravity).
 - **Anti-loop `Stop` guard:** Immediately allows stop when Claude/Codex sets `"stop_hook_active": true`, or Antigravity sets `"continuationActive": true` or a `"terminationReason"` other than `"NO_TOOL_CALL"`.
-- **Automatic learned-rule enforcement (fail-safe):** When a target repository contains an approved `<repo>/.anti-slop/learned/rules.json` store (created via `anti-slop-learn`), `Stop` mode automatically enforces approved, SHA-256-intact deterministic rules alongside built-in diff checks. Repos without a learned-rule store no-op cleanly, and unapproved, retired, or tampered entries are ignored.
+- **Automatic learned-rule enforcement (fail-safe):** When a target repository contains an approved `<repo>/.anti-slop/learned/rules.json` store (created via `anti-slop-learn`), `Stop` mode automatically enforces approved, SHA-256-intact deterministic rules alongside built-in diff checks. Repos without a learned-rule store no-op cleanly, unapproved/retired/tampered entries are ignored, and a malformed or unreadable store reports exit `1` (non-blocking hook error) rather than trapping the agent in a policy-denial loop.
 - **Benchmark isolation & `--no-budget`:** Immediately no-ops when `ANTI_SLOP_BENCHMARK_SUBJECT=1` or the target path lies inside an `antislop_*` temp workspace. Pass `--no-budget` (default in `--install` Stop/PostToolUse hooks) to disable heuristic `--max-net-loc` / `--max-files` caps and block only objective defects (`DIFF-TEST-SKIP`, `DIFF-STUB-*`, `DIFF-SUPPRESSION`, `DIFF-SILENT-CATCH`, `DIFF-DEBUG-LEFTOVER`, `DIFF-HOST-PATH`, `DIFF-CHATBOT-OPENER`, `DIFF-CHATBOT-CLOSER`, `DIFF-BROKEN-DOC-PATH`).
 
 ## Contents

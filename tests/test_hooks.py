@@ -575,6 +575,65 @@ class RunDiffGateHookTests(unittest.TestCase):
         proc_retired = self._run_hook("--harness", "claude", "--no-budget")
         self.assertEqual(proc_retired.returncode, 0, msg=proc_retired.stderr)
 
+        # 6. Piped --diff from a subdirectory inside the git repo still discovers <git-root>/.anti-slop/learned/rules.json.
+        entry2 = learn.capture_pattern(
+            store_path,
+            title="Float math on currency v2",
+            bad_example="total = float(cents) / 100.0",
+            desired_outcome="Keep currency math in integer cents or Decimal.",
+            valid_neighbouring_case="seconds = float(elapsed_ms) / 1000.0",
+        )
+        learn.propose_prevention(
+            store_path,
+            entry2["id"],
+            layer="deterministic_check",
+            severity="error",
+            file_glob="*.py",
+            pattern=r"\bfloat\s*\(\s*\w*(?:cent|price|amount)\w*\s*\)",
+            remediation="Use integer cents or Decimal for currency math.",
+            retirement_trigger="Retire once static Cents typing enforces integer-only math.",
+        )
+        _git(self.repo, "checkout", "--", "src/app.py")
+        learn.verify_rule(store_path, entry2["id"], repo_root=self.repo)
+        learn.approve_rule(store_path, entry2["id"], approved_by="maintainer")
+        (self.repo / "src" / "app.py").write_text(
+            "def add(a: int, b: int) -> int:\n"
+            "    total = float(cents) / 100.0\n"
+            "    return int(total) + a + b\n",
+            encoding="utf-8",
+        )
+        diff_txt = _git(self.repo, "diff", "HEAD").stdout
+        proc_subdir_diff = self._run_hook(
+            "--harness", "claude", "--no-budget", "--diff", "-",
+            "--repo-root", str(self.repo / "src"),
+            stdin_text=diff_txt,
+            include_repo_root=False,
+        )
+        self.assertEqual(proc_subdir_diff.returncode, 2, msg=proc_subdir_diff.stderr)
+        self.assertIn("LEARNED-L-002", proc_subdir_diff.stderr)
+
+        # 7. Malformed .anti-slop/learned/rules.json returns non-blocking exit 1 (never exit 2 or Antigravity continue).
+        store_path.write_text("{ malformed json", encoding="utf-8")
+        proc_corrupt_claude = self._run_hook("--harness", "claude", "--no-budget")
+        self.assertEqual(proc_corrupt_claude.returncode, 1, msg=proc_corrupt_claude.stderr)
+        self.assertIn("non-blocking", proc_corrupt_claude.stderr)
+
+        proc_corrupt_agy = self._run_hook(
+            "--harness",
+            "antigravity",
+            "--no-budget",
+            stdin_text=json.dumps({
+                "hookEventName": "Stop",
+                "cwd": str(self.repo),
+                "terminationReason": "NO_TOOL_CALL",
+                "continuationActive": False,
+            }),
+            include_repo_root=False,
+        )
+        self.assertEqual(proc_corrupt_agy.returncode, 1, msg=proc_corrupt_agy.stdout + proc_corrupt_agy.stderr)
+        self.assertEqual(proc_corrupt_agy.stdout, "")
+        self.assertIn("non-blocking", proc_corrupt_agy.stderr)
+
 
 class HookExamplesIntegrityTests(unittest.TestCase):
     def test_example_hook_json_configs_are_valid_and_wire_wrapper(self) -> None:

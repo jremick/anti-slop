@@ -55,7 +55,7 @@ You can run this loop directly with the zero-dependency CLI tool [gates/learn.py
 1. `capture`: record the slipped bad example, desired behavior, and a **valid neighbouring case** (assigns permanent ID `L-001`, `L-002`, ...).
 2. `suggest` / `propose`: choose the smallest effective layer (`deterministic_check` first, `codebase_example` second, short `<= 45`-word `prompt_rule` last with explicit justification and retirement trigger).
 3. `verify`: automatically verify against (a) the bad example, (b) the valid neighbouring case, and (c) an existing-repository false-positive scan.
-4. `approve`: explicit human approval gate (SHA-256-bound to the verified proposal; activates deterministic rules in `gates/review.py` and `gates/diff_check.py --learned-rules`).
+4. `approve`: explicit human approval gate (SHA-256-bound to the verified proposal; activates deterministic rules automatically in `gates/review.py`, the live `Stop` hook in `gates/hooks/run_diff_gate_hook.py`, `gates/diff_check.py --learned-rules`, and opt-in `action.yml`).
 5. `retire`: cleanly stop enforcing an obsolete rule while preserving its captured regression examples and leaving its stable ID unused.
 
 For issue-tracked defects, use one short record (matching `.github/ISSUE_TEMPLATE/slop-defect.md`):

@@ -117,12 +117,12 @@ Follow the prose boundaries in [docs/operating-guide.md](../docs/operating-guide
 
 ## Complementary to Ruff, ESLint, and Semgrep
 
-`anti-slop` does not replace language-specific AST linters or security SAST tools — run Ruff, ESLint, and Semgrep for deep single-language analysis, and layer `gates/diff_check.py` as a zero-dependency polyglot diff, prose, and agent-hook gate.
+`anti-slop` does not replace language-specific AST linters or security SAST tools: run Ruff, ESLint, and Semgrep for deep single-language analysis, and layer `gates/diff_check.py` as a zero-dependency polyglot diff, prose, and agent-hook gate.
 
 | Capability | Ruff / ESLint | Semgrep | `anti-slop` (`diff_check.py` + hooks) |
 | --- | --- | --- | --- |
-| Deep language-specific lint, formatting, and type rules | Primary strength (per-stack setup) | Partial (pattern rules) | Out of scope — keep Ruff/ESLint |
-| Security taint / dataflow SAST across codebase | Limited | Primary strength | Out of scope — keep Semgrep |
+| Deep language-specific lint, formatting, and type rules | Primary strength (per-stack setup) | Partial (pattern rules) | Out of scope (keep Ruff/ESLint) |
+| Security taint / dataflow SAST across codebase | Limited | Primary strength | Out of scope (keep Semgrep) |
 | Zero-config polyglot diff gate (Python, JS/TS, Go, Markdown, PR body in one stdlib script) | Separate per-language configs | Requires rulepacks + binary | Native (`--diff - --no-budget`, 0 deps) |
 | Block unauthorized edits under `tests/` and newly added test skips (`DIFF-TEST-SKIP`) | Not enforced by default | Custom rules only | Native (explicit `--allow-test-edit` / `--allow-test-skip`) |
 | Catch unjustified suppressions, silent broad catches, debug leftovers, and stubs on *added diff lines only* | Overlaps on Python (`BLE001`/`PGH003`/`T100`) or JS (`no-empty`/`no-debugger`) per language | Overlaps with custom rules | Unified diff-scoped gate across Python, JS/TS, and Go |
@@ -132,7 +132,7 @@ Follow the prose boundaries in [docs/operating-guide.md](../docs/operating-guide
 
 ## Real-World OSS Precision Audit
 
-To measure false positives honestly on real production engineering history (not just synthetic unit tests), `gates/diff_check.py` was audited against the last **50 non-merge commits** of three public OSS repositories spanning Python and TypeScript (**150 commits**, **409 file edits**, `+10,442 / -2,936` LOC) using `--diff - --allow-test-edit --no-budget --json`, plus all tracked authored files in this repository.
+To measure false positives on real production engineering history (not just synthetic unit tests), `gates/diff_check.py` was audited against the last **50 non-merge commits** of three public OSS repositories spanning Python and TypeScript (**150 commits**, **409 file edits**, `+10,442 / -2,936` LOC) using `--diff - --allow-test-edit --no-budget --json`, plus all tracked authored files in this repository.
 
 Every commit was evaluated in both **checkout mode** (`--repo-root` checked out at each commit SHA, matching CI `action.yml` and local `Stop` hooks) and **hunk-only mode** (`repo_root=None`, matching piped diffs without disk files). Every finding was inspected verbatim and classified into one of four buckets: **Parser/Regex FP** (tool bug), **True Positive**, **Debatable / Intentional Pattern** (rule matched real syntax used deliberately upstream), or **Policy-Strict Convention** (upstream style omits an inline reason required by the rule).
 
@@ -143,12 +143,12 @@ Every commit was evaluated in both **checkout mode** (`--repo-root` checked out 
 | [urllib3/urllib3](https://github.com/urllib3/urllib3) (Python) | `3db5970fcc56` | 50 | 185 (`+4,779 / -2,214`) | 39 / 50 (78.0%) | 23 E / 0 W | `DIFF-SUPPRESSION`: 19, `DIFF-TEST-SKIP`: 3, `DIFF-STUB-TODO`: 1 |
 | [sdispater/tomlkit](https://github.com/sdispater/tomlkit) (Python) | `d2aa305673a0` | 50 | 110 (`+3,621 / -357`) | 48 / 50 (96.0%) | 5 E / 0 W | `DIFF-SUPPRESSION`: 5 |
 | [honojs/hono](https://github.com/honojs/hono) (TypeScript) | `717dc17cb80b` | 50 | 114 (`+2,042 / -365`) | 49 / 50 (98.0%) | 1 E / 0 W | `DIFF-SILENT-CATCH`: 1 |
-| **OSS Total** | — | **150** | **409 (`+10,442 / -2,936`)** | **136 / 150 (90.7%)** | **29 E / 0 W** | **`DIFF-SUPPRESSION`: 24, `DIFF-TEST-SKIP`: 3, `DIFF-STUB-TODO`: 1, `DIFF-SILENT-CATCH`: 1** |
+| **OSS Total** | - | **150** | **409 (`+10,442 / -2,936`)** | **136 / 150 (90.7%)** | **29 E / 0 W** | **`DIFF-SUPPRESSION`: 24, `DIFF-TEST-SKIP`: 3, `DIFF-STUB-TODO`: 1, `DIFF-SILENT-CATCH`: 1** |
 
 - **Zero-noise rules across all 150 commits (0 errors, 0 warnings):** `DIFF-DEBUG-LEFTOVER`, `DIFF-HOST-PATH`, `DIFF-STUB-PASS` (post-fix), `DIFF-STUB-NOT-IMPLEMENTED`, `DIFF-BROKEN-DOC-PATH`, `DIFF-CHATBOT-OPENER`, `DIFF-CHATBOT-CLOSER`, and `DIFF-DECORATIVE-EMOJI`.
 - **Checkout vs. hunk-only parity (post-fix):** `100%` identical findings across all 150 commits (`29 E / 0 W` in both modes).
 
-### Honest Classification of All 29 OSS Findings (and 2 Bugs Found & Fixed)
+### Classification of All 29 OSS Findings (and 2 Bugs Found & Fixed)
 
 1. **Parser / Regex False Positives (`0 / 29` post-fix; `2` real bugs caught during the audit and fixed with regression tests in [tests/test_gates.py](../tests/test_gates.py)):**
    - **Hunk-only `DIFF-STUB-PASS` FP (OSS corpus, `sdispater/tomlkit` commit `7133174ab7`):** `class StringKey(str): pass` passed cleanly in checkout/AST mode (`5 E`) but falsely triggered `DIFF-STUB-PASS` in hunk-only mode (`6 E -> 5 E`, aggregate hunk-only `30 E -> 29 E`) because `_hunk_pass_is_non_function_block` only exempted `Protocol`/`Exception`/`*Error` bases rather than all `class` headers. Fixed for single-line and multi-line `class` headers without relaxing non-abstract `def ...: pass` detection.
@@ -172,11 +172,12 @@ Using the exact same 150-commit pinned OSS corpus (`urllib3` `3db5970fcc56`, `to
 | [honojs/hono](https://github.com/honojs/hono) (TypeScript) | `717dc17cb80b` | 50 | 43 / 50 (86.0%) | 47 / 50 (94.0%) | 10 W | `STRUCT-GOD-FILE`: 5, `STRUCT-DUPLICATE-BLOCK`: 4, `STRUCT-GOD-FUNCTION`: 1 |
 | **OSS Total** | - | **150** | **102 / 150 (68.0%)** | **145 / 150 (96.7%)** | **72 W** | **`STRUCT-GOD-FILE`: 41, `STRUCT-GOD-FUNCTION`: 24, `STRUCT-DUPLICATE-BLOCK`: 4, `STRUCT-TEST-THEATER`: 3** |
 
-- **Zero-noise structural rules across all 150 commits (0 warnings):** `STRUCT-SILENT-FALLBACK` (`0`), `STRUCT-DEAD-COMPAT` (`0`), and `STRUCT-SCOPE-SPRAWL` (`0`).
-- **3 genuine parser/AST false-positive classes caught during the audit and fixed (`87 W -> 72 W`, `-15` false warnings; regression tests in [tests/test_structural_and_review.py](../tests/test_structural_and_review.py)):**
-  1. **Vitest / `expect-type` type assertions (`hono`, 5/5 `STRUCT-TEST-THEATER` FPs fixed):** `expectTypeOf<...>().toEqualTypeOf<...>()` and `assertType<...>()` were not recognized by `JS_ASSERT_RE`. Updated `JS_ASSERT_RE` to recognize `expectTypeOf`, `assertType`, and `expect.*(...)` while keeping tautology and empty-test checks intact.
-  2. **AST-verified local and imported test helpers (`tomlkit`, 9/9 `STRUCT-TEST-THEATER` FPs fixed):** `tomlkit`'s `test_items.py` delegated assertions to `from tests.util import elementary_test`, which missed name-prefix checks (`assert_*`). Updated Python test-theater inspection to verify via AST whether same-file or imported `tests/` helper functions actually execute real assertions; assertion-free helpers and production calls without assertions remain flagged.
-  3. **Strict stdlib warning-error assertions (`urllib3`, 1/4 `STRUCT-TEST-THEATER` FPs fixed):** `warnings.simplefilter("error", FutureWarning)` inside `warnings.catch_warnings()` turns any emitted warning into a test failure (`warnings.simplefilter("ignore", ...)` remains flagged).
+- **Zero-noise structural rules across all 150 commits (0 warnings):** `STRUCT-SILENT-FALLBACK` (`0`), `STRUCT-DEAD-COMPAT` (`0`), and `STRUCT-SCOPE-SPRAWL` (`0`). Hunk-only mode (`repo_root=None`) also reported `0` warnings across the 150 pinned commits (and an additional 150 earlier history commits after fixing truncated hunk-only test blocks and Deno `@std/assert` calls below).
+- **Parser/AST false-positive classes caught during the audit and fixed (`87 W -> 72 W` on the 150 pinned commits, `-15` false warnings, plus `4` additional hunk-only/Deno FPs caught on earlier `urllib3`/`hono` history; regression tests in [tests/test_structural_and_review.py](../tests/test_structural_and_review.py)):**
+  1. **Vitest / `expect-type` & Deno `@std/assert` assertions (`hono`, 5/5 pinned + 3/3 `6cbe361b7a` FPs fixed):** `expectTypeOf<...>().toEqualTypeOf<...>()`, `assertType<...>()`, and Deno camelCase assertions (`assertEquals`, `assertThrows`) were not recognized by `JS_ASSERT_RE`. Updated `JS_ASSERT_RE` while keeping tautology and empty-test checks intact.
+  2. **AST-verified local, imported, and module-attribute test helpers (`tomlkit`, 9/9 FPs fixed):** `tomlkit`'s `test_items.py` delegated assertions to `from tests.util import elementary_test`. Updated Python test-theater inspection to verify via AST whether same-file, `from tests.* import ...`, `import tests.*` attribute calls, or 1-hop re-exported helpers actually execute real assertions; assertion-free helpers remain flagged.
+  3. **Strict stdlib warning-error assertions (`urllib3`, 1/4 FPs fixed):** `warnings.simplefilter("error", FutureWarning)` inside `warnings.catch_warnings()` turns any emitted warning into a test failure (`warnings.simplefilter("ignore", ...)` remains flagged).
+  4. **Truncated hunk-only test blocks (`urllib3` `e8a81de5e1` hunk-only FP fixed) & TypeScript function overloads:** Hunk-only mode (`repo_root=None`) now skips `STRUCT-TEST-THEATER` when a Python function reaches the end of a partial diff hunk or a JS/TS test block is unclosed (`depth > 0`), and `STRUCT-GOD-FUNCTION` skips semicolon-terminated / ambient TypeScript overload signatures without bodies.
 - **Classification of all 72 post-fix structural warnings:**
   - **True duplicates (`4 / 72`):** All 4 `STRUCT-DUPLICATE-BLOCK` hits in `hono` (`64d4cd2234`, `399e7c9207`, `fb48e2b295`) flagged real verbatim mirrored adapter files (`adapters/<target>/src/` duplicating `src/adapter/<target>/`) where each bugfix had to be applied identically in two places.
   - **Intentional no-assert / string-eval tests (`3 / 72`):** In `urllib3`, `2` hits (`test_assert_hostname_invalid_cn`, `test_timeout_success`) are intentional "does not raise" HTTP smoke tests with zero `assert` statements, and `1` hit (`test_streaming_close`) passes Python assertions inside a string executed by a Pyodide webworker (`run_webworker(worker_code)`).
@@ -186,9 +187,9 @@ Using the exact same 150-commit pinned OSS corpus (`urllib3` `3db5970fcc56`, `to
 
 Scanning this repository's own tracked authored files (excluding pinned third-party OSS snapshots under `benchmarks/sources/` and archived raw model transcripts under `results/pilot-3way-v0.6.0/artifacts/`):
 
-- **163 authored Markdown files:** `0` errors, `0` warnings.
-- **20 authored non-test Python files (`gates/`, `scripts/`, `benchmarks/graders/`):** `1` error (`benchmarks/graders/grade_rw3.py:281`, an intentional `except Exception: pass` negative probe inside a grader), `0` warnings.
-- **6 test-suite files (`tests/test_*.py`):** `8` errors post-fix (down from `9` after fixing the prose `TODO` false positive in `tests/test_gates.py`): `6` intentional `DIFF-HOST-PATH` negative-test fixture strings and `2` intentional Python-version `@unittest.skipIf` guards in `tests/test_graders.py`.
+- **164 authored Markdown files:** `0` errors, `0` warnings.
+- **26 authored non-test Python files (`gates/`, `scripts/`, `benchmarks/graders/`, `benchmarks/evolution.py`):** `1` error (`benchmarks/graders/grade_rw3.py:281`, an intentional `except Exception: pass` negative probe inside a grader), `0` warnings.
+- **9 test-suite files (`tests/test_*.py`):** `8` errors post-fix (down from `9` after fixing the prose `TODO` false positive in `tests/test_gates.py`): `6` intentional `DIFF-HOST-PATH` negative-test fixture strings and `2` intentional Python-version `@unittest.skipIf` guards in `tests/test_graders.py`.
 
 ### Reproducing the OSS Audit
 

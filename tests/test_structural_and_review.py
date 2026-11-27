@@ -667,6 +667,173 @@ class PlainEnglishReviewAndCliTests(unittest.TestCase):
         )
         self.assertEqual(len(bad_hits), 2, msg=bad_hits)
 
+        # 4. Module-attribute imported helpers (`import tests.util`, `from tests import util as u`)
+        # and 1-hop re-exports (`tests/__init__.py`) verify via AST while assertion-free helpers still fail.
+        (self.root / "tests" / "__init__.py").write_text(
+            "from .util import elementary_test\n",
+            encoding="utf-8",
+        )
+        py_mod_attr_ok = (
+            "import tests.util\n"
+            "from tests import util as u\n"
+            "from tests import elementary_test\n\n"
+            "def test_dotted():\n    tests.util.elementary_test(1, int, 1)\n"
+            "def test_alias():\n    u.elementary_test(2, int, 2)\n"
+            "def test_reexport():\n    elementary_test(3, int, 3)\n"
+        )
+        self.assertEqual(
+            structural.check_test_theater_in_source(
+                "tests/test_attr.py", py_mod_attr_ok, repo_root=self.root
+            ),
+            [],
+        )
+        py_mod_attr_bad = "import tests.util\ndef test_bad_attr():\n    tests.util.noop_helper(1)\n"
+        self.assertEqual(
+            len(
+                structural.check_test_theater_in_source(
+                    "tests/test_attr.py", py_mod_attr_bad, repo_root=self.root
+                )
+            ),
+            1,
+        )
+
+        # 5. Deno @std/assert camelCase assertions (hono audit regression) pass, while empty Deno tests fail.
+        deno_ok = (
+            "Deno.test('escape elements', () => {\n"
+            "  assertEquals(render(), '<div>ok</div>')\n"
+            "})\n"
+            "Deno.test('reject invalid', () => {\n"
+            "  assertThrows(() => parse('bad'), Error)\n"
+            "})\n"
+        )
+        self.assertEqual(
+            structural.check_test_theater_in_source("runtime-tests/jsx.test.tsx", deno_ok),
+            [],
+        )
+        deno_bad = "Deno.test('no assert', () => {\n  render()\n})\n"
+        self.assertEqual(
+            len(structural.check_test_theater_in_source("runtime-tests/jsx.test.tsx", deno_bad)),
+            1,
+        )
+
+        # 6. Hunk-only mode (repo_root=None) must NOT false-positive on truncated Python or JS/TS test hunks
+        # (urllib3 e8a81de5e1 regression), while complete empty tests in a new file remain flagged.
+        trunc_py_diff = (
+            "diff --git a/tests/test_socket.py b/tests/test_socket.py\n"
+            "--- a/tests/test_socket.py\n"
+            "+++ b/tests/test_socket.py\n"
+            "@@ -10,4 +10,5 @@ class TestProxy:\n"
+            " def test_simple(self):\n"
+            "     cfg = make_cfg()\n"
+            "+    cfg['strip_fragment'] = True\n"
+            "     run_req(cfg)\n"
+        )
+        self.assertEqual(
+            structural.check_structural_diff(trunc_py_diff, repo_root=None)["warnings"],
+            [],
+        )
+        trunc_ts_diff = (
+            "diff --git a/src/app.test.ts b/src/app.test.ts\n"
+            "--- a/src/app.test.ts\n"
+            "+++ b/src/app.test.ts\n"
+            "@@ -5,3 +5,4 @@ describe('app', () => {\n"
+            "   it('handles req', async () => {\n"
+            "+    const h = makeHeaders()\n"
+            "     await fetch(h)\n"
+        )
+        self.assertEqual(
+            structural.check_structural_diff(trunc_ts_diff, repo_root=None)["warnings"],
+            [],
+        )
+
+        # 7. TypeScript overload signatures & `declare function` must not miscount lines in STRUCT-GOD-FUNCTION.
+        ts_overloads = "\n".join(
+            [
+                "export function parse(x: string): string;",
+                "export function parse(x: number): number;",
+                "export declare function external(opts: { a: number }): void;",
+            ]
+            + [f"export const ITEM_{i} = {i};" for i in range(45)]
+            + ["export function parse(x: string | number): string | number {"]
+            + [f"  const v{i} = x;" for i in range(20)]
+            + ["  return x;", "}"]
+        )
+        self.assertEqual(
+            structural.check_god_growth_in_source("src/parser.ts", ts_overloads, max_func_lines=60),
+            [],
+        )
+
+        # 8. STRUCT-DEAD-COMPAT allows __all__-exported symbols & domain verbs like prune_old_sessions,
+        # while still catching unreferenced calculate_old / calculate_legacy.
+        py_active_old = (
+            '__all__ = ["prune_old_sessions", "legacy_public_api"]\n'
+            "def prune_old_sessions(items):\n    return [x for x in items if x]\n"
+            "def legacy_public_api(x):\n    return x\n"
+        )
+        self.assertEqual(
+            structural.check_dead_compat_in_source("src/cleanup.py", py_active_old),
+            [],
+        )
+        self.assertEqual(
+            len(
+                structural.check_dead_compat_in_source(
+                    "src/cleanup.py", "def calculate_old(x):\n    return x\n"
+                )
+            ),
+            1,
+        )
+
+        # 9. gates/review.py invoked from a git subdirectory resolves git toplevel and enforces learned rules,
+        # and PLAIN_ENGLISH_CATALOG stays free of em-dashes.
+        for code, exp in review.PLAIN_ENGLISH_CATALOG.items():
+            for field, val in exp.items():
+                self.assertNotIn("\u2014", val, msg=(code, field))
+
+        from gates import learn as _learn
+
+        sub_repo = self.root / "subrepo"
+        sub_repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=sub_repo, check=True)
+        subprocess.run(["git", "config", "user.email", "ci@example.com"], cwd=sub_repo, check=True)
+        subprocess.run(["git", "config", "user.name", "CI"], cwd=sub_repo, check=True)
+        (sub_repo / "pkg").mkdir()
+        (sub_repo / "pkg/mod.py").write_text("X = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=sub_repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=sub_repo, check=True)
+
+        store = _learn.default_store_path(sub_repo)
+        ent = _learn.capture_pattern(
+            store,
+            title="Ban raw_eval",
+            bad_example="raw_eval(x)",
+            desired_outcome="Use safe_parse",
+            valid_neighbouring_case="safe_parse(x)",
+        )
+        _learn.propose_prevention(
+            store, ent["id"], layer="deterministic_check", severity="error",
+            file_glob="*.py", pattern=r"\braw_eval\s*\(",
+            remediation="Use safe_parse.", retirement_trigger="Later.",
+        )
+        _learn.verify_rule(store, ent["id"], repo_root=sub_repo)
+        _learn.approve_rule(store, ent["id"], approved_by="reviewer")
+
+        (sub_repo / "pkg/mod.py").write_text("raw_eval('1')\n", encoding="utf-8")
+        p_sub_diff = subprocess.run(
+            [sys.executable, "-B", str(REPO_ROOT / "gates/review.py"), "--json"],
+            cwd=sub_repo / "pkg", stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_sub_diff.returncode, 1, msg=p_sub_diff.stdout + p_sub_diff.stderr)
+        self.assertIn("LEARNED-L-001", p_sub_diff.stdout)
+
+        p_sub_files = subprocess.run(
+            [sys.executable, "-B", str(REPO_ROOT / "gates/review.py"), "--json", "mod.py"],
+            cwd=sub_repo / "pkg", stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_sub_files.returncode, 1, msg=p_sub_files.stdout + p_sub_files.stderr)
+        self.assertIn("LEARNED-L-001", p_sub_files.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
