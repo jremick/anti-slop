@@ -18,6 +18,9 @@ compound across future AI coding sessions:
   7. STRUCT-COMMENTED-CODE: newly added multi-line commented-out code blocks
      (>= 3 consecutive executable-looking commented lines) that poison future
      AI generation context.
+  8. ARCH-CIRCULAR-IMPORT / ARCH-SINGLE-IMPL-WRAPPER / ARCH-BOUNDARY-SCATTER:
+     cross-module architectural compounding-slop detectors wired from
+     gates/architecture.py.
 
 Zero third-party dependencies (Python 3.11+ stdlib only).
 """
@@ -38,6 +41,7 @@ _PKG_PARENT = str(Path(__file__).resolve().parents[1])
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+from gates import architecture as _arch  # noqa: E402
 from gates import diff_check as _dc  # noqa: E402
 
 
@@ -2605,6 +2609,13 @@ def check_structural_diff(
             severity=severity,
         )
     )
+    findings.extend(
+        _arch.check_architecture_sources(
+            target_sources,
+            repo_root=root_path,
+            severity=severity,
+        )
+    )
 
     errors = [f for f in findings if f["severity"] == "error"]
     warnings = [f for f in findings if f["severity"] != "error"]
@@ -2685,6 +2696,13 @@ def check_structural_files(
 
     findings.extend(
         check_duplicate_blocks(
+            target_sources,
+            repo_root=root,
+            severity=severity,
+        )
+    )
+    findings.extend(
+        _arch.check_architecture_sources(
             target_sources,
             repo_root=root,
             severity=severity,

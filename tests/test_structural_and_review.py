@@ -460,6 +460,9 @@ class PlainEnglishReviewAndCliTests(unittest.TestCase):
             "STRUCT-GOD-FUNCTION",
             "STRUCT-GOD-FILE",
             "STRUCT-SCOPE-SPRAWL",
+            "ARCH-CIRCULAR-IMPORT",
+            "ARCH-SINGLE-IMPL-WRAPPER",
+            "ARCH-BOUNDARY-SCATTER",
         }
         self.assertTrue(expected_codes.issubset(set(review.PLAIN_ENGLISH_CATALOG.keys())))
         for code in expected_codes:

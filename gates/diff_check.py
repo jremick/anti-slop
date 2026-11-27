@@ -2883,12 +2883,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--structural",
         action="store_true",
-        help="Enable AI-era structural compounding-slop checks (test theater, silent fallbacks, duplicate blocks, dead compat paths, commented-out code, god growth, scope sprawl) as warnings.",
+        help=(
+            "Enable AI-era structural and architectural compounding-slop checks "
+            "(test theater, silent fallbacks, duplicate blocks, dead compat paths, "
+            "commented-out code, god growth, scope sprawl, circular imports, "
+            "single-impl wrappers, env-var boundary scatter) as warnings."
+        ),
     )
     parser.add_argument(
         "--strict-structural",
         action="store_true",
-        help="Enable structural compounding-slop checks and promote them to hard errors.",
+        help="Enable structural and architectural compounding-slop checks and promote them to hard errors.",
     )
     parser.add_argument(
         "--explain",

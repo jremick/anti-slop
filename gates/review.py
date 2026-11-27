@@ -314,11 +314,59 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
         "fix_prompt": "Revert unrelated edits outside the target module and keep this change focused on one clear goal.",
         "evidence": "docs/evidence.md#ext-07, docs/ai-era-rules.md",
     },
+    "ARCH-CIRCULAR-IMPORT": {
+        "title": "Modules import each other in a circular dependency loop",
+        "why_veterans_flag_it": (
+            "Circular imports make startup order fragile, trigger partially initialized module errors, "
+            "and blur ownership boundaries between modules."
+        ),
+        "how_it_compounds": (
+            "Once two modules depend on each other, later AI sessions pull more helpers across the cycle "
+            "until neither module can be tested, moved, or reasoned about independently."
+        ),
+        "fix_prompt": (
+            "Break the import cycle by extracting shared types or helpers into a lower-level module "
+            "or moving type-only imports behind 'if TYPE_CHECKING:' (Python) or 'import type' (TypeScript)."
+        ),
+        "evidence": "docs/evidence.md#ext-15, docs/ai-era-rules.md",
+    },
+    "ARCH-SINGLE-IMPL-WRAPPER": {
+        "title": "Speculative abstraction layer wrapping a single implementation",
+        "why_veterans_flag_it": (
+            "Adding an abstract base class, single-implementation service interface, single-target factory, "
+            "or 1-to-1 pass-through wrapper adds indirection without providing real polymorphism."
+        ),
+        "how_it_compounds": (
+            "Every extra wrapper forces future AI sessions to load multiple files to trace one operation; "
+            "under context pressure, agents bypass the layer and invent duplicate helpers instead."
+        ),
+        "fix_prompt": (
+            "Delete the unused abstraction, single-target factory, or pass-through wrapper and call the concrete "
+            "class or function directly until a second real implementation exists."
+        ),
+        "evidence": "docs/evidence.md#ext-15, docs/ai-era-rules.md",
+    },
+    "ARCH-BOUNDARY-SCATTER": {
+        "title": "Raw environment variable read is scattered across multiple modules",
+        "why_veterans_flag_it": (
+            "Reading the same environment variable directly inside business logic across three or more modules "
+            "splits defaults, parsing, and failure behavior across the codebase."
+        ),
+        "how_it_compounds": (
+            "Future AI turns add more ad-hoc os.getenv() or process.env reads with subtly different fallbacks, "
+            "making configuration drift, test isolation, and startup validation progressively harder."
+        ),
+        "fix_prompt": (
+            "Read and validate this environment variable once in a dedicated configuration boundary module "
+            "and pass the typed setting into downstream functions or services."
+        ),
+        "evidence": "docs/evidence.md#ext-15, docs/ai-era-rules.md",
+    },
 }
 
 
 def explain_finding(finding: Dict[str, Any]) -> Dict[str, str]:
-    """Return a plain-English explanation block for any DIFF-*, STRUCT-*, or LEARNED-* finding."""
+    """Return a plain-English explanation block for any DIFF-*, STRUCT-*, ARCH-*, or LEARNED-* finding."""
     code = str(finding.get("code") or "")
     if code in PLAIN_ENGLISH_CATALOG:
         return dict(PLAIN_ENGLISH_CATALOG[code])
