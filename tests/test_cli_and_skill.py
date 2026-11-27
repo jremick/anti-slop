@@ -71,7 +71,7 @@ class UnifiedCliAndSkillTests(unittest.TestCase):
 
         proc_help = self._run_cli("--help")
         self.assertEqual(proc_help.returncode, 0, msg=proc_help.stderr)
-        for sub in ("review", "diff", "learn", "mutate", "verify", "hook", "api", "skill"):
+        for sub in ("review", "audit", "diff", "learn", "mutate", "verify", "hook", "api", "skill"):
             self.assertIn(sub, proc_help.stdout)
 
         proc_bad = self._run_cli("does-not-exist")

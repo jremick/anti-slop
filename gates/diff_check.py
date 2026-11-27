@@ -416,6 +416,80 @@ def _is_excluded_path(path: str, patterns: Sequence[re.Pattern[str]]) -> bool:
     return any(pat.match(norm) is not None for pat in patterns)
 
 
+DEFAULT_PROTECTED_PATHS_REL = ".anti-slop/protected-paths.json"
+
+
+def load_protected_paths(
+    repo_root: Optional[Path | str] = None,
+    extra_patterns: Optional[Sequence[str]] = None,
+) -> List[str]:
+    """Load protected path globs from <repo>/.anti-slop/protected-paths.json plus CLI extras.
+
+    Whenever any protected pattern is configured, `.anti-slop/protected-paths.json`
+    itself is automatically protected so agents cannot weaken the lock unapproved.
+    """
+    raw_globs: List[str] = []
+    if repo_root is not None:
+        cfg_path = Path(repo_root).resolve() / DEFAULT_PROTECTED_PATHS_REL
+        if cfg_path.is_file():
+            try:
+                parsed = json.loads(cfg_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Failed to parse {DEFAULT_PROTECTED_PATHS_REL}: {exc}") from exc
+            if not isinstance(parsed, dict) or not isinstance(parsed.get("protected_paths"), list):
+                raise ValueError(
+                    f"{DEFAULT_PROTECTED_PATHS_REL} must be a JSON object with a 'protected_paths' array."
+                )
+            for idx, item in enumerate(parsed["protected_paths"]):
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError(
+                        f"{DEFAULT_PROTECTED_PATHS_REL} protected_paths[{idx}] must be a non-empty string."
+                    )
+                raw_globs.append(item.strip())
+
+    if extra_patterns:
+        for raw in extra_patterns:
+            cleaned = str(raw).strip()
+            if cleaned:
+                raw_globs.append(cleaned)
+
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for pat in raw_globs:
+        if pat not in seen:
+            seen.add(pat)
+            deduped.append(pat)
+
+    if deduped and DEFAULT_PROTECTED_PATHS_REL not in seen:
+        deduped.append(DEFAULT_PROTECTED_PATHS_REL)
+    return deduped
+
+
+def _compile_protected_patterns(globs: Sequence[str]) -> List[Tuple[str, re.Pattern[str]]]:
+    compiled: List[Tuple[str, re.Pattern[str]]] = []
+    for raw in globs:
+        pat = _compile_exclude_glob(raw)
+        if pat is not None:
+            compiled.append((raw, pat))
+    return compiled
+
+
+def match_protected_path(
+    path: str,
+    compiled: Sequence[Tuple[str, re.Pattern[str]]],
+) -> Optional[str]:
+    """Return the first matching protected glob for path, or None."""
+    if not compiled:
+        return None
+    norm = _normalize_relpath(path).lstrip("/")
+    if not norm:
+        return None
+    for raw_glob, pat in compiled:
+        if pat.match(norm) is not None:
+            return raw_glob
+    return None
+
+
 def _filter_unified_diff(diff_text: str, patterns: Sequence[re.Pattern[str]]) -> str:
     """Drop per-file sections from a unified diff whose path matches any exclude pattern."""
     if not patterns or not diff_text:
@@ -2497,6 +2571,8 @@ def check_diff(
     strict_structural: bool = False,
     learned_rules: Optional[Path | str] = None,
     exclude: Optional[Sequence[str]] = None,
+    protect_paths: Optional[Sequence[str]] = None,
+    allow_protected_edit: bool = False,
 ) -> Dict[str, Any]:
     """Validate a unified diff against Layer-1 deterministic diff and prose gates."""
     if strict_structural:
@@ -2513,6 +2589,11 @@ def check_diff(
     errors: List[Dict[str, Any]] = []
     warnings: List[Dict[str, Any]] = []
     root_path = Path(repo_root).resolve() if repo_root is not None else None
+    protected_compiled = (
+        []
+        if allow_protected_edit
+        else _compile_protected_patterns(load_protected_paths(root_path, protect_paths))
+    )
     emoji_severity = "error" if strict_prose else "warning"
     emoji_target = errors if strict_prose else warnings
 
@@ -2559,6 +2640,24 @@ def check_diff(
                     remediation="Do not modify test files to match broken code; pass --allow-test-edit if authorized.",
                 )
             )
+
+        if protected_compiled:
+            matched_glob = match_protected_path(path, protected_compiled)
+            if matched_glob is None and file_entry.get("old_path"):
+                matched_glob = match_protected_path(str(file_entry["old_path"]), protected_compiled)
+            if matched_glob is not None:
+                errors.append(
+                    _finding(
+                        code="DIFF-PROTECTED-PATH",
+                        severity="error",
+                        file=path,
+                        message=f"Unauthorized edit to protected path '{path}' (matched '{matched_glob}').",
+                        remediation=(
+                            "Do not modify protected specs, decision docs, or human-owned invariant contracts "
+                            "without explicit human authorization; pass --allow-protected-edit if authorized."
+                        ),
+                    )
+                )
 
         _check_code_stubs_in_hunks(file_entry, root_path, errors)
         _check_code_credibility_in_hunks(
@@ -2666,6 +2765,8 @@ def check_diff_and_text(
     max_files: int = DEFAULT_MAX_FILES,
     strict_prose: bool = False,
     exclude: Optional[Sequence[str]] = None,
+    protect_paths: Optional[Sequence[str]] = None,
+    allow_protected_edit: bool = False,
 ) -> Dict[str, Any]:
     """Validate a unified diff together with an accompanying PR/review Markdown text."""
     return check_diff(
@@ -2680,6 +2781,8 @@ def check_diff_and_text(
         pr_body_source=text_source,
         strict_prose=strict_prose,
         exclude=exclude,
+        protect_paths=protect_paths,
+        allow_protected_edit=allow_protected_edit,
     )
 
 
@@ -2697,6 +2800,8 @@ def check_files(
     strict_structural: bool = False,
     learned_rules: Optional[Path | str] = None,
     exclude: Optional[Sequence[str]] = None,
+    protect_paths: Optional[Sequence[str]] = None,
+    allow_protected_edit: bool = False,
 ) -> Dict[str, Any]:
     """Validate an explicit list of modified files against Layer-1 diff and prose gates."""
     if strict_structural:
@@ -2706,6 +2811,11 @@ def check_files(
     root = Path(repo_root).resolve() if repo_root is not None else Path.cwd().resolve()
     errors: List[Dict[str, Any]] = []
     warnings: List[Dict[str, Any]] = []
+    protected_compiled = (
+        []
+        if allow_protected_edit
+        else _compile_protected_patterns(load_protected_paths(root, protect_paths))
+    )
     emoji_severity = "error" if strict_prose else "warning"
     emoji_target = errors if strict_prose else warnings
 
@@ -2756,6 +2866,22 @@ def check_files(
                     remediation="Do not modify test files without authorization; pass --allow-test-edit if authorized.",
                 )
             )
+
+        if protected_compiled:
+            matched_glob = match_protected_path(rel, protected_compiled)
+            if matched_glob is not None:
+                errors.append(
+                    _finding(
+                        code="DIFF-PROTECTED-PATH",
+                        severity="error",
+                        file=rel,
+                        message=f"Unauthorized edit to protected path '{rel}' (matched '{matched_glob}').",
+                        remediation=(
+                            "Do not modify protected specs, decision docs, or human-owned invariant contracts "
+                            "without explicit human authorization; pass --allow-protected-edit if authorized."
+                        ),
+                    )
+                )
 
         disk_path = Path(rel) if Path(rel).is_absolute() else (root / rel)
         if not disk_path.is_file():
@@ -2913,6 +3039,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Repeatable '**'-aware glob pattern for paths to skip (e.g., 'results/*/artifacts/**').",
     )
     parser.add_argument(
+        "--protect-path",
+        action="append",
+        default=[],
+        dest="protect_paths",
+        metavar="GLOB",
+        help=(
+            "Repeatable '**'-aware glob pattern for protected specs, decision docs, or invariant tests "
+            "(merged with <repo>/.anti-slop/protected-paths.json if present)."
+        ),
+    )
+    parser.add_argument(
+        "--allow-protected-edit",
+        action="store_true",
+        help="Authorize edits to paths locked by --protect-path or .anti-slop/protected-paths.json.",
+    )
+    parser.add_argument(
         "--no-budget",
         action="store_true",
         help="Disable heuristic --max-net-loc and --max-files diff budgets (enforce objective defects only).",
@@ -2981,6 +3123,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
                 exclude=args.exclude,
+                protect_paths=args.protect_paths,
+                allow_protected_edit=args.allow_protected_edit,
             )
         elif target_files:
             result = check_files(
@@ -2996,6 +3140,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
                 exclude=args.exclude,
+                protect_paths=args.protect_paths,
+                allow_protected_edit=args.allow_protected_edit,
             )
         elif pr_body is not None:
             result = check_files(
@@ -3011,6 +3157,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
                 exclude=args.exclude,
+                protect_paths=args.protect_paths,
+                allow_protected_edit=args.allow_protected_edit,
             )
         elif not sys.stdin.isatty():
             diff_text = sys.stdin.read()
@@ -3028,6 +3176,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
                 exclude=args.exclude,
+                protect_paths=args.protect_paths,
+                allow_protected_edit=args.allow_protected_edit,
             )
         else:
             parser.error("Provide --diff, --files / PATH, --pr-body/--pr-body-file, or pipe a unified diff on stdin.")

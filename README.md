@@ -158,16 +158,17 @@ repos:
 
 ```bash
 anti-slop review [--markdown|--json] [--fail-on-warning]             # Plain-English shortcut + structural + learned review
-anti-slop verify [--recipe .anti-slop/verify.json|--check-receipt]   # Live E2E service/HTTP/CLI checks + SHA-256 receipts
-anti-slop diff --diff - --no-budget [--exclude <glob>]               # Fast blocking diff and prose gate
+anti-slop audit --spec-file <spec> [--summary-file <pr>|--print-prompt] # Clean-room cross-family spec-fidelity diff audit
+anti-slop verify [--recipe .anti-slop/verify.json|--check-receipt]   # Live E2E service/HTTP/CLI/metric checks + SHA-256 receipts
+anti-slop diff --diff - --no-budget [--exclude <glob>] [--protect-path <glob>] # Fast blocking diff, protected-path, and prose gate
 anti-slop mutate --test-cmd "pytest -q" [--base origin/main]         # Isolated diff-scoped Python & JS/TS mutation testing
-anti-slop learn <capture|propose|verify|approve|retire|library|mine> # Verified self-learning, packs, and pattern mining
-anti-slop hook --install <claude|antigravity|codex> [--dry-run]      # Mid-turn PreToolUse/Stop hook adapter & installer
+anti-slop learn <capture|propose|verify|approve|retire|library|mine> # Verified self-learning, packs, and pattern/churn mining
+anti-slop hook --install <claude|antigravity|codex> [--dry-run]      # Mid-turn PreToolUse/Stop hook adapter, locks & circuit breaker
 anti-slop skill <show|install <claude|antigravity|codex>>            # Inspect or install the bundled agent workflow skill
-anti-slop api <path/to/model-config.json>                            # Validate 2026 model API & harness configs
+anti-slop api <path/to/model-config.json>                            # Validate 2026 model API, cross-family audit & harness configs
 ```
 
-All 7 legacy `anti-slop-*` console scripts remain installed in `pyproject.toml` for backward compatibility.
+All 8 direct `anti-slop-*` console scripts remain installed in `pyproject.toml` alongside `anti-slop`.
 
 </details>
 

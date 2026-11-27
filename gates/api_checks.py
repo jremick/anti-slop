@@ -90,6 +90,36 @@ LOOP_MODES = frozenset({
     "loop",
 })
 
+ML_RD_WORKLOADS = frozenset({
+    "ml_research",
+    "ml-research",
+    "kernel_opt",
+    "kernel-opt",
+    "local_inference",
+    "local-inference",
+    "pretraining",
+    "ai_rd",
+    "ai-rd",
+})
+
+_PROVIDER_FAMILY_PATTERNS: Tuple[Tuple[str, re.Pattern[str]], ...] = (
+    ("anthropic", re.compile(r"\b(?:claude|anthropic|opus|sonnet|haiku|fable|mythos)\b", re.IGNORECASE)),
+    ("openai", re.compile(r"\b(?:gpt-[0-9]|openai|codex|chatgpt|o[134]-mini|o[134]-pro|astra|sol)\b", re.IGNORECASE)),
+    ("google", re.compile(r"\b(?:gemini|google|antigravity|deepmind|neon|argon|carbon|hydrogen)\b", re.IGNORECASE)),
+)
+
+
+def _infer_provider_family(raw: Any) -> Optional[str]:
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    cleaned = raw.strip().lower()
+    if cleaned in ("anthropic", "openai", "google"):
+        return cleaned
+    for provider, pat in _PROVIDER_FAMILY_PATTERNS:
+        if pat.search(cleaned):
+            return provider
+    return None
+
 
 def _finding(code: str, severity: str, message: str, remediation: str) -> Dict[str, str]:
     return {
@@ -1000,6 +1030,72 @@ def validate_config(config: Dict[str, Any], *, strict: bool = False) -> Dict[str
                     remediation=(
                         "Pair or replace lossy summarization with observation masking (observation_masking=true / "
                         "tool-result clearing) or explicit fresh checkpoint resets (checkpoint_reset=true)."
+                    ),
+                )
+            )
+
+    # Cross-family audit guard: catch correlated same-vendor authoring + auditing configs.
+    primary_provider = _infer_provider_family(family)
+    found_auditor_model, auditor_model_val = _lookup(
+        ctx_dicts, "auditor_model", "reviewer_model", "verifier_model"
+    )
+    found_auditor_prov, auditor_prov_val = _lookup(
+        ctx_dicts, "auditor_provider", "reviewer_provider", "verifier_provider"
+    )
+    auditor_provider = (
+        _infer_provider_family(auditor_prov_val) if found_auditor_prov else None
+    ) or (
+        _infer_provider_family(auditor_model_val) if found_auditor_model else None
+    )
+    found_allow_same, allow_same_val = _lookup(ctx_dicts, "allow_same_family_audit")
+    if (
+        primary_provider is not None
+        and auditor_provider is not None
+        and auditor_provider == primary_provider
+        and not bool(found_allow_same and allow_same_val)
+    ):
+        errors.append(
+            _finding(
+                code="HARNESS-SAME-FAMILY-AUDIT",
+                severity="error",
+                message=(
+                    f"{family} ({primary_provider}) is configured with a same-family auditor/reviewer "
+                    f"({auditor_model_val or auditor_prov_val}); own-family judges share correlated "
+                    "blind spots (UK AISI EXT-04; Pombal et al. arXiv:2604.06996)."
+                ),
+                remediation=(
+                    "Configure auditor_model / auditor_provider from a different vendor family "
+                    "(Anthropic <-> OpenAI <-> Google) and run `anti-slop audit` in a clean-room context."
+                ),
+            )
+        )
+
+    # Claude ML R&D / local-inference routing warning: flag capability-cap & fallback risk when unverified.
+    if family in ("claude-opus-5-5", "claude-fable-5-2"):
+        found_wl, wl_raw = _lookup(ctx_dicts, "workload", "task_type", "mode")
+        has_cross_auditor = (
+            auditor_provider is not None
+            and primary_provider is not None
+            and auditor_provider != primary_provider
+        )
+        if (
+            found_wl
+            and isinstance(wl_raw, str)
+            and wl_raw.strip().lower() in ML_RD_WORKLOADS
+            and not has_cross_auditor
+        ):
+            warnings.append(
+                _finding(
+                    code="CLAUDE-ML-RD-CAP-WARNING",
+                    severity="warning",
+                    message=(
+                        f"{family} declares workload='{wl_raw}' without a cross-family verifier; "
+                        "Anthropic system cards document training-time capability caps on frontier AI R&D "
+                        "and sticky fallback routing on dual-use triggers."
+                    ),
+                    remediation=(
+                        "Pair ML/inference runs with Tier-1 `anti-slop verify` throughput/contract assertions "
+                        "and configure a cross-family auditor (`auditor_provider != 'anthropic'`)."
                     ),
                 )
             )

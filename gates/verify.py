@@ -25,6 +25,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 import subprocess
@@ -260,6 +261,78 @@ def _validate_http_body(raw: Dict[str, Any], cid: str, idx: int) -> Tuple[Option
     return body, has_json_body, raw.get("json_body")
 
 
+_JSON_RULE_OPERATORS = frozenset({
+    "equals",
+    "not_equals",
+    "min",
+    "max",
+    "min_len",
+    "max_len",
+    "contains",
+    "not_contains",
+})
+_JSON_PATH_TOKEN_RE = re.compile(r"([^.\[\]]+)|\[(-?\d+)\]")
+
+
+def _is_number(val: Any) -> bool:
+    return isinstance(val, (int, float)) and not isinstance(val, bool)
+
+
+def _validate_single_json_rule(raw: Any, prefix: str) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise VerifyConfigError(f"{prefix} must be a JSON object.")
+    path_expr = raw.get("path")
+    if not isinstance(path_expr, str) or not path_expr.strip():
+        raise VerifyConfigError(f"{prefix}.path must be a non-empty string.")
+    unknown = set(raw.keys()) - {"path"} - _JSON_RULE_OPERATORS
+    if unknown:
+        raise VerifyConfigError(f"{prefix} contains unsupported field(s): {', '.join(sorted(unknown))}.")
+    if not (set(raw.keys()) & _JSON_RULE_OPERATORS):
+        raise VerifyConfigError(
+            f"{prefix} must specify at least one assertion operator ({', '.join(sorted(_JSON_RULE_OPERATORS))})."
+        )
+    rule: Dict[str, Any] = {"path": path_expr.strip()}
+    for op in ("min", "max"):
+        if op in raw:
+            if not _is_number(raw[op]):
+                raise VerifyConfigError(f"{prefix}.{op} must be a number.")
+            rule[op] = raw[op]
+    for op in ("min_len", "max_len"):
+        if op in raw:
+            if not _is_strict_int(raw[op]) or raw[op] < 0:
+                raise VerifyConfigError(f"{prefix}.{op} must be a non-negative integer.")
+            rule[op] = raw[op]
+    for op in ("contains", "not_contains"):
+        if op in raw:
+            if not isinstance(raw[op], list):
+                raise VerifyConfigError(f"{prefix}.{op} must be a JSON array.")
+            rule[op] = list(raw[op])
+    for op in ("equals", "not_equals"):
+        if op in raw:
+            rule[op] = raw[op]
+    return rule
+
+
+def _validate_json_rules(val: Any, cid: str, idx: int) -> List[Dict[str, Any]]:
+    if val is None:
+        return []
+    if not isinstance(val, list):
+        raise VerifyConfigError(f"checks[{idx}] ('{cid}'): expect_json_rules must be a JSON array.")
+    return [
+        _validate_single_json_rule(raw, f"checks[{idx}].expect_json_rules[{r_idx}]")
+        for r_idx, raw in enumerate(val)
+    ]
+
+
+def _opt_max_elapsed(raw: Dict[str, Any], cid: str, idx: int) -> Optional[float]:
+    val = raw.get("max_elapsed_s")
+    if val is None:
+        return None
+    if not _is_positive_number(val):
+        raise VerifyConfigError(f"checks[{idx}] ('{cid}'): max_elapsed_s must be a positive number.")
+    return float(val)
+
+
 def _validate_http_check(raw: Dict[str, Any], cid: str, idx: int) -> Dict[str, Any]:
     url = raw.get("url")
     if not isinstance(url, str) or not url.startswith(("http://", "https://")):
@@ -283,9 +356,11 @@ def _validate_http_check(raw: Dict[str, Any], cid: str, idx: int) -> Dict[str, A
         "has_json_body": has_json_body,
         "json_body": json_body,
         "timeout_s": float(timeout_s),
+        "max_elapsed_s": _opt_max_elapsed(raw, cid, idx),
         "expect_status": statuses,
         "has_expect_json": "expect_json" in raw and raw["expect_json"] is not None,
         "expect_json": raw.get("expect_json"),
+        "expect_json_rules": _validate_json_rules(raw.get("expect_json_rules"), cid, idx),
         "expect_body_contains": _validate_str_list(raw.get("expect_body_contains"), f"checks[{idx}].expect_body_contains"),
         "expect_body_not_contains": _validate_str_list(
             raw.get("expect_body_not_contains"), f"checks[{idx}].expect_body_not_contains"
@@ -311,7 +386,11 @@ def _validate_cli_check(raw: Dict[str, Any], cid: str, idx: int) -> Dict[str, An
         "cwd": cwd,
         "env": _validate_str_dict(raw.get("env"), f"checks[{idx}].env"),
         "timeout_s": float(timeout_s),
+        "max_elapsed_s": _opt_max_elapsed(raw, cid, idx),
         "expect_exit": expect_exit,
+        "has_expect_json": "expect_json" in raw and raw["expect_json"] is not None,
+        "expect_json": raw.get("expect_json"),
+        "expect_json_rules": _validate_json_rules(raw.get("expect_json_rules"), cid, idx),
         "expect_stdout_contains": _validate_str_list(
             raw.get("expect_stdout_contains"), f"checks[{idx}].expect_stdout_contains"
         ),
@@ -343,6 +422,9 @@ def _validate_file_check(raw: Dict[str, Any], cid: str, idx: int) -> Dict[str, A
         "path": path_val.strip(),
         "must_exist": must_exist,
         "non_empty": non_empty,
+        "has_expect_json": "expect_json" in raw and raw["expect_json"] is not None,
+        "expect_json": raw.get("expect_json"),
+        "expect_json_rules": _validate_json_rules(raw.get("expect_json_rules"), cid, idx),
         "contains": _validate_str_list(raw.get("contains"), f"checks[{idx}].contains"),
         "not_contains": _validate_str_list(raw.get("not_contains"), f"checks[{idx}].not_contains"),
     }
@@ -478,6 +560,124 @@ def json_subset_match(expected: Any, actual: Any, path: str = "$") -> Optional[s
     if expected != actual:
         return f"at {path}: expected {expected!r}, got {actual!r}"
     return None
+
+
+def _strict_json_equal(a: Any, b: Any) -> bool:
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_strict_json_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return set(a.keys()) == set(b.keys()) and all(_strict_json_equal(a[k], b[k]) for k in a)
+    return bool(a == b)
+
+
+def _resolve_json_path(data: Any, path_expr: str) -> Tuple[bool, Any, Optional[str]]:
+    expr = path_expr.strip()
+    if expr == "$":
+        return True, data, None
+    if expr.startswith("$."):
+        expr = expr[2:]
+    elif expr.startswith("$"):
+        expr = expr[1:]
+
+    cur = data
+    pos = 0
+    for match in _JSON_PATH_TOKEN_RE.finditer(expr):
+        gap = expr[pos : match.start()]
+        if gap not in ("", "."):
+            return False, None, f"invalid json path syntax near {gap!r} in '{path_expr}'"
+        pos = match.end()
+        key_tok, idx_tok = match.group(1), match.group(2)
+        if key_tok is not None:
+            if not isinstance(cur, dict) or key_tok not in cur:
+                return False, None, f"path '{path_expr}' missing key '{key_tok}'"
+            cur = cur[key_tok]
+        else:
+            idx = int(idx_tok)
+            if not isinstance(cur, list) or not (-len(cur) <= idx < len(cur)):
+                return False, None, f"path '{path_expr}' index [{idx}] out of range"
+            cur = cur[idx]
+
+    if pos != len(expr):
+        return False, None, f"invalid json path syntax in '{path_expr}'"
+    return True, cur, None
+
+
+def _eval_json_bounds(actual: Any, rule: Dict[str, Any], path_expr: str) -> List[str]:
+    failures: List[str] = []
+    if "equals" in rule and not _strict_json_equal(actual, rule["equals"]):
+        failures.append(f"expect_json_rules ({path_expr}): expected {rule['equals']!r}, got {actual!r}")
+    if "not_equals" in rule and _strict_json_equal(actual, rule["not_equals"]):
+        failures.append(f"expect_json_rules ({path_expr}): expected value != {rule['not_equals']!r}")
+    if "min" in rule and (not _is_number(actual) or actual < rule["min"]):
+        failures.append(f"expect_json_rules ({path_expr}): expected >= {rule['min']}, got {actual!r}")
+    if "max" in rule and (not _is_number(actual) or actual > rule["max"]):
+        failures.append(f"expect_json_rules ({path_expr}): expected <= {rule['max']}, got {actual!r}")
+    if "min_len" in rule and (not isinstance(actual, (list, dict, str)) or len(actual) < rule["min_len"]):
+        got_len = len(actual) if isinstance(actual, (list, dict, str)) else type(actual).__name__
+        failures.append(f"expect_json_rules ({path_expr}): expected length >= {rule['min_len']}, got {got_len}")
+    if "max_len" in rule and (not isinstance(actual, (list, dict, str)) or len(actual) > rule["max_len"]):
+        got_len = len(actual) if isinstance(actual, (list, dict, str)) else type(actual).__name__
+        failures.append(f"expect_json_rules ({path_expr}): expected length <= {rule['max_len']}, got {got_len}")
+    return failures
+
+
+def _eval_json_membership(actual: Any, items: Sequence[Any], *, op: str, path_expr: str) -> List[str]:
+    if not isinstance(actual, (list, str)):
+        return [f"expect_json_rules ({path_expr}): '{op}' requires array or string, got {type(actual).__name__}"]
+    failures: List[str] = []
+    for target in items:
+        present = (
+            any(_strict_json_equal(entry, target) for entry in actual)
+            if isinstance(actual, list)
+            else (isinstance(target, str) and target in actual)
+        )
+        if op == "contains" and not present:
+            kind = "array" if isinstance(actual, list) else "string"
+            failures.append(f"expect_json_rules ({path_expr}): {kind} missing required {target!r}")
+        elif op == "not_contains" and present:
+            kind = "array" if isinstance(actual, list) else "string"
+            failures.append(f"expect_json_rules ({path_expr}): {kind} contained forbidden {target!r}")
+    return failures
+
+
+def _eval_single_json_rule(data: Any, rule: Dict[str, Any]) -> List[str]:
+    path_expr = rule["path"]
+    ok, actual, err = _resolve_json_path(data, path_expr)
+    if not ok:
+        return [f"expect_json_rules ({path_expr}): {err}"]
+    failures = _eval_json_bounds(actual, rule, path_expr)
+    if "contains" in rule:
+        failures.extend(_eval_json_membership(actual, rule["contains"], op="contains", path_expr=path_expr))
+    if "not_contains" in rule:
+        failures.extend(_eval_json_membership(actual, rule["not_contains"], op="not_contains", path_expr=path_expr))
+    return failures
+
+
+def _evaluate_json_payload(
+    raw_text: str,
+    *,
+    has_expect_json: bool,
+    expect_json: Any,
+    rules: Sequence[Dict[str, Any]],
+    source_label: str,
+) -> List[str]:
+    if not has_expect_json and not rules:
+        return []
+    try:
+        parsed = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        return [f"expected valid JSON in {source_label}, decode error: {exc}"]
+
+    failures: List[str] = []
+    if has_expect_json:
+        mismatch = json_subset_match(expect_json, parsed)
+        if mismatch is not None:
+            failures.append(f"expect_json mismatch {mismatch}")
+    for rule in rules:
+        failures.extend(_eval_single_json_rule(parsed, rule))
+    return failures
 
 
 class _OutputBuffer:
@@ -748,15 +948,15 @@ def _evaluate_http_assertions(spec: Dict[str, Any], http_status: int, body_text:
         exp_label = str(expected_statuses[0]) if len(expected_statuses) == 1 else str(expected_statuses)
         failures.append(f"expected HTTP status {exp_label}, got {http_status}")
 
-    if spec["has_expect_json"]:
-        try:
-            parsed = json.loads(body_text)
-        except json.JSONDecodeError as exc:
-            failures.append(f"expected valid JSON response for expect_json, decode error: {exc}")
-        else:
-            mismatch = json_subset_match(spec["expect_json"], parsed)
-            if mismatch is not None:
-                failures.append(f"expect_json mismatch {mismatch}")
+    failures.extend(
+        _evaluate_json_payload(
+            body_text,
+            has_expect_json=spec["has_expect_json"],
+            expect_json=spec["expect_json"],
+            rules=spec.get("expect_json_rules") or (),
+            source_label="HTTP response",
+        )
+    )
 
     for needle in spec["expect_body_contains"]:
         if needle not in body_text:
@@ -789,10 +989,12 @@ def _run_http_check(spec: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         failures.append(f"HTTP request error: {_sanitize_text(str(exc), repo_root)}")
 
+    elapsed_s = round(time.monotonic() - started_at, 3)
     if http_status is not None:
         failures.extend(_evaluate_http_assertions(spec, http_status, body_text))
+    if spec.get("max_elapsed_s") is not None and elapsed_s > spec["max_elapsed_s"]:
+        failures.append(f"elapsed time {elapsed_s:.3f}s exceeded max_elapsed_s ({spec['max_elapsed_s']:g}s)")
 
-    elapsed_s = round(time.monotonic() - started_at, 3)
     snippet = _truncate(_sanitize_text(body_text, repo_root))
     status_label = f"HTTP {http_status}" if http_status is not None else "connection error"
     return {
@@ -859,6 +1061,15 @@ def _evaluate_cli_assertions(
     failures: List[str] = []
     if exit_code != spec["expect_exit"]:
         failures.append(f"expected exit code {spec['expect_exit']}, got {exit_code}")
+    failures.extend(
+        _evaluate_json_payload(
+            stdout_text,
+            has_expect_json=bool(spec.get("has_expect_json")),
+            expect_json=spec.get("expect_json"),
+            rules=spec.get("expect_json_rules") or (),
+            source_label="CLI stdout",
+        )
+    )
     for needle in spec["expect_stdout_contains"]:
         if needle not in stdout_text:
             failures.append(f"stdout missing expected substring {needle!r}")
@@ -888,8 +1099,11 @@ def _run_cli_check(spec: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
         }
 
     exit_code, stdout_text, stderr_text, failures = _exec_cli_process(spec, cwd, repo_root)
+    elapsed_s = round(time.monotonic() - started_at, 3)
     if exit_code is not None:
         failures.extend(_evaluate_cli_assertions(spec, exit_code, stdout_text, stderr_text))
+    if spec.get("max_elapsed_s") is not None and elapsed_s > spec["max_elapsed_s"]:
+        failures.append(f"elapsed time {elapsed_s:.3f}s exceeded max_elapsed_s ({spec['max_elapsed_s']:g}s)")
 
     out_snip = _truncate(_sanitize_text(stdout_text, repo_root))
     err_snip = _truncate(_sanitize_text(stderr_text, repo_root))
@@ -898,7 +1112,7 @@ def _run_cli_check(spec: Dict[str, Any], repo_root: Path) -> Dict[str, Any]:
         "id": spec["id"],
         "kind": "cli",
         "ok": len(failures) == 0,
-        "elapsed_s": round(time.monotonic() - started_at, 3),
+        "elapsed_s": elapsed_s,
         "target": target,
         "status": status_label,
         "exit_code": exit_code,
@@ -929,6 +1143,15 @@ def _evaluate_file_contents(
         failures.append(f"expected non-empty file: {rel_label}")
     content = full_path.read_text(encoding="utf-8", errors="replace")
     snippet = _truncate(_sanitize_text(content, repo_root), 300)
+    failures.extend(
+        _evaluate_json_payload(
+            content,
+            has_expect_json=bool(spec.get("has_expect_json")),
+            expect_json=spec.get("expect_json"),
+            rules=spec.get("expect_json_rules") or (),
+            source_label=f"file {rel_label}",
+        )
+    )
     for needle in spec["contains"]:
         if needle not in content:
             failures.append(f"file missing expected substring {needle!r}")
@@ -1517,8 +1740,15 @@ def _build_adhoc_http_checks(args: argparse.Namespace) -> List[Dict[str, Any]]:
 def _build_adhoc_recipe(args: argparse.Namespace) -> Dict[str, Any]:
     services = _build_adhoc_services(args)
     checks = _build_adhoc_http_checks(args)
+    cmd_expect_json: Any = None
+    has_cmd_json = args.expect_json is not None and not args.http_get
+    if has_cmd_json:
+        try:
+            cmd_expect_json = json.loads(args.expect_json)
+        except json.JSONDecodeError as exc:
+            raise VerifyConfigError(f"Invalid JSON passed to --expect-json: {exc}") from exc
     for idx, cmd in enumerate(args.cmd or [], start=1):
-        checks.append({
+        cli_chk: Dict[str, Any] = {
             "id": f"cli-{idx}",
             "kind": "cli",
             "command": cmd,
@@ -1527,7 +1757,10 @@ def _build_adhoc_recipe(args: argparse.Namespace) -> Dict[str, Any]:
             "expect_stdout_contains": list(args.expect_stdout or []),
             "expect_stdout_not_contains": list(args.expect_stdout_not or []),
             "expect_stderr_not_contains": list(args.expect_stderr_not or []),
-        })
+        }
+        if has_cmd_json:
+            cli_chk["expect_json"] = cmd_expect_json
+        checks.append(cli_chk)
     for idx, fpath in enumerate(args.file_checks or [], start=1):
         checks.append({"id": f"file-{idx}", "kind": "file", "path": fpath, "must_exist": True, "non_empty": True})
 

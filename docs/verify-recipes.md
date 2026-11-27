@@ -172,8 +172,10 @@ Every check requires a unique `id` and a `kind` of `"http"`, `"cli"`, or `"file"
 | `body` | `null` | Raw UTF-8 request body string (mutually exclusive with `json_body`). |
 | `json_body` | `null` | JSON payload serialized automatically with `Content-Type: application/json`. |
 | `timeout_s` | `10` | Request timeout in seconds. |
+| `max_elapsed_s` | `null` | Optional latency ceiling in seconds (fails check if observed elapsed time exceeds threshold). |
 | `expect_status` | `200` | Expected HTTP status integer or list of accepted integers. |
 | `expect_json` | `null` | Recursive JSON subset match against the parsed JSON response (strict `bool` vs `int`). |
+| `expect_json_rules` | `[]` | List of path-based contract/metric assertions (`path` + `equals`, `not_equals`, `min`, `max`, `min_len`, `max_len`, `contains`, `not_contains`). |
 | `expect_body_contains` | `[]` | Substrings that must appear in the response body. |
 | `expect_body_not_contains` | `[]` | Substrings forbidden in the response body. |
 
@@ -185,7 +187,10 @@ Every check requires a unique `id` and a `kind` of `"http"`, `"cli"`, or `"file"
 | `cwd` | repo root | Working directory relative to repo root. |
 | `env` | `{}` | Extra string environment variables. |
 | `timeout_s` | `30` | Execution timeout in seconds (timed-out process groups are killed cleanly). |
+| `max_elapsed_s` | `null` | Optional runtime ceiling in seconds to catch silent slow-path fallbacks. |
 | `expect_exit` | `0` | Expected integer exit code. |
+| `expect_json` | `null` | Optional recursive JSON subset match against parsed CLI stdout. |
+| `expect_json_rules` | `[]` | Path-based contract/metric assertions against parsed CLI stdout (e.g., `metrics.throughput_tok_s` `min: 100`, `active_fields` `contains: ["skin_tone", "eye_color"]`). |
 | `expect_stdout_contains` | `[]` | Substrings required in stdout. |
 | `expect_stdout_not_contains` | `[]` | Substrings forbidden in stdout. |
 | `expect_stderr_contains` | `[]` | Substrings required in stderr. |
@@ -198,6 +203,8 @@ Every check requires a unique `id` and a `kind` of `"http"`, `"cli"`, or `"file"
 | `path` | required | File path resolved relative to the repository root. |
 | `must_exist` | `true` | When `true`, file must exist as a regular file; when `false`, path must not exist. |
 | `non_empty` | `true` | When `must_exist` is `true`, fail if file size is `0` bytes. |
+| `expect_json` | `null` | Optional recursive JSON subset match against parsed JSON file contents. |
+| `expect_json_rules` | `[]` | Path-based contract/metric assertions against parsed JSON file contents. |
 | `contains` | `[]` | Substrings required in the file's UTF-8 text. |
 | `not_contains` | `[]` | Substrings forbidden in the file's UTF-8 text. |
 

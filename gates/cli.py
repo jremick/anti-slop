@@ -3,6 +3,7 @@
 
 Dispatches to all anti-slop subcommands with zero third-party dependencies:
   - review: plain-English code review (shortcuts + structural/architectural risks + learned rules)
+  - audit:  clean-room cross-family spec-fidelity diff auditor
   - diff:   deterministic diff and Markdown prose gate
   - learn:  verified human-gated self-learning loop, optional library, and mining
   - mutate: diff-scoped Python and JS/TS mutation testing in an isolated temp copy
@@ -33,6 +34,7 @@ SKILL_INSTALL_CHOICES: Tuple[str, ...] = ("claude", "antigravity", "codex")
 
 SUBCOMMAND_TARGETS: Dict[str, Tuple[str, str]] = {
     "review": ("gates.review", "Run plain-English change review (shortcuts + structural/architectural + learned rules)."),
+    "audit": ("gates.audit", "Run clean-room cross-family spec-fidelity diff audit."),
     "diff": ("gates.diff_check", "Run deterministic diff and Markdown prose gate."),
     "learn": ("gates.learn", "Manage verified self-learning rules, optional packs, and pattern mining."),
     "mutate": ("gates.mutate", "Run diff-scoped Python and JS/TS mutation testing in an isolated temp copy."),

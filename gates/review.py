@@ -56,6 +56,23 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
         "fix_prompt": "Restore the existing test file untouched and fix the production code to satisfy it (or explain why the test contract itself must change).",
         "evidence": "docs/evidence.md#local-05, docs/evidence.md#ext-13, docs/ai-era-rules.md",
     },
+    "DIFF-PROTECTED-PATH": {
+        "title": "A protected spec, decision record, or human-owned contract file was modified",
+        "why_veterans_flag_it": (
+            "Protected paths hold human-authored specifications, architectural decisions, invariant tests, "
+            "or live verification recipes. Allowing an agent to edit or mint them silently enables policy "
+            "laundering where the agent rewrites the contract to justify its own code changes."
+        ),
+        "how_it_compounds": (
+            "Future AI sessions treat altered specs, ADRs, or invariant tests as authoritative project law "
+            "and propagate the unauthorized change into new features."
+        ),
+        "fix_prompt": (
+            "Revert edits to the protected path and escalate any needed contract or policy change to the human "
+            "owner explicitly (re-run with --allow-protected-edit only after human approval)."
+        ),
+        "evidence": "docs/operations-and-routing.md, docs/evidence.md#ext-12",
+    },
     "DIFF-SUPPRESSION": {
         "title": "A linter or type-checker warning was silenced without explanation",
         "why_veterans_flag_it": (
@@ -431,6 +448,8 @@ def review_diff(
     strict_structural: bool = False,
     pr_body: Optional[str] = None,
     learned_rules: Optional[Path | str] = None,
+    protect_paths: Optional[Sequence[str]] = None,
+    allow_protected_edit: bool = False,
     max_func_lines: int = _struct.DEFAULT_MAX_FUNC_LINES,
     max_func_branches: int = _struct.DEFAULT_MAX_FUNC_BRANCHES,
     max_file_lines: int = _struct.DEFAULT_MAX_FILE_LINES,
@@ -447,6 +466,8 @@ def review_diff(
         max_files=max_files,
         pr_body=pr_body,
         strict_prose=strict_prose,
+        protect_paths=protect_paths,
+        allow_protected_edit=allow_protected_edit,
     )
     struct_res = _struct.check_structural_diff(
         diff_text,
@@ -497,6 +518,8 @@ def review_files(
     strict_structural: bool = False,
     pr_body: Optional[str] = None,
     learned_rules: Optional[Path | str] = None,
+    protect_paths: Optional[Sequence[str]] = None,
+    allow_protected_edit: bool = False,
     max_func_lines: int = _struct.DEFAULT_MAX_FUNC_LINES,
     max_func_branches: int = _struct.DEFAULT_MAX_FUNC_BRANCHES,
     max_file_lines: int = _struct.DEFAULT_MAX_FILE_LINES,
@@ -510,6 +533,8 @@ def review_files(
         no_budget=no_budget,
         pr_body=pr_body,
         strict_prose=strict_prose,
+        protect_paths=protect_paths,
+        allow_protected_edit=allow_protected_edit,
     )
     struct_res = _struct.check_structural_files(
         files,
@@ -751,6 +776,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--repo-root", default=".", help="Repository root (default: '.').")
     parser.add_argument("--lock-tests", action="store_true", help="Flag any edits under tests/.")
     parser.add_argument("--allow-test-skip", action="store_true", help="Allow test-skip annotations.")
+    parser.add_argument(
+        "--protect-path",
+        action="append",
+        default=[],
+        dest="protect_paths",
+        metavar="GLOB",
+        help="Repeatable glob pattern for protected specs, decisions, or invariant tests.",
+    )
+    parser.add_argument(
+        "--allow-protected-edit",
+        action="store_true",
+        help="Authorize edits to paths locked by --protect-path or .anti-slop/protected-paths.json.",
+    )
     parser.add_argument("--strict-structural", action="store_true", help="Treat structural compounding slop as blocking errors.")
     parser.add_argument("--fail-on-warning", action="store_true", help="Exit 1 if any compounding slop risks are found.")
     parser.add_argument("--learned-rules", default=None, help="Path to learned rules JSON store.")
@@ -793,6 +831,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 strict_structural=args.strict_structural,
                 pr_body=pr_body,
                 learned_rules=args.learned_rules,
+                protect_paths=args.protect_paths,
+                allow_protected_edit=args.allow_protected_edit,
             )
         else:
             if args.diff is not None:
@@ -821,6 +861,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 strict_structural=args.strict_structural,
                 pr_body=pr_body,
                 learned_rules=args.learned_rules,
+                protect_paths=args.protect_paths,
+                allow_protected_edit=args.allow_protected_edit,
             )
     except (OSError, ValueError) as exc:
         if args.emit_json:

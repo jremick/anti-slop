@@ -105,6 +105,50 @@ PATCH_PATH_RE = re.compile(
 TELEMETRY_EVENTS = frozenset({"stop_hook", "pretool_hook"})
 TELEMETRY_CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{1,63}$")
 TELEMETRY_EXT_RE = re.compile(r"^\.[a-z0-9]{1,16}$")
+DEFAULT_MAX_CONSECUTIVE_BLOCKS = 3  # [Heuristic] Stop-hook loop circuit breaker
+
+
+def _import_diff_check() -> Any:
+    pkg_parent = str(Path(__file__).resolve().parents[2])
+    if pkg_parent not in sys.path:
+        sys.path.insert(0, pkg_parent)
+    from gates import diff_check as _dc
+
+    return _dc
+
+
+def _count_trailing_block_streak(
+    repo_root: Path,
+    current_codes: Sequence[str],
+) -> int:
+    """Count consecutive trailing blocked stop_hook turns in local telemetry matching current_codes."""
+    telemetry_path = repo_root / ".anti-slop" / "telemetry.jsonl"
+    if not telemetry_path.is_file():
+        return 0
+    try:
+        lines = telemetry_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return 0
+
+    current_set = set(current_codes)
+    streak = 0
+    for raw in reversed(lines):
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict) or obj.get("event") != "stop_hook":
+            continue
+        if obj.get("blocked") is not True:
+            break
+        prior_codes = set(obj.get("codes") or []) if isinstance(obj.get("codes"), list) else set()
+        if current_set and prior_codes and not (current_set & prior_codes):
+            break
+        streak += 1
+    return streak
 
 
 def _extract_patch_paths(patch_text: str, out: List[str]) -> None:
@@ -436,6 +480,8 @@ def _run_pretooluse_detailed(
     *,
     repo_root: Path,
     allow_test_edit: bool = False,
+    allow_protected_edit: bool = False,
+    protect_paths: Optional[Sequence[str]] = None,
 ) -> Tuple[int, str, Dict[str, Any]]:
     empty_meta: Dict[str, Any] = {"ran": False, "codes": [], "file_exts": []}
     if not raw_json.strip():
@@ -452,23 +498,48 @@ def _run_pretooluse_detailed(
     edit_paths = extract_tool_edit_paths(payload)
     file_exts = _extract_file_exts_from_paths(edit_paths)
 
-    if allow_test_edit:
-        return 0, "", {"ran": True, "codes": [], "file_exts": file_exts}
+    dc = _import_diff_check()
+    protected_compiled: List[Tuple[str, re.Pattern[str]]] = []
+    if not allow_protected_edit:
+        try:
+            protected_globs = dc.load_protected_paths(repo_root, protect_paths)
+        except ValueError as exc:
+            return 1, f"[anti-slop hook] Protected paths config error (non-blocking): {exc}", empty_meta
+        protected_compiled = dc._compile_protected_patterns(protected_globs)
 
-    blocked: List[str] = []
+    blocked_protected: List[Tuple[str, str]] = []
+    blocked_tests: List[str] = []
     for raw_path in edit_paths:
         norm = _normalize_candidate_path(raw_path, repo_root)
-        if _is_test_path(norm) and norm not in blocked:
-            blocked.append(norm)
+        if not norm:
+            continue
+        if protected_compiled:
+            matched_glob = dc.match_protected_path(norm, protected_compiled)
+            if matched_glob is not None and not any(p == norm for p, _ in blocked_protected):
+                blocked_protected.append((norm, matched_glob))
+        if not allow_test_edit and _is_test_path(norm) and norm not in blocked_tests:
+            blocked_tests.append(norm)
 
-    if blocked:
-        targets = ", ".join(blocked)
-        msg = (
-            f"[anti-slop hook] Blocked [DIFF-UNAUTHORIZED-TEST-EDIT]: attempted edit under tests/ ({targets}).\n"
-            "Remediation: Fix the production code instead of weakening tests. "
-            "Pass --allow-test-edit or set ANTI_SLOP_ALLOW_TEST_EDIT=1 only when test changes are explicitly authorized."
-        )
-        return 2, msg, {"ran": True, "codes": ["DIFF-UNAUTHORIZED-TEST-EDIT"], "file_exts": file_exts}
+    if blocked_protected or blocked_tests:
+        messages: List[str] = []
+        codes: List[str] = []
+        if blocked_protected:
+            codes.append("DIFF-PROTECTED-PATH")
+            targets = ", ".join(f"{p} ({g})" for p, g in blocked_protected)
+            messages.append(
+                f"[anti-slop hook] Blocked [DIFF-PROTECTED-PATH]: attempted edit to protected path ({targets}).\n"
+                "Remediation: Escalate contract, spec, decision, or invariant changes to the human owner. "
+                "Pass --allow-protected-edit or set ANTI_SLOP_ALLOW_PROTECTED_EDIT=1 only when explicitly authorized."
+            )
+        if blocked_tests:
+            codes.append("DIFF-UNAUTHORIZED-TEST-EDIT")
+            targets = ", ".join(blocked_tests)
+            messages.append(
+                f"[anti-slop hook] Blocked [DIFF-UNAUTHORIZED-TEST-EDIT]: attempted edit under tests/ ({targets}).\n"
+                "Remediation: Fix the production code instead of weakening tests. "
+                "Pass --allow-test-edit or set ANTI_SLOP_ALLOW_TEST_EDIT=1 only when test changes are explicitly authorized."
+            )
+        return 2, "\n".join(messages), {"ran": True, "codes": codes, "file_exts": file_exts}
 
     return 0, "", {"ran": True, "codes": [], "file_exts": file_exts}
 
@@ -478,12 +549,16 @@ def run_pretooluse_check(
     *,
     repo_root: Path,
     allow_test_edit: bool = False,
+    allow_protected_edit: bool = False,
+    protect_paths: Optional[Sequence[str]] = None,
 ) -> Tuple[int, str]:
-    """Inspect PreToolUse stdin JSON and block unauthorized test edits with code 2."""
+    """Inspect PreToolUse stdin JSON and block unauthorized test or protected-path edits with code 2."""
     code, message, _ = _run_pretooluse_detailed(
         raw_json,
         repo_root=repo_root,
         allow_test_edit=allow_test_edit,
+        allow_protected_edit=allow_protected_edit,
+        protect_paths=protect_paths,
     )
     return code, message
 
@@ -560,6 +635,8 @@ def _run_diff_gate_detailed(
     diff_text: Optional[str] = None,
     staged_only: bool = False,
     allow_test_edit: bool = False,
+    allow_protected_edit: bool = False,
+    protect_paths: Optional[Sequence[str]] = None,
     no_budget: bool = False,
     max_net_loc: Optional[int] = None,
     max_files: Optional[int] = None,
@@ -599,6 +676,12 @@ def _run_diff_gate_detailed(
     ]
     if allow_test_edit:
         cmd.append("--allow-test-edit")
+    if allow_protected_edit:
+        cmd.append("--allow-protected-edit")
+    if protect_paths:
+        for pat in protect_paths:
+            if str(pat).strip():
+                cmd.extend(["--protect-path", str(pat).strip()])
     if no_budget:
         cmd.append("--no-budget")
     else:
@@ -681,6 +764,8 @@ def run_diff_gate(
     diff_text: Optional[str] = None,
     staged_only: bool = False,
     allow_test_edit: bool = False,
+    allow_protected_edit: bool = False,
+    protect_paths: Optional[Sequence[str]] = None,
     no_budget: bool = False,
     max_net_loc: Optional[int] = None,
     max_files: Optional[int] = None,
@@ -692,6 +777,8 @@ def run_diff_gate(
         diff_text=diff_text,
         staged_only=staged_only,
         allow_test_edit=allow_test_edit,
+        allow_protected_edit=allow_protected_edit,
+        protect_paths=protect_paths,
         no_budget=no_budget,
         max_net_loc=max_net_loc,
         max_files=max_files,
@@ -1205,6 +1292,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Authorize edits under tests/ (also enabled via ANTI_SLOP_ALLOW_TEST_EDIT=1).",
     )
     parser.add_argument(
+        "--protect-path",
+        action="append",
+        default=[],
+        dest="protect_paths",
+        metavar="GLOB",
+        help=(
+            "Repeatable glob pattern for protected specs, decisions, or invariant tests "
+            "(merged with <repo>/.anti-slop/protected-paths.json if present)."
+        ),
+    )
+    parser.add_argument(
+        "--allow-protected-edit",
+        action="store_true",
+        help="Authorize edits to protected paths (also enabled via ANTI_SLOP_ALLOW_PROTECTED_EDIT=1).",
+    )
+    parser.add_argument(
+        "--max-consecutive-blocks",
+        type=int,
+        default=DEFAULT_MAX_CONSECUTIVE_BLOCKS,
+        help=(
+            f"Append a loop circuit-breaker escalation after N consecutive matching Stop blocks "
+            f"in local telemetry (default: {DEFAULT_MAX_CONSECUTIVE_BLOCKS} [Heuristic]; <=0 disables)."
+        ),
+    )
+    parser.add_argument(
         "--no-budget",
         action="store_true",
         help="Disable heuristic --max-net-loc and --max-files diff budgets (block objective defects only).",
@@ -1273,6 +1385,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return _emit_result(harness=harness, mode=mode, code=0, message="")
 
     allow_test_edit = args.allow_test_edit or _env_truthy("ANTI_SLOP_ALLOW_TEST_EDIT")
+    allow_protected_edit = args.allow_protected_edit or _env_truthy("ANTI_SLOP_ALLOW_PROTECTED_EDIT")
 
     if args.stdin_tool_json:
         effective_root = _resolve_git_toplevel(target_dir) or target_dir
@@ -1280,6 +1393,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             raw_stdin,
             repo_root=effective_root,
             allow_test_edit=allow_test_edit,
+            allow_protected_edit=allow_protected_edit,
+            protect_paths=args.protect_paths,
         )
         if meta["ran"] and code in (0, 2):
             record_hook_telemetry(
@@ -1302,11 +1417,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             diff_text=diff_text,
             staged_only=args.staged_only,
             allow_test_edit=allow_test_edit,
+            allow_protected_edit=allow_protected_edit,
+            protect_paths=args.protect_paths,
             no_budget=args.no_budget,
             max_net_loc=args.max_net_loc,
             max_files=args.max_files,
             learned_rules=args.learned_rules,
         )
+        if meta["ran"] and code == 2 and args.max_consecutive_blocks > 0:
+            prior_streak = _count_trailing_block_streak(meta["repo_root"], meta["codes"])
+            total_streak = prior_streak + 1
+            if total_streak >= args.max_consecutive_blocks:
+                codes_lbl = ", ".join(meta["codes"]) or "repeated violation"
+                cb_note = (
+                    f"[CIRCUIT-BREAKER] Repeated stop-hook block ({total_streak} consecutive turns on {codes_lbl}). "
+                    "Stop retrying blindly: reset to a fresh context boundary, escalate to the human owner, "
+                    "or run a clean-room cross-family audit (`anti-slop audit`)."
+                )
+                message = f"{message}\n{cb_note}" if message else cb_note
         if meta["ran"] and code in (0, 2):
             record_hook_telemetry(
                 repo_root=meta["repo_root"],

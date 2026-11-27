@@ -49,6 +49,7 @@ class PackagingMetadataTests(unittest.TestCase):
             "anti-slop": "gates.cli:main",
             "anti-slop-diff": "gates.diff_check:main",
             "anti-slop-review": "gates.review:main",
+            "anti-slop-audit": "gates.audit:main",
             "anti-slop-learn": "gates.learn:main",
             "anti-slop-hook": "gates.hooks.run_diff_gate_hook:main",
             "anti-slop-api": "gates.api_checks:main",
@@ -69,7 +70,7 @@ class PackagingMetadataTests(unittest.TestCase):
             else:
                 self.assertEqual(lic, "MIT")
 
-            self.assertEqual(len(project["scripts"]), 8)
+            self.assertEqual(len(project["scripts"]), 9)
             self.assertEqual(project["scripts"], expected_scripts)
 
             setuptools_cfg = data.get("tool", {}).get("setuptools", {})
@@ -145,6 +146,8 @@ class PackagingMetadataTests(unittest.TestCase):
             "explain",
             "learned-rules",
             "exclude",
+            "protect-paths",
+            "allow-protected-edit",
         )
         for inp in required_inputs:
             with self.subTest(input=inp):

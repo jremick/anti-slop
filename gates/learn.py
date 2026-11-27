@@ -1667,6 +1667,8 @@ def _parse_telemetry_jsonl(telemetry_path: Path) -> Dict[str, Any]:
             "code_last_seen": {},
             "earliest_ts": None,
             "latest_ts": None,
+            "max_consecutive_block_streak": 0,
+            "repeated_block_loops": 0,
         }
 
     try:
@@ -1674,6 +1676,9 @@ def _parse_telemetry_jsonl(telemetry_path: Path) -> Dict[str, Any]:
     except OSError:
         raw_lines = []
 
+    current_block_streak = 0
+    max_block_streak = 0
+    repeated_block_loops = 0
     for raw in raw_lines:
         stripped = raw.strip()
         if not stripped:
@@ -1695,6 +1700,15 @@ def _parse_telemetry_jsonl(telemetry_path: Path) -> Dict[str, Any]:
 
         event = str(obj.get("event") or "unknown").strip() or "unknown"
         events_by_type[event] = events_by_type.get(event, 0) + 1
+        if event == "stop_hook":
+            if obj.get("blocked") is True:
+                current_block_streak += 1
+                if current_block_streak > max_block_streak:
+                    max_block_streak = current_block_streak
+                if current_block_streak == 3:
+                    repeated_block_loops += 1
+            else:
+                current_block_streak = 0
 
         harness = str(obj.get("harness") or "").strip()
         if harness:
@@ -1748,6 +1762,8 @@ def _parse_telemetry_jsonl(telemetry_path: Path) -> Dict[str, Any]:
         "code_last_seen": dict(sorted(code_last_seen.items())),
         "earliest_ts": earliest_ts,
         "latest_ts": latest_ts,
+        "max_consecutive_block_streak": max_block_streak,
+        "repeated_block_loops": repeated_block_loops,
     }
 
 
@@ -1902,6 +1918,7 @@ def _mine_git_history(
         "fix_commit_ratio": 0.0,
         "churn_signals": [],
         "high_churn_files": [],
+        "rapid_churn_files": [],
         "diff_and_structural_code_counts": {},
     }
     if commits == 0:
@@ -1980,13 +1997,22 @@ def _mine_git_history(
                 continue
             ft = file_touch_counts.setdefault(
                 fpath,
-                {"file": fpath, "commit_count": 0, "fix_or_revert_count": 0, "sample_commits": []},
+                {
+                    "file": fpath,
+                    "commit_count": 0,
+                    "fix_or_revert_count": 0,
+                    "sample_commits": [],
+                    "_dates": [],
+                },
             )
             ft["commit_count"] += 1
             if is_fix or is_revert:
                 ft["fix_or_revert_count"] += 1
             if len(ft["sample_commits"]) < 5:
                 ft["sample_commits"].append(short_sha)
+            parsed_dt = _parse_utc_iso(author_iso)
+            if parsed_dt is not None:
+                ft["_dates"].append(parsed_dt)
 
         if compiled_opt_rules:
             _scan_commit_diff_opt_rules(parsed, compiled_opt_rules, short_sha, opt_hits_by_rule)
@@ -2020,11 +2046,34 @@ def _mine_git_history(
     scanned = len(commit_rows)
     high_churn_files = sorted(
         [
-            item
+            {k: v for k, v in item.items() if k != "_dates"}
             for item in file_touch_counts.values()
             if item["fix_or_revert_count"] >= 2
         ],
         key=lambda x: (-x["fix_or_revert_count"], -x["commit_count"], x["file"]),
+    )[:10]
+
+    rapid_churn_candidates: List[Dict[str, Any]] = []
+    for item in file_touch_counts.values():
+        dts = sorted(item["_dates"])
+        max_14d = 0
+        left = 0
+        for right, cur_dt in enumerate(dts):
+            while (cur_dt - dts[left]).total_seconds() > 14 * 86400:
+                left += 1
+            window_count = right - left + 1
+            if window_count > max_14d:
+                max_14d = window_count
+        if max_14d >= 3:
+            rapid_churn_candidates.append({
+                "file": item["file"],
+                "max_touches_14d": max_14d,
+                "commit_count": item["commit_count"],
+                "sample_commits": item["sample_commits"],
+            })
+    rapid_churn_files = sorted(
+        rapid_churn_candidates,
+        key=lambda x: (-x["max_touches_14d"], -x["commit_count"], x["file"]),
     )[:10]
 
     summary = {
@@ -2035,6 +2084,7 @@ def _mine_git_history(
         "fix_commit_ratio": round((fix_count + revert_count) / scanned, 4) if scanned else 0.0,
         "churn_signals": churn_signals,
         "high_churn_files": high_churn_files,
+        "rapid_churn_files": rapid_churn_files,
         "diff_and_structural_code_counts": dict(
             sorted(
                 ((code, st["commit_count"]) for code, st in git_code_stats.items()),
@@ -2248,6 +2298,18 @@ def _build_mine_next_steps(
         steps.append(
             f"Inspect high-churn file {top_file['file']} "
             f"({top_file['fix_or_revert_count']} fix/revert commit(s)) for missing characterization tests or structural coupling."
+        )
+    if git_summary.get("rapid_churn_files"):
+        top_rapid = git_summary["rapid_churn_files"][0]
+        steps.append(
+            f"Inspect 14-day rapid-churn file {top_rapid['file']} "
+            f"({top_rapid['max_touches_14d']} edits within 14 days [Heuristic]) for architectural instability or spec drift."
+        )
+    if int(telemetry_summary.get("repeated_block_loops") or 0) > 0:
+        steps.append(
+            f"Investigate {telemetry_summary['repeated_block_loops']} repeated stop-hook block loop(s) "
+            f"(max streak: {telemetry_summary['max_consecutive_block_streak']}): reset agent contexts earlier "
+            "or run a clean-room cross-family audit (`anti-slop audit`)."
         )
     if not steps:
         if not telemetry_summary.get("exists"):
