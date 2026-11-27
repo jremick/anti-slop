@@ -59,7 +59,7 @@ class PackagingMetadataTests(unittest.TestCase):
             data = tomllib.loads(raw_text)
             project = data["project"]
             self.assertEqual(project["name"], "anti-slop")
-            self.assertEqual(project["version"], "0.7.0")
+            self.assertEqual(project["version"], "0.8.0")
             self.assertEqual(project["requires-python"], ">=3.11")
             self.assertEqual(project["dependencies"], [])
 
@@ -85,7 +85,7 @@ class PackagingMetadataTests(unittest.TestCase):
         else:
             # Python < 3.11 fallback (stdlib-only verification without skipping)
             self.assertRegex(raw_text, r'(?m)^name\s*=\s*"anti-slop"\s*$')
-            self.assertRegex(raw_text, r'(?m)^version\s*=\s*"0\.7\.0"\s*$')
+            self.assertRegex(raw_text, r'(?m)^version\s*=\s*"0\.8\.0"\s*$')
             self.assertRegex(raw_text, r'(?m)^requires-python\s*=\s*">=3\.11"\s*$')
             self.assertRegex(raw_text, r"(?m)^dependencies\s*=\s*\[\s*\]\s*$")
             self.assertRegex(raw_text, r'(?m)^license\s*=\s*(?:\{\s*text\s*=\s*"MIT"\s*\}|"MIT")\s*$')

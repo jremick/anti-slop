@@ -14,7 +14,7 @@ Editing or clarifying a candidate rule does not require pretending it is already
 
 ## Versioning and stable IDs
 
-- `VERSION` tracks the repository, tooling, runtime gates and benchmark-suite release (currently `0.7.0`). `standard/core.md` keeps its own pinned standard version (currently `0.2.0`) so standing-rule stability stays decoupled from tooling and benchmark releases. Update the `standard/core.md` header only on a standing-rule release, and always update `CHANGELOG.md`.
+- `VERSION` tracks the repository, tooling, runtime gates and benchmark-suite release (currently `0.8.0`). `standard/core.md` keeps its own pinned standard version (currently `0.2.0`) so standing-rule stability stays decoupled from tooling and benchmark releases. Update the `standard/core.md` header only on a standing-rule release, and always update `CHANGELOG.md`.
 - Rule IDs (`R1`–`R7` in `standard/core.md` and `D-*` in `gates/model_deltas.json`) are stable. Retiring a rule leaves a numeric gap; never renumber or reuse an ID.
 - Case `version` changes whenever prompts, inputs, stages or scoring criteria materially change. Preserve earlier case definitions needed by historical results, using separate versioned filenames. Keep `W1`–`C2` unchanged for `v0.1.0` vs. `v0.2.0` comparisons.
 - Never edit frozen condition, output or check evidence for an already published run. Add a new run or a clearly documented correction with the original record retained in history.
@@ -25,7 +25,7 @@ Editing or clarifying a candidate rule does not require pretending it is already
 
 Check source support and expected behaviour, not just file existence. Reconcile the predeclared pilot manifest (`benchmarks/pilot*.json`) before describing an experiment as complete. Include failures, blocks and timeouts with non-empty blocker evidence. Preserve unknown metrics as `null`; do not fill them with zero. Distinguish honest blocking from completion.
 
-Reviewers should be blinded to model and condition where practical. Counterbalance first exposure when measuring handling time. Report raw counts, replicate counts (`n`), and actual defects; the current 26-case suite (20 constructed probes including `EV1` and `CM1`, plus 6 pinned OSS real-work cases) does not support a precise general population effect estimate. Once a held-out case influences tuning, move it to the development/regression set.
+Reviewers should be blinded to model and condition where practical. Counterbalance first exposure when measuring handling time. Report raw counts, replicate counts (`n`), and actual defects; the current 28-case suite (22 constructed probes including `EV1`, `EV2`, `CM1`, and `CM2`, plus 6 pinned OSS real-work cases) does not support a precise general population effect estimate. Once a held-out case influences tuning, move it to the development/regression set.
 
 Constructed diagnostic cases (`origin: constructed`) and pinned real-work cases (`origin: real_work`) are different populations and must be reported separately. Actual model runs on either are measured evidence; fabricated demonstration records must use `synthetic: true` and must not become performance claims. Never commit personal workstation paths, local dotdir contents, or credentials in run artifacts.
 

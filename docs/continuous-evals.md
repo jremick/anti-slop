@@ -41,7 +41,7 @@ Before asking a human reviewer to approve any candidate surfaced by `mine` or a 
 1. **Check the curated library first:** Inspect and dry-run verify a matching optional pack before inventing a custom regex (`anti-slop learn library show <pack>` and `anti-slop learn library enable <pack> --by <human> --dry-run`).
 2. **Escalate from narrowest to broadest layer:** Prefer `deterministic_check` (zero standing prompt tokens) first, `codebase_example` second, and a scoped `<= 45`-word `prompt_rule` last (requiring explicit `--why-not-deterministic` and `--retirement-trigger`).
 3. **Pass 3-way automated verification (`anti-slop learn verify <id>`):** Every deterministic candidate must (a) catch its captured `bad_example`, (b) leave its `valid_neighbouring_case` untouched, and (c) pass an existing-repository false-positive scan (`repo_scan_hits <= max_repo_hits`). Any candidate that fails is fixed or discarded automatically before reaching a human.
-4. **Prove prompt-layer rules empirically:** Any candidate that cannot be enforced deterministically must prove net quality gain via paired multi-turn `EV1` comparison (`benchmarks/evolution.py compare` returning `KEEP`) rather than intuition.
+4. **Prove prompt-layer rules empirically:** Any candidate that cannot be enforced deterministically must prove net quality gain via paired multi-turn `EV1`/`EV2` comparison (`benchmarks/evolution.py compare` returning `KEEP`) rather than intuition.
 5. **Require explicit human approval:** Enforcement activates only after a human runs `anti-slop learn approve <id> --by <name>`. Approval binds a SHA-256 hash of the verified proposal; editing a rule after approval fails closed until re-verified and re-approved.
 
 ## 2. Onboarding New Frontier Models
@@ -59,7 +59,7 @@ python3 -B scripts/eval_cycle.py plan \
   --replicates 3
 ```
 
-Use `--suites evolution`, `--suites comments`, or `--suites integrity` to stage suites incrementally, or `--json` for automated orchestration.
+Use `--suites evolution`, `--suites ts-evolution`, `--suites comments`, `--suites comments-multifile`, or `--suites integrity` to stage suites incrementally, or `--json` for automated orchestration.
 
 2. **Register the model adapter cleanly:** Add the model entry to `DEFAULT_MODELS` and `FROZEN_MODEL_VERSIONS` in `scripts/run_benchmark.py`. Keep `gates/model_deltas.json` untouched on the first pass so `baseline` and `core-rules-v0.2.0` are measured without speculative model deltas.
 3. **Dry-run and verify isolation:** Run each planned `--dry-run` command first to verify condition hashes, stage counts, and model routing with zero API spend. Confirm every run executes in a fresh temp directory outside the repository with isolated `CODEX_HOME`/`HOME`, `ANTI_SLOP_BENCHMARK_SUBJECT=1`, and pre-hash path sanitization.
@@ -67,7 +67,7 @@ Use `--suites evolution`, `--suites comments`, or `--suites integrity` to stage 
 5. **Grade, validate, and compute keep/drop decisions:**
    - Validate hashes and schema with `scripts/benchmark.py validate`.
    - Summarize paired tracks with `scripts/benchmark.py summarize` and confirm `missing_pilot_coverage.complete = true` against a matching pilot manifest under `benchmarks/`.
-   - For `EV1`, run `benchmarks/evolution.py compare` on Stage-4 grader metrics to classify each arm (`KEEP`, `DROP`, or `INCONCLUSIVE`).
+   - For `EV1` and `EV2`, run `benchmarks/evolution.py compare` on Stage-4 grader metrics to classify each arm (`KEEP`, `DROP`, or `INCONCLUSIVE`).
 6. **Promote clean results and refresh the longitudinal scorecard:** Move sanitized datasets from `runs-local/` into `results/<experiment-id>/`, update the scorecard, and run all repository integrity checks:
 
 ```bash
@@ -90,23 +90,22 @@ python3 -B gates/learn.py retire L-001 --reason "Enforced by static type check i
 ```
 
 2. **Benchmark-level ceilings and regressions (`scripts/eval_cycle.py scorecard`):** The scorecard's **Rule-Retirement Watch** highlights two conditions automatically:
-   - **Baseline 100% ceiling across all tested models:** For example, in `results/pilot-comments-v0.7.0/` (`CM1`), the `no-comments` baseline already passes `12/12` (`100.0%`) across all four focus models on accuracy (while `comment-traps` still adds a `+26.8%` wall-time tax). Accuracy-only rules targeting that explicit single-file prompt have no headroom left; retire them or upgrade the benchmark to a harder multi-file case (`CM2`).
-   - **Treatment regression or `DROP` verdicts:** In `results/pilot-evolution-v0.7.0/` (`EV1`), standing prose (`core-rules-v0.2.0`) dropped overall pass rate from `6/12` (`50.0%`) to `5/12` (`41.7%`) and triggered `DROP` on `claude-opus-5-5` and `gpt-6.2-sol`, whereas deterministic + structural gating (`gated-structural`) reached `11/12` (`91.7%`) with `0` slop defects. That result directly justifies moving enforcement from standing prose into deterministic gates rather than expanding `standard/core.md`.
+   - **Baseline 100% ceiling across all tested models:** In both `results/pilot-comments-v0.7.0/` (`CM1`, 1 file / 90L) and `results/pilot-comments-v0.8.0/` (`CM2`, 6 modules / 345L with invariants omitted from the prompt), the `no-comments` baseline already passes `12/12` (`100.0%`) across all four focus models on accuracy (while `invariant-comments` runs `-4.5%` / `-6.8%` faster and `comment-traps` adds `+31.5%` / `+16.4%` Opus USD tax). Accuracy-only rules targeting small single-context-window packages have no accuracy headroom left; retire them or scale future comment evals to 1,000+ line cross-repo context-rot tasks with external side effects.
+   - **Treatment regression or `DROP` / `INCONCLUSIVE` verdicts:** In `results/pilot-evolution-v0.7.0/` (`EV1`), standing prose (`core-rules-v0.2.0`) dropped overall pass rate from `6/12` (`50.0%`) to `5/12` (`41.7%`) and triggered `DROP` on `claude-opus-5-5` and `gpt-6.2-sol`, whereas deterministic + structural gating (`gated-structural`) reached `11/12` (`91.7%`) with `0` slop defects. In `results/pilot-ts-evolution-v0.8.0/` (`EV2`), standing prose scored `INCONCLUSIVE` (`8/12`, `+13.0%` tokens / `+11.6%` Opus USD), whereas `gated-structural` reached **`12/12` (`100.0%`, `KEEP`)** with `0` slop at `-10.4%` fewer tokens than prompts alone. Both results reinforce moving enforcement from standing prose into deterministic gates rather than expanding `standard/core.md`.
 
 ### Stable ID Invariant
 
 Retiring any rule (`R*`, `D-*`, or `L-*`) stops its enforcement while keeping its regression examples in the repository and leaving its ID permanently unused. Never renumber or reuse retired IDs; if a future model regresses on a previously retired failure mode, the preserved bad/valid pair catches it cleanly.
 
-## 4. Roadmap Beyond Pre-v1 (`0.7.0` -> `1.0.0`)
+## 4. Roadmap Beyond Pre-v1 (`0.8.0` -> `1.0.0`)
 
-Release `0.7.0` is a pre-v1 milestone: deterministic diff and structural gates, diff-scoped Python AST mutation testing (`gates/mutate.py`), the human-gated learning loop (`gates/learn.py`), and `216` clean `CODEX_HOME`-isolated public runs (`results/`) are working today, while broader verification and multi-language coverage remain active milestones toward `1.0.0`.
+Release `0.8.0` is an active pre-v1 milestone shipping Tier-1 live E2E verification receipts (`gates/verify.py`, [docs/verify-recipes.md](verify-recipes.md)), architectural compounding-slop detectors (`gates/architecture.py`, `ARCH-*`, `0` FPs across 150 OSS commits), Python + JS/TS diff-scoped mutation testing (`gates/mutate.py`), the human-gated learning loop (`gates/learn.py`), and `288` clean `CODEX_HOME`-isolated public runs across five datasets (`results/`).
 
-Planned post-`0.7.0` priorities, ordered by impact:
+Planned post-`0.8.0` priorities toward `1.0.0`, ordered by impact:
 
-1. **Live E2E and real-artifact verification automation:** Automate Tier-1 verification workflows that start the real app, HTTP API, CLI, or browser against real inputs and capture observable exit codes, responses, state changes, or screenshots rather than relying on heavily mocked unit tests alone (see the 3-tier verification hierarchy in [docs/operating-guide.md](operating-guide.md#3-tier-verification-hierarchy)).
-2. **Architectural slop detection:** Extend `gates/structural.py` beyond file-level checks to catch cross-module coupling spikes, single-implementation factory/interface/DI wrapper bloat, and leaky boundary abstractions across diffs.
-3. **Broader language and multi-file evaluations:**
-   - **`EV2` (TypeScript/JavaScript multi-turn evolution):** Replicate multi-turn compounding decay measurements outside Python.
-   - **`CM2` (harder multi-file comment ablation):** Hide domain invariants across interacting files without naming them in the prompt so brief `# INVARIANT:` notes vs. stale comment traps are tested without accuracy ceiling compression.
-   - **JS/TS AST mutation testing:** Extend diff-scoped mutation testing beyond Python (`gates/mutate.py`) to TypeScript and JavaScript diffs.
-4. **Scheduled cross-model re-evaluations and automated retirement reviews:** Run `scripts/eval_cycle.py plan` and `scorecard` on a recurring cadence as new frontier models release, retiring rules that models outgrow and updating `gates/model_deltas.json` strictly from measured clean datasets.
+1. **Playwright and browser visual verification adapter:** Extend `gates/verify.py` (`anti-slop verify`) to drive headless browser UI flows, assert DOM/console health, and attach visual verification artifacts to tamper-evident receipts.
+2. **Deeper architectural coupling and data-model drift checks:** Extend `gates/architecture.py` to detect cross-module fan-in/fan-out spikes, schema/DTO drift across service boundaries, and leaky abstraction layers.
+3. **Broader language and large-scale evaluations:**
+   - **Go and Rust multi-turn evolution (`EV3+`):** Replicate multi-turn compounding decay measurements beyond Python and TypeScript.
+   - **1,000+ line cross-repo context-rot comment evals:** Test external side effects and undocumented invariants that cannot be inferred from a single context window of local source alone.
+4. **PyPI publication and scheduled cross-model re-evaluations:** Publish `anti-slop` to PyPI and run `scripts/eval_cycle.py plan` and `scorecard` on a recurring cadence as new frontier models release, retiring rules that models outgrow and updating `gates/model_deltas.json` strictly from measured clean datasets.

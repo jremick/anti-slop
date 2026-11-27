@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anti-slop"
-version = "0.7.0"
+version = "0.8.0"
 description = "Catch and prevent AI coding shortcuts and compounding software slop with automated checks, plain-English reviews, a verified learning loop, and real code-quality tests."
 readme = "README.md"
 license = { text = "MIT" }
