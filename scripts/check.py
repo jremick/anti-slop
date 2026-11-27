@@ -17,6 +17,11 @@ KNOWN_COMPARISON_PAIRS: tuple[tuple[str, str], ...] = (
     ("core-rules", "model-controls"),
     ("core-rules-v0.2.0", "model-controls"),
     ("baseline", "model-controls"),
+    ("baseline", "gated-structural"),
+    ("core-rules-v0.2.0", "gated-structural"),
+    ("no-comments", "invariant-comments"),
+    ("no-comments", "comment-traps"),
+    ("invariant-comments", "comment-traps"),
 )
 
 

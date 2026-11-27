@@ -127,6 +127,13 @@ WORKSPACE_GRADER_CASES: dict[str, str] = {
     "RW3": "benchmarks/graders/grade_rw3.py",
     "SE1": "benchmarks/graders/grade_se1.py",
     "EV1": "benchmarks/graders/grade_ev1.py",
+    "CM1": "benchmarks/graders/grade_cm1.py",
+}
+
+CM1_CONDITION_VARIANTS: dict[str, str] = {
+    "no-comments": "no_comments",
+    "invariant-comments": "invariant_comments",
+    "comment-traps": "comment_traps",
 }
 
 READONLY_CASES: frozenset[str] = frozenset({"S1", "S2", "D1", "W3", "RW4", "RW5", "RW6", "SE2"})
@@ -536,6 +543,24 @@ def _write_frozen_snapshot(out_path: Path, text: str) -> Path:
     return out_path
 
 
+def render_cm1_ablation_snapshot(repo_root: Path, condition: str) -> str:
+    """Build an auditable frozen condition snapshot for a CM1 comment-ablation arm.
+
+    All three arms deliver the identical neutral BASELINE_INSTRUCTION to the model so
+    the only manipulated variable is the comment profile inside webhooks.py.
+    """
+    variant = CM1_CONDITION_VARIANTS[condition]
+    webhooks_rel = f"benchmarks/sources/cm1_comment_ablation/{variant}/webhooks.py"
+    webhooks_sha = benchmark.sha256(repo_root / webhooks_rel)
+    return (
+        f"CM1 comment-hygiene ablation arm: {condition}\n"
+        f"Workspace variant: {variant}\n"
+        f"Pinned webhooks.py SHA-256: {webhooks_sha}\n"
+        f"Delivered system instruction (identical across all 3 CM1 arms):\n\n"
+        f"{BASELINE_INSTRUCTION}"
+    )
+
+
 def freeze_conditions(
     repo_root: Path,
     conditions_dir: Path,
@@ -569,10 +594,13 @@ def freeze_conditions(
             text = BASELINE_INSTRUCTION + "\n" + core_v02.rstrip() + "\n"
         elif cond == "gated-structural":
             text = GATED_STRUCTURAL_INSTRUCTION
+        elif cond in CM1_CONDITION_VARIANTS:
+            text = render_cm1_ablation_snapshot(repo_root, cond)
         else:
             raise ValueError(
                 f"unsupported condition {cond!r}; supported: baseline, core-rules, "
-                "core-rules-v0.1.0, core-rules-v0.2.0, model-controls, gated-structural"
+                "core-rules-v0.1.0, core-rules-v0.2.0, model-controls, gated-structural, "
+                "no-comments, invariant-comments, comment-traps"
             )
         snapshots[cond] = _write_frozen_snapshot(conditions_dir / f"{cond}.txt", text)
     return snapshots
@@ -584,6 +612,8 @@ def prepare_clean_workspace(
     condition_text: str,
     write_agents_md: bool,
     run_id: str,
+    *,
+    condition: str | None = None,
 ) -> tuple[Path, dict[str, str]]:
     """Create an isolated temp workspace outside repo_root with only case inputs."""
     safe_prefix = re.sub(r"[^a-zA-Z0-9._-]+", "_", run_id)[:48]
@@ -592,14 +622,48 @@ def prepare_clean_workspace(
         raise RuntimeError(f"isolated workspace {workdir} must lie outside repo_root {repo_root}")
 
     initial_hashes: dict[str, str] = {}
-    for source in case["evidence_sources"]:
-        rel = source["locator"]
-        src_path = repo_root / rel
-        dst_path = workdir / rel
-        dst_path.parent.mkdir(parents=True, exist_ok=True)
-        raw = src_path.read_bytes()
-        dst_path.write_bytes(raw)
-        initial_hashes[rel] = _sha256_bytes(raw)
+    if case["case_id"] == "CM1":
+        variant = CM1_CONDITION_VARIANTS.get(condition or "", "comment_traps")
+        grader_script = repo_root / WORKSPACE_GRADER_CASES["CM1"]
+        if not grader_script.is_file():
+            grader_script = REPO_ROOT / WORKSPACE_GRADER_CASES["CM1"]
+        with tempfile.TemporaryDirectory(prefix="antislop_cm1_stage_") as stage_tmp:
+            proc = subprocess.run(
+                [
+                    sys.executable, "-B", str(grader_script),
+                    "--prepare-variant", variant,
+                    "--dest", stage_tmp,
+                ],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0:
+                shutil.rmtree(workdir, ignore_errors=True)
+                raise RuntimeError(
+                    f"grade_cm1.py --prepare-variant {variant} failed (rc={proc.returncode}): "
+                    f"{proc.stderr.strip() or proc.stdout.strip()}"
+                )
+            prepared_dir = Path(stage_tmp) / variant
+            for src_path in sorted(prepared_dir.rglob("*")):
+                if not src_path.is_file():
+                    continue
+                rel_path = src_path.relative_to(prepared_dir)
+                dst_path = workdir / rel_path
+                dst_path.parent.mkdir(parents=True, exist_ok=True)
+                raw = src_path.read_bytes()
+                dst_path.write_bytes(raw)
+                initial_hashes[str(rel_path).replace("\\", "/")] = _sha256_bytes(raw)
+    else:
+        for source in case["evidence_sources"]:
+            rel = source["locator"]
+            src_path = repo_root / rel
+            dst_path = workdir / rel
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            raw = src_path.read_bytes()
+            dst_path.write_bytes(raw)
+            initial_hashes[rel] = _sha256_bytes(raw)
 
     if write_agents_md:
         agents_path = workdir / "AGENTS.md"
@@ -1277,6 +1341,7 @@ def _write_workspace_diff(
     dest_path: Path,
     *,
     extra_paths: tuple[Path, ...] | list[Path] = (),
+    source_root: Path | None = None,
 ) -> Path:
     """Write a compact unified diff of modified/created/deleted workspace files."""
     chunks: list[str] = []
@@ -1284,13 +1349,21 @@ def _write_workspace_diff(
     for rel in changes["modified"]:
         if rel == "AGENTS.md":
             continue
-        orig_path = repo_root / rel
+        if source_root is not None:
+            orig_path = source_root / rel
+            orig_lines = (
+                orig_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                if orig_path.is_file()
+                else []
+            )
+        else:
+            orig_path = repo_root / rel
+            orig_lines = (
+                orig_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                if rel in source_set and orig_path.is_file()
+                else []
+            )
         cur_path = workdir / rel
-        orig_lines = (
-            orig_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
-            if rel in source_set and orig_path.is_file()
-            else []
-        )
         cur_lines = cur_path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
         diff_lines = list(
             difflib.unified_diff(orig_lines, cur_lines, fromfile=f"a/{rel}", tofile=f"b/{rel}")
@@ -1328,15 +1401,24 @@ def _run_workspace_grader(
     grader_out_path: Path,
     response_file: Path | None = None,
     child_max_rss_mb: int = DEFAULT_CHILD_MAX_RSS_MB,
+    *,
+    condition: str | None = None,
 ) -> dict[str, Any] | None:
-    """Invoke a multi-file workspace grader (M1, M2, B2) directly against workdir."""
+    """Invoke a multi-file workspace grader directly against workdir."""
     case_id = case["case_id"]
     grader_rel = WORKSPACE_GRADER_CASES.get(case_id)
     if grader_rel is None:
         return None
-    cmd = [sys.executable, "-B", str(repo_root / grader_rel), str(workdir), "--stage", str(stage)]
-    if case_id in ("B2", "RW3", "SE1") and stage == 2 and response_file is not None and response_file.is_file():
-        cmd.extend(["--response-file", str(response_file)])
+    grader_path = repo_root / grader_rel
+    if not grader_path.is_file():
+        grader_path = REPO_ROOT / grader_rel
+    if case_id == "CM1":
+        variant = CM1_CONDITION_VARIANTS.get(condition or "", "comment_traps")
+        cmd = [sys.executable, "-B", str(grader_path), str(workdir), "--variant", variant]
+    else:
+        cmd = [sys.executable, "-B", str(grader_path), str(workdir), "--stage", str(stage)]
+        if case_id in ("B2", "RW3", "SE1") and stage == 2 and response_file is not None and response_file.is_file():
+            cmd.extend(["--response-file", str(response_file)])
 
     try:
         proc = _run_stage_subprocess(
@@ -1550,6 +1632,15 @@ def _auto_populate_checks(
             if cid in cmap4:
                 status = "pass" if cmap4[cid]["passed"] else "fail"
                 evidence = [ev4]
+        elif case_id == "CM1" and 1 in stage_grader_reports:
+            rep1, ev1 = stage_grader_reports[1]
+            cmap1 = _by_id(rep1)
+            if cid in cmap1:
+                status = "pass" if cmap1[cid]["passed"] else "fail"
+                evidence = [ev1]
+            elif "load" in cmap1 and not cmap1["load"]["passed"]:
+                status = "fail"
+                evidence = [ev1]
         elif case_id == "RW5" and cid == "pushback_order_proof_and_readonly":
             if 2 in text_checks:
                 if not text_checks[2][0]["passed"] or ro_hits:
@@ -1583,10 +1674,26 @@ def execute_run(
     art_dir = exp_dir / "artifacts" / run_id
     art_dir.mkdir(parents=True, exist_ok=True)
 
-    condition_text = condition_file.read_text(encoding="utf-8")
+    if condition in CM1_CONDITION_VARIANTS:
+        # Deliver the identical neutral standing prompt across all 3 CM1 ablation arms
+        # so the only manipulated variable is the comment profile inside webhooks.py.
+        condition_text = BASELINE_INSTRUCTION
+    else:
+        condition_text = condition_file.read_text(encoding="utf-8")
     write_agents_md = model_cfg["cli"] in ("codex", "agy")
     workdir, initial_hashes = prepare_clean_workspace(
-        repo_root, case, condition_text, write_agents_md=write_agents_md, run_id=run_id
+        repo_root,
+        case,
+        condition_text,
+        write_agents_md=write_agents_md,
+        run_id=run_id,
+        condition=condition,
+    )
+    diff_source_root = (
+        repo_root / "benchmarks" / "sources" / "cm1_comment_ablation"
+        / CM1_CONDITION_VARIANTS.get(condition, "comment_traps")
+        if case_id == "CM1"
+        else None
     )
     isolated_home: Path | None = None
     isolated_codex_home: Path | None = None
@@ -1702,7 +1809,13 @@ def execute_run(
             elif case_id in WORKSPACE_GRADER_CASES:
                 diff_file = art_dir / f"stage-{stage_idx}-workspace.diff"
                 _write_workspace_diff(
-                    repo_root, case, workdir, changes, diff_file, extra_paths=scrub_paths
+                    repo_root,
+                    case,
+                    workdir,
+                    changes,
+                    diff_file,
+                    extra_paths=scrub_paths,
+                    source_root=diff_source_root,
                 )
                 gate_note = ""
                 if condition == "gated-structural":
@@ -1783,7 +1896,13 @@ def execute_run(
                                 failure_evidence.append(repair_trace_rel)
                                 break
                             _write_workspace_diff(
-                                repo_root, case, workdir, changes, diff_file, extra_paths=scrub_paths
+                                repo_root,
+                                case,
+                                workdir,
+                                changes,
+                                diff_file,
+                                extra_paths=scrub_paths,
+                                source_root=diff_source_root,
                             )
                             gate_note += f"- Automated gate repair turn completed (`{repair_trace_rel}`)\n"
                 diff_rel = str(diff_file.relative_to(repo_root)).replace("\\", "/")
@@ -1797,6 +1916,7 @@ def execute_run(
                 report = _run_workspace_grader(
                     repo_root, case, workdir, stage_idx, grader_out,
                     response_file=response_file, child_max_rss_mb=child_max_rss_mb,
+                    condition=condition,
                 )
                 if response_file is not None and response_file.is_file():
                     response_file.write_text(
@@ -2026,6 +2146,14 @@ def main(argv: list[str] | None = None) -> int:
         if cid not in by_case_id:
             print(f"ERROR: unknown case_id {cid!r}", file=sys.stderr)
             return 2
+
+    cm1_conds = [c for c in args.conditions if c in CM1_CONDITION_VARIANTS]
+    if cm1_conds and any(cid != "CM1" for cid in args.cases):
+        print(
+            f"ERROR: CM1 comment-ablation conditions ({', '.join(cm1_conds)}) can only be used with --cases CM1",
+            file=sys.stderr,
+        )
+        return 2
 
     exp_dir = (args.output_root if args.output_root.is_absolute() else root / args.output_root) / args.experiment_id
     exp_dir.mkdir(parents=True, exist_ok=True)

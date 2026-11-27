@@ -50,6 +50,7 @@ class PackagingMetadataTests(unittest.TestCase):
             "anti-slop-learn": "gates.learn:main",
             "anti-slop-hook": "gates.hooks.run_diff_gate_hook:main",
             "anti-slop-api": "gates.api_checks:main",
+            "anti-slop-mutate": "gates.mutate:main",
         }
         if tomllib is not None:
             data = tomllib.loads(raw_text)
@@ -66,9 +67,14 @@ class PackagingMetadataTests(unittest.TestCase):
 
             self.assertEqual(project["scripts"], expected_scripts)
 
-            packages = data.get("tool", {}).get("setuptools", {}).get("packages", [])
+            setuptools_cfg = data.get("tool", {}).get("setuptools", {})
+            packages = setuptools_cfg.get("packages", [])
             self.assertIn("gates", packages)
             self.assertIn("gates.hooks", packages)
+            self.assertIn("library", packages)
+
+            pkg_data = setuptools_cfg.get("package-data", {})
+            self.assertIn("catalog.json", pkg_data.get("library", []))
         else:
             # Python < 3.11 fallback (stdlib-only verification without skipping)
             self.assertRegex(raw_text, r'(?m)^name\s*=\s*"anti-slop"\s*$')
@@ -79,9 +85,13 @@ class PackagingMetadataTests(unittest.TestCase):
                 self.assertIn(f'{script_name} = "{target}"', raw_text)
             self.assertIn('"gates"', raw_text)
             self.assertIn('"gates.hooks"', raw_text)
+            self.assertIn('"library"', raw_text)
+            self.assertRegex(raw_text, r'(?m)^library\s*=\s*\[\s*"catalog\.json"\s*\]\s*$')
 
         self.assertTrue((REPO_ROOT / "gates/__init__.py").is_file())
         self.assertTrue((REPO_ROOT / "gates/hooks/__init__.py").is_file())
+        self.assertTrue((REPO_ROOT / "library/__init__.py").is_file())
+        self.assertTrue((REPO_ROOT / "library/catalog.json").is_file())
 
         # Verify every declared console script imports cleanly and resolves a callable.
         for script_name, target in expected_scripts.items():

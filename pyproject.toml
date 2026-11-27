@@ -48,6 +48,7 @@ anti-slop-review = "gates.review:main"
 anti-slop-learn = "gates.learn:main"
 anti-slop-hook = "gates.hooks.run_diff_gate_hook:main"
 anti-slop-api = "gates.api_checks:main"
+anti-slop-mutate = "gates.mutate:main"
 
 [tool.setuptools]
 packages = ["gates", "gates.hooks", "library"]

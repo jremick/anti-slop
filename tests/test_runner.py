@@ -706,6 +706,207 @@ class RunnerIntegrityTests(unittest.TestCase):
         self.assertIn("runs-local/exp_gated/artifacts/" + rec["run_id"] + "/stage-1-gate-review.txt", rec["artifact_hashes"])
         self.assertIn("runs-local/exp_gated/artifacts/" + rec["run_id"] + "/stage-1-gate-repair-trace.log", rec["artifact_hashes"])
 
+    def test_cm1_ablation_freeze_prepare_and_mechanical_grading(self) -> None:
+        from tests.test_cm1 import CLEAN_WEBHOOKS_BODY
+
+        conds = ["no-comments", "invariant-comments", "comment-traps"]
+
+        # 1. Shared condition freezing produces one immutable snapshot per arm across all models.
+        cond_dir = self.root / "cm1_conds"
+        snaps = run_benchmark.freeze_conditions(
+            REPO_ROOT,
+            cond_dir,
+            conds,
+            models=["claude-opus-5-5", "gpt-6.2-astra"],
+        )
+        self.assertEqual(set(snaps.keys()), set(conds))
+        sha_set = {benchmark.sha256(snaps[c]) for c in conds}
+        self.assertEqual(len(sha_set), 3)
+        for cond in conds:
+            self.assertFalse(benchmark.is_per_model_condition(cond))
+            self.assertEqual(
+                run_benchmark.resolve_condition_file(snaps, cond, "claude-opus-5-5"),
+                run_benchmark.resolve_condition_file(snaps, cond, "gpt-6.2-astra"),
+            )
+            snap_text = snaps[cond].read_text(encoding="utf-8")
+            self.assertIn(run_benchmark.BASELINE_INSTRUCTION.strip(), snap_text)
+            self.assertIn(run_benchmark.CM1_CONDITION_VARIANTS[cond], snap_text)
+
+        # Dry-run CLI succeeds for CM1 and rejects pairing CM1 arms with non-CM1 cases.
+        rc_cm1 = run_benchmark.main([
+            "--experiment-id", "dry-cm1",
+            "--cases", "CM1",
+            "--models", "claude-opus-5-5",
+            "--conditions", *conds,
+            "--output-root", str(self.root / "out_cm1"),
+            "--dry-run",
+        ])
+        self.assertEqual(rc_cm1, 0)
+        rc_bad = run_benchmark.main([
+            "--experiment-id", "dry-bad-cm1",
+            "--cases", "EV1",
+            "--models", "claude-opus-5-5",
+            "--conditions", *conds,
+            "--output-root", str(self.root / "out_cm1"),
+            "--dry-run",
+        ])
+        self.assertEqual(rc_bad, 2)
+
+        # 2. prepare_clean_workspace isolates ONLY the requested variant at workspace root (blinded paths).
+        cases = benchmark.load_cases(REPO_ROOT / "benchmarks" / "cases", REPO_ROOT)
+        cm1_case = cases[("CM1", "0.7.0")]
+        for cond, variant in run_benchmark.CM1_CONDITION_VARIANTS.items():
+            workdir, hashes = run_benchmark.prepare_clean_workspace(
+                REPO_ROOT,
+                cm1_case,
+                run_benchmark.BASELINE_INSTRUCTION,
+                write_agents_md=True,
+                run_id=f"cm1_prep_{cond}",
+                condition=cond,
+            )
+            self.addCleanup(lambda p=workdir: shutil.rmtree(p, ignore_errors=True))
+            self.assertEqual(
+                set(hashes.keys()),
+                {
+                    "__init__.py",
+                    "models.py",
+                    "webhooks.py",
+                    "run_checks.py",
+                    "tests/__init__.py",
+                    "tests/test_webhooks.py",
+                    "AGENTS.md",
+                },
+            )
+            # Zero sibling variant dirs or condition-name path leaks inside workdir.
+            self.assertFalse((workdir / "benchmarks").exists())
+            for vname in run_benchmark.CM1_CONDITION_VARIANTS.values():
+                self.assertFalse((workdir / vname).exists())
+            expected_sha = benchmark.sha256(
+                REPO_ROOT / "benchmarks" / "sources" / "cm1_comment_ablation" / variant / "webhooks.py"
+            )
+            self.assertEqual(hashes["webhooks.py"], expected_sha)
+            self.assertEqual((workdir / "AGENTS.md").read_text(encoding="utf-8"), run_benchmark.BASELINE_INSTRUCTION)
+
+        # 3. _auto_populate_checks marks all 4 CM1 checks fail on grader load/syntax error.
+        load_fail_checks, load_defects = run_benchmark._auto_populate_checks(
+            cm1_case,
+            {1: ({"case_id": "CM1", "passed": False, "checks": [{"id": "load", "passed": False, "detail": "SyntaxError"}]}, "g1.json")},
+            {},
+        )
+        self.assertEqual(load_defects, [])
+        self.assertEqual(len(load_fail_checks), 4)
+        self.assertTrue(all(c["status"] == "fail" and c["evidence"] == ["g1.json"] for c in load_fail_checks))
+
+        # 4. End-to-end execute_run runs REAL grade_cm1.py, delivers identical neutral prompt, and validates cleanly.
+        fake_repo = self.root / "fake_cm1_repo"
+        shutil.copytree(
+            REPO_ROOT / "benchmarks" / "sources" / "cm1_comment_ablation",
+            fake_repo / "benchmarks" / "sources" / "cm1_comment_ablation",
+        )
+        exp_dir = fake_repo / "runs-local" / "exp_cm1"
+        exp_snaps = run_benchmark.freeze_conditions(fake_repo, exp_dir / "conditions", conds)
+        delivered_instructions: list[str] = []
+        delivered_prompts: list[str] = []
+
+        def fake_invoke_clean(**kwargs):
+            delivered_instructions.append(kwargs["condition_text"])
+            delivered_prompts.append(kwargs["prompt"])
+            kwargs["trace_log_path"].write_text("trace\n", encoding="utf-8")
+            (kwargs["workdir"] / "webhooks.py").write_text(CLEAN_WEBHOOKS_BODY, encoding="utf-8")
+            return {
+                "status": "completed",
+                "text": "Updated webhooks.py and confirmed python3 run_checks.py exits 0.",
+                "session_id": "sid-cm1-clean",
+                "total_tokens": 120,
+                "cost_usd": 0.01,
+                "observed_model": "claude-opus-5-5",
+                "downgraded_models": [],
+                "elapsed_s": 0.1,
+            }
+
+        def fake_invoke_trap(**kwargs):
+            delivered_instructions.append(kwargs["condition_text"])
+            delivered_prompts.append(kwargs["prompt"])
+            kwargs["trace_log_path"].write_text("trace\n", encoding="utf-8")
+            trapped = CLEAN_WEBHOOKS_BODY.replace(
+                "return (amount_cents * fee_bps + 5000) // 10000",
+                "return int(amount_cents * (fee_bps / 10000.0))",
+            ) + "\n# def leftover(x):\n#     y = x + 1\n#     return y\n"
+            (kwargs["workdir"] / "webhooks.py").write_text(trapped, encoding="utf-8")
+            return {
+                "status": "completed",
+                "text": "Updated webhooks.py.",
+                "session_id": "sid-cm1-trap",
+                "total_tokens": 130,
+                "cost_usd": 0.01,
+                "observed_model": "claude-opus-5-5",
+                "downgraded_models": [],
+                "elapsed_s": 0.1,
+            }
+
+        with mock.patch("scripts.run_benchmark._invoke_stage", side_effect=fake_invoke_clean):
+            rec_clean = run_benchmark.execute_run(
+                repo_root=fake_repo,
+                exp_dir=exp_dir,
+                experiment_id="exp_cm1",
+                case=cm1_case,
+                model_cfg=run_benchmark.DEFAULT_MODELS["claude-opus-5-5"],
+                cli_version="claude 1.0",
+                condition="no-comments",
+                condition_file=exp_snaps["no-comments"],
+                replicate=1,
+                source_snapshot_id="git-deadbeef1234",
+                timeout_seconds=30,
+            )
+
+        with mock.patch("scripts.run_benchmark._invoke_stage", side_effect=fake_invoke_trap):
+            rec_trap = run_benchmark.execute_run(
+                repo_root=fake_repo,
+                exp_dir=exp_dir,
+                experiment_id="exp_cm1",
+                case=cm1_case,
+                model_cfg=run_benchmark.DEFAULT_MODELS["claude-opus-5-5"],
+                cli_version="claude 1.0",
+                condition="comment-traps",
+                condition_file=exp_snaps["comment-traps"],
+                replicate=1,
+                source_snapshot_id="git-deadbeef1234",
+                timeout_seconds=30,
+            )
+
+        # Identical neutral instruction & neutral prompt delivered across both arms!
+        self.assertEqual(delivered_instructions, [run_benchmark.BASELINE_INSTRUCTION, run_benchmark.BASELINE_INSTRUCTION])
+        self.assertEqual(delivered_prompts[0], delivered_prompts[1])
+        self.assertNotIn("comment_traps", delivered_prompts[0])
+
+        clean_map = {c["id"]: c["status"] for c in rec_clean["checks"]}
+        self.assertEqual(
+            clean_map,
+            {
+                "feature_and_idempotency_verified": "pass",
+                "out_of_order_invariant_preserved": "pass",
+                "integer_cent_precision_preserved": "pass",
+                "commented_code_cleaned_and_readonly_intact": "pass",
+            },
+        )
+        trap_map = {c["id"]: c["status"] for c in rec_trap["checks"]}
+        self.assertEqual(trap_map["feature_and_idempotency_verified"], "pass")
+        self.assertEqual(trap_map["out_of_order_invariant_preserved"], "pass")
+        self.assertEqual(trap_map["integer_cent_precision_preserved"], "fail")
+        self.assertEqual(trap_map["commented_code_cleaned_and_readonly_intact"], "fail")
+
+        # Unified workspace diff was computed against the original variant file (not /dev/null).
+        clean_diff_rel = f"runs-local/exp_cm1/artifacts/{rec_clean['run_id']}/stage-1-workspace.diff"
+        self.assertIn(clean_diff_rel, rec_clean["artifact_hashes"])
+        self.assertIn("--- a/webhooks.py", (fake_repo / clean_diff_rel).read_text(encoding="utf-8"))
+
+        # Both records pass benchmark.validate_run and benchmark.comparable_pairs cleanly!
+        cases_map = {("CM1", "0.7.0"): cm1_case}
+        benchmark.validate_run(rec_clean, cases_map, fake_repo, "cm1-clean")
+        benchmark.validate_run(rec_trap, cases_map, fake_repo, "cm1-trap")
+        pairs = benchmark.comparable_pairs([rec_clean, rec_trap], "no-comments", "comment-traps")
+        self.assertEqual(len(pairs), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
