@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" width="960" height="476" role="img" aria-labelledby="title desc">
+  <title id="title">TypeScript Multi-Turn Quality: EV2 (4-Turn Evolution)</title>
+  <desc id="desc">pilot-ts-evolution-v0.8.0 · 36 runs · 144 stages · 4 models × 3 conditions × n = 3 · 0 word caps. Overall acceptance moves from 58.3% (7/12, 10 slop) baseline to 66.7% (8/12, 5 slop) core-rules to 100.0% (12/12, 0 slop) gated-structural; mean TS mutation kill rate rises to 79.2%.</desc>
+  <style>
+    .sans { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace; }
+  </style>
+
+  <!-- Outer frame -->
+  <rect x="0.5" y="0.5" width="959" height="475" rx="10" fill="#ffffff" stroke="#d0d7de"/>
+
+  <!-- Header -->
+  <text x="28" y="38" class="sans" font-size="16.5" font-weight="700" fill="#0f172a">TypeScript Multi-Turn Quality: EV2 (4-Turn Evolution)</text>
+  <text x="28" y="58" class="sans" font-size="11.5" fill="#475569">pilot-ts-evolution-v0.8.0 · 36 runs · 144 stages · 4 models × 3 conditions × n = 3 · 0 word caps</text>
+
+  <!-- Condition legend (top right) -->
+  <g transform="translate(588, 26)">
+    <rect x="0" y="3" width="10" height="10" rx="2" fill="#94a3b8"/>
+    <text x="16" y="12" class="sans" font-size="11" fill="#334155">baseline</text>
+    <rect x="80" y="3" width="10" height="10" rx="2" fill="#2563eb"/>
+    <text x="96" y="12" class="sans" font-size="11" fill="#334155">core-rules (v0.2.0)</text>
+    <rect x="224" y="3" width="10" height="10" rx="2" fill="#0f766e"/>
+    <text x="240" y="12" class="sans" font-size="11" fill="#334155">gated-structural</text>
+  </g>
+  <line x1="28" y1="72" x2="932" y2="72" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- Left Panel: Overall Pass Rate & Slop Findings -->
+  <rect x="24" y="84" width="400" height="290" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="40" y="106" class="sans" font-size="13" font-weight="700" fill="#0f172a">Overall Pass Rate &amp; Slop Findings</text>
+  <text x="40" y="122" class="sans" font-size="10.5" fill="#475569">All 4 models (12 runs/arm) · 6 mechanical EV2 checks</text>
+  <line x1="74" y1="268.0" x2="406" y2="268.0" stroke="#475569" stroke-opacity="0.45" stroke-width="1"/>
+  <text x="66" y="271.5" text-anchor="end" class="mono" font-size="10" fill="#475569">0%</text>
+  <line x1="74" y1="218.0" x2="406" y2="218.0" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="66" y="221.5" text-anchor="end" class="mono" font-size="10" fill="#475569">50%</text>
+  <line x1="74" y1="168.0" x2="406" y2="168.0" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="66" y="171.5" text-anchor="end" class="mono" font-size="10" fill="#475569">100%</text>
+  <rect x="98.0" y="209.7" width="64.0" height="58.3" rx="4" fill="#94a3b8"/>
+  <rect x="98.0" y="178.2" width="64" height="27.5" rx="3" fill="#ffffff"/>
+  <text x="130.0" y="190.2" text-anchor="middle" class="mono" font-size="13" font-weight="700" fill="#334155">58.3%</text>
+  <text x="130.0" y="203.2" text-anchor="middle" class="mono" font-size="10" fill="#475569">(7/12)</text>
+  <text x="130.0" y="285" text-anchor="middle" class="sans" font-size="11" font-weight="600" fill="#0f172a">baseline</text>
+  <text x="130.0" y="300" text-anchor="middle" class="mono" font-size="10" font-weight="700" fill="#b91c1c">10 slop</text>
+  <text x="130.0" y="314" text-anchor="middle" class="mono" font-size="9.5" font-weight="400" fill="#475569">74.2% mut</text>
+  <rect x="208.0" y="201.3" width="64.0" height="66.7" rx="4" fill="#2563eb"/>
+  <rect x="208.0" y="169.8" width="64" height="27.5" rx="3" fill="#ffffff"/>
+  <text x="240.0" y="181.8" text-anchor="middle" class="mono" font-size="13" font-weight="700" fill="#2563eb">66.7%</text>
+  <text x="240.0" y="194.8" text-anchor="middle" class="mono" font-size="10" fill="#475569">(8/12)</text>
+  <text x="240.0" y="285" text-anchor="middle" class="sans" font-size="11" font-weight="600" fill="#0f172a">core-rules</text>
+  <text x="240.0" y="300" text-anchor="middle" class="mono" font-size="10" font-weight="700" fill="#b91c1c">5 slop</text>
+  <text x="240.0" y="314" text-anchor="middle" class="mono" font-size="9.5" font-weight="400" fill="#475569">75.0% mut</text>
+  <rect x="318.0" y="168.0" width="64.0" height="100.0" rx="4" fill="#0f766e"/>
+  <rect x="318.0" y="136.5" width="64" height="27.5" rx="3" fill="#ffffff"/>
+  <text x="350.0" y="148.5" text-anchor="middle" class="mono" font-size="13" font-weight="700" fill="#0f766e">100.0%</text>
+  <text x="350.0" y="161.5" text-anchor="middle" class="mono" font-size="10" fill="#475569">(12/12)</text>
+  <text x="350.0" y="285" text-anchor="middle" class="sans" font-size="11" font-weight="600" fill="#0f172a">gated-structural</text>
+  <text x="350.0" y="300" text-anchor="middle" class="mono" font-size="10" font-weight="700" fill="#0f766e">0 slop</text>
+  <text x="350.0" y="314" text-anchor="middle" class="mono" font-size="9.5" font-weight="600" fill="#0f766e">79.2% mut</text>
+  <line x1="40" y1="327" x2="408" y2="327" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="40" y="343" class="sans" font-size="9.5" fill="#475569">All 15 baseline/core defects were duplicate blocks (8)</text>
+  <text x="40" y="358" class="sans" font-size="9.5" fill="#475569">or god functions (7); 0 suppression noise.</text>
+
+  <!-- Right Panel: Acceptance & TS Mutation Kill Rate by Model -->
+  <rect x="438" y="84" width="498" height="290" rx="8" fill="#ffffff" stroke="#e2e8f0"/>
+  <text x="454" y="106" class="sans" font-size="13" font-weight="700" fill="#0f172a">Acceptance &amp; TS Mutation Kill Rate by Model</text>
+  <text x="454" y="122" class="sans" font-size="10.5" fill="#475569">n = 3 per arm · Total: 7/12 → 8/12 → 12/12 (+5/-0 vs. baseline)</text>
+  <text x="920" y="138" text-anchor="end" class="mono" font-size="9.5" fill="#475569">mut kill</text>
+  <line x1="604.0" y1="142" x2="604.0" y2="330" stroke="#475569" stroke-opacity="0.45" stroke-width="1"/>
+  <text x="604.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">0</text>
+  <line x1="664.0" y1="142" x2="664.0" y2="330" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="664.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">1</text>
+  <line x1="724.0" y1="142" x2="724.0" y2="330" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="724.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">2</text>
+  <line x1="784.0" y1="142" x2="784.0" y2="330" stroke="#e2e8f0" stroke-opacity="1" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="784.0" y="346" text-anchor="middle" class="mono" font-size="10" fill="#475569">3/3</text>
+  <text x="454" y="163.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">Claude Opus 5.5</text>
+  <text x="454" y="176.5" class="sans" font-size="9.5" font-weight="400" fill="#475569">slop 3 → 0 · 0 repairs</text>
+  <rect x="604.0" y="146.0" width="60.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="671.0" y="154.5" class="mono" font-size="10" font-weight="500" fill="#475569">1/3</text>
+  <text x="920" y="154.5" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">85.0%</text>
+  <rect x="604.0" y="158.5" width="120.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="731.0" y="167.0" class="mono" font-size="10" font-weight="500" fill="#475569">2/3</text>
+  <text x="920" y="167.0" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">83.3%</text>
+  <rect x="604.0" y="171.0" width="180.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="791.0" y="179.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">3/3</text>
+  <text x="920" y="179.5" text-anchor="end" class="mono" font-size="10" font-weight="700" fill="#0f766e">85.0%</text>
+  <line x1="454" y1="188.0" x2="920" y2="188.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
+  <text x="454" y="211.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">GPT-6.2 Astra</text>
+  <text x="454" y="224.5" class="sans" font-size="9.5" font-weight="400" fill="#475569">0 slop · mut -5.0pp</text>
+  <rect x="604.0" y="194.0" width="180.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="791.0" y="202.5" class="mono" font-size="10" font-weight="500" fill="#475569">3/3</text>
+  <text x="920" y="202.5" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">80.0%</text>
+  <rect x="604.0" y="206.5" width="180.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="791.0" y="215.0" class="mono" font-size="10" font-weight="500" fill="#475569">3/3</text>
+  <text x="920" y="215.0" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">75.0%</text>
+  <rect x="604.0" y="219.0" width="180.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="791.0" y="227.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">3/3</text>
+  <text x="920" y="227.5" text-anchor="end" class="mono" font-size="10" font-weight="700" fill="#0f766e">75.0%</text>
+  <line x1="454" y1="236.0" x2="920" y2="236.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
+  <text x="454" y="259.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">GPT-6.2 Sol</text>
+  <text x="454" y="272.5" class="sans" font-size="9.5" font-weight="400" fill="#475569">0 slop · mut +3.3pp</text>
+  <rect x="604.0" y="242.0" width="180.0" height="10.0" rx="2.5" fill="#94a3b8"/>
+  <text x="791.0" y="250.5" class="mono" font-size="10" font-weight="500" fill="#475569">3/3</text>
+  <text x="920" y="250.5" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">73.3%</text>
+  <rect x="604.0" y="254.5" width="180.0" height="10.0" rx="2.5" fill="#2563eb"/>
+  <text x="791.0" y="263.0" class="mono" font-size="10" font-weight="500" fill="#475569">3/3</text>
+  <text x="920" y="263.0" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">78.3%</text>
+  <rect x="604.0" y="267.0" width="180.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="791.0" y="275.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">3/3</text>
+  <text x="920" y="275.5" text-anchor="end" class="mono" font-size="10" font-weight="700" fill="#0f766e">76.7%</text>
+  <line x1="454" y1="284.0" x2="920" y2="284.0" stroke="#e2e8f0" stroke-opacity="0.65" stroke-width="1"/>
+  <text x="454" y="307.0" class="sans" font-size="11.5" font-weight="600" fill="#0f172a">Gemini 4 Neon</text>
+  <text x="454" y="320.5" class="sans" font-size="9.5" font-weight="600" fill="#0f766e">+21.7pp mut · 0 slop</text>
+  <rect x="604.0" y="290.0" width="3.5" height="10.0" rx="1.5" fill="#94a3b8"/>
+  <text x="614.0" y="298.5" class="mono" font-size="10" font-weight="500" fill="#475569">0/3</text>
+  <text x="920" y="298.5" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">58.3%</text>
+  <rect x="604.0" y="302.5" width="3.5" height="10.0" rx="1.5" fill="#2563eb"/>
+  <text x="614.0" y="311.0" class="mono" font-size="10" font-weight="500" fill="#475569">0/3</text>
+  <text x="920" y="311.0" text-anchor="end" class="mono" font-size="10" font-weight="500" fill="#475569">63.3%</text>
+  <rect x="604.0" y="315.0" width="180.0" height="10.0" rx="2.5" fill="#0f766e"/>
+  <text x="791.0" y="323.5" class="mono" font-size="10" font-weight="700" fill="#0f172a">3/3</text>
+  <text x="920" y="323.5" text-anchor="end" class="mono" font-size="10" font-weight="700" fill="#0f766e">80.0%</text>
+  <text x="454" y="363" class="sans" font-size="9.5" fill="#475569">Right column: mean JS/TS mutation kill rate per arm (min 65% to pass, 20 mutants/run).</text>
+
+  <!-- Positive Callout: TypeScript EV2 Verdict -->
+  <defs>
+    <clipPath id="clip-ts-pos-light"><rect x="24" y="388" width="448" height="68" rx="6"/></clipPath>
+    <clipPath id="clip-ts-split-light"><rect x="488" y="388" width="448" height="68" rx="6"/></clipPath>
+  </defs>
+  <rect x="24" y="388" width="448" height="68" rx="6" fill="#f0fdfa" stroke="#99f6e4"/>
+  <rect x="24" y="388" width="4.5" height="68" fill="#0f766e" clip-path="url(#clip-ts-pos-light)"/>
+  <text x="42" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="#0f766e">TYPESCRIPT EV2 VERDICT: KEEP</text>
+  <text x="42" y="426" class="sans" font-size="11" font-weight="700" fill="#0f172a">Gated: 58.3% → 100% pass · 0 slop (6 dup + 4 god fn → 0)</text>
+  <text x="42" y="443" class="sans" font-size="10" fill="#475569">Cheaper &amp; faster than prompts: -10.4% tokens · -8.5% Opus USD · -6.8% wall</text>
+
+  <!-- Model Split & Repair Profile Callout -->
+  <rect x="488" y="388" width="448" height="68" rx="6" fill="#fffbeb" stroke="#fde68a"/>
+  <rect x="488" y="388" width="4.5" height="68" fill="#d97706" clip-path="url(#clip-ts-split-light)"/>
+  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="#b45309">MODEL SPLIT &amp; REPAIR PROFILE</text>
+  <text x="506" y="426" class="sans" font-size="11" font-weight="700" fill="#0f172a">Astra &amp; Sol hit 3/3 in baseline; Neon drove 4/4 repair turns (+21.7pp mut)</text>
+  <text x="506" y="443" class="sans" font-size="10" fill="#475569">Total overhead vs baseline: +1.2% tokens · +2.2% Opus USD · +2.1% wall</text>
+</svg>

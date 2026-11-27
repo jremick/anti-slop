@@ -3,19 +3,21 @@
 
 Zero external dependencies (stdlib Python 3.11+ only). Reads
 `results/pilot-3way-v0.6.0/runs.jsonl`, `results/pilot-evolution-v0.7.0/runs.jsonl`,
-and their referenced grader JSONs / stage artifacts directly — never hardcodes
-benchmark counts, rates, or deltas.
+`results/pilot-ts-evolution-v0.8.0/runs.jsonl`, and their referenced grader JSONs /
+stage artifacts directly — never hardcodes benchmark counts, rates, or deltas.
 
 Outputs written under `docs/assets/`:
   - pilot-v0.6.0-results-light.svg
   - pilot-v0.6.0-results-dark.svg
   - pilot-v0.7.0-evolution-light.svg
   - pilot-v0.7.0-evolution-dark.svg
+  - pilot-v0.8.0-ts-evolution-light.svg
+  - pilot-v0.8.0-ts-evolution-dark.svg
   - hook-loop-light.svg
   - hook-loop-dark.svg
 
 Optional flag `--social-svg PATH` also writes a 1280x640 dark technical social
-preview SVG (using live metrics from both pilots) for PNG rasterization.
+preview SVG (using live metrics across pilots) for PNG rasterization.
 """
 
 from __future__ import annotations
@@ -87,6 +89,10 @@ class Theme:
     positive_bg: str
     positive_border: str
     positive_ink: str
+    caution: str
+    caution_bg: str
+    caution_border: str
+    caution_ink: str
     neutral_badge_bg: str
     neutral_badge_border: str
     neutral_badge_ink: str
@@ -120,6 +126,10 @@ LIGHT_THEME = Theme(
     positive_bg="#f0fdfa",
     positive_border="#99f6e4",
     positive_ink="#0f766e",
+    caution="#d97706",
+    caution_bg="#fffbeb",
+    caution_border="#fde68a",
+    caution_ink="#b45309",
     neutral_badge_bg="#f1f5f9",
     neutral_badge_border="#cbd5e1",
     neutral_badge_ink="#334155",
@@ -153,6 +163,10 @@ DARK_THEME = Theme(
     positive_bg="#0e2222",
     positive_border="#1f4d4b",
     positive_ink="#5eead4",
+    caution="#d29922",
+    caution_bg="#1f1a10",
+    caution_border="#544018",
+    caution_ink="#e3b341",
     neutral_badge_bg="#21262d",
     neutral_badge_border="#30363d",
     neutral_badge_ink="#c9d1d9",
@@ -457,10 +471,16 @@ class EvolutionStats:
     cond_pass: dict[str, int]
     cond_total: dict[str, int]
     cond_slop: dict[str, int]
+    cond_duplicate_blocks: dict[str, int]
+    cond_god_functions: dict[str, int]
+    cond_silent_shortcuts: dict[str, int]
     cond_mut_mean_pct: dict[str, float]
     cond_repair_turns: dict[str, int]
+    cond_tokens: dict[str, int]
+    cond_usd: dict[str, float]
     cond_wall_s: dict[str, float]
     wall_delta_pct: float
+    wall_delta_gated_vs_core_pct: float
     mut_delta_gated_vs_core_pp: float
     net_improved_bg: int
     net_regressed_bg: int
@@ -469,17 +489,21 @@ class EvolutionStats:
     model_god_fns: dict[tuple[str, str], int]
     model_slop: dict[tuple[str, str], int]
     model_mut_fails: dict[tuple[str, str], int]
+    model_repair_turns: dict[tuple[str, str], int]
     gated_vs_baseline_verdict: str
     core_verdict_by_model: dict[str, str]
     core_drop_short_names: tuple[str, ...]
     tok_delta_min_pct: float
     tok_delta_max_pct: float
+    tok_delta_gated_vs_base_pct: float
+    tok_delta_gated_vs_core_pct: float
     opus_usd_delta_pct: float
+    opus_usd_delta_gated_vs_core_pct: float
     gated_fail_summary: str
 
 
 def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
-    """Parse EV1 runs.jsonl, grade_ev1.py evidence JSONs, and stage artifacts."""
+    """Parse EV1/EV2 runs.jsonl, stage grader JSONs, and stage artifacts."""
     runs = [
         json.loads(line)
         for line in runs_path.read_text(encoding="utf-8").splitlines()
@@ -504,8 +528,13 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
     cond_pass: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
     cond_total: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
     cond_slop: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_duplicate_blocks: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_god_functions: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_silent_shortcuts: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
     cond_mut_rates: dict[str, list[float]] = {c: [] for c in EV_CONDITIONS}
     cond_repair_turns: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_tokens: dict[str, int] = {c: 0 for c in EV_CONDITIONS}
+    cond_usd: dict[str, float] = {c: 0.0 for c in EV_CONDITIONS}
     cond_wall_s: dict[str, float] = {c: 0.0 for c in EV_CONDITIONS}
 
     mc_raw: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
@@ -513,6 +542,7 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
     mc_god_fns: dict[tuple[str, str], int] = defaultdict(int)
     mc_slop: dict[tuple[str, str], int] = defaultdict(int)
     mc_mut_fails: dict[tuple[str, str], int] = defaultdict(int)
+    mc_repair_turns: dict[tuple[str, str], int] = defaultdict(int)
     mc_tokens: dict[tuple[str, str], int] = defaultdict(int)
     mc_usd: dict[tuple[str, str], float] = defaultdict(float)
 
@@ -565,12 +595,17 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
 
         slop = _slop_defect_count(metrics)
         mut_rate = float(metrics.get("mutation_kill_rate", 0.0))
+        dup_blocks = int(metrics.get("duplicate_blocks", 0))
         god_fns = int(metrics.get("god_functions", 0))
+        silent_shortcuts = int(metrics.get("silent_failures_and_shortcuts", 0))
 
         cond_total[cond] += 1
         if acc:
             cond_pass[cond] += 1
         cond_slop[cond] += slop
+        cond_duplicate_blocks[cond] += dup_blocks
+        cond_god_functions[cond] += god_fns
+        cond_silent_shortcuts[cond] += silent_shortcuts
         cond_mut_rates[cond].append(mut_rate)
 
         repairs = sum(
@@ -579,6 +614,7 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
             if k.endswith("-gate-repair-trace.log")
         )
         cond_repair_turns[cond] += repairs
+        mc_repair_turns[(mid, cond)] += repairs
 
         for sa in stages:
             stage_text = (repo_root / sa["path"]).read_text(encoding="utf-8")
@@ -608,16 +644,20 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
 
         run_metrics = r.get("metrics") or {}
         if run_metrics.get("total_tokens") is not None:
-            mc_tokens[(mid, cond)] += int(run_metrics["total_tokens"])
+            tok_val = int(run_metrics["total_tokens"])
+            mc_tokens[(mid, cond)] += tok_val
+            cond_tokens[cond] += tok_val
         if run_metrics.get("cost_usd") is not None:
-            mc_usd[(mid, cond)] += float(run_metrics["cost_usd"])
+            usd_val = float(run_metrics["cost_usd"])
+            mc_usd[(mid, cond)] += usd_val
+            cond_usd[cond] += usd_val
 
         grader_by_cond[cond].append(grader)
         grader_by_mc[(mid, cond)].append(grader)
         paired_cells[(mid, rep)][cond] = r
 
     if mutation_threshold_pct is None:
-        raise ValueError("Could not parse mutation kill threshold from EV1 grader JSONs")
+        raise ValueError(f"Could not parse mutation kill threshold from {case_id} grader JSONs")
 
     net_improved_bg = 0
     net_regressed_bg = 0
@@ -643,8 +683,10 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
     }
 
     wall_b = cond_wall_s["baseline"]
+    wall_c = cond_wall_s["core-rules-v0.2.0"]
     wall_g = cond_wall_s["gated-structural"]
     wall_delta_pct = ((wall_g - wall_b) / wall_b * 100.0) if wall_b else 0.0
+    wall_delta_gated_vs_core_pct = ((wall_g - wall_c) / wall_c * 100.0) if wall_c else 0.0
     mut_delta_gated_vs_core_pp = (
         cond_mut_mean_pct["gated-structural"] - cond_mut_mean_pct["core-rules-v0.2.0"]
     )
@@ -659,10 +701,20 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
     tok_delta_min_pct = min(tok_deltas) if tok_deltas else 0.0
     tok_delta_max_pct = max(tok_deltas) if tok_deltas else 0.0
 
+    tok_b = cond_tokens["baseline"]
+    tok_c = cond_tokens["core-rules-v0.2.0"]
+    tok_g = cond_tokens["gated-structural"]
+    tok_delta_gated_vs_base_pct = ((tok_g - tok_b) / tok_b * 100.0) if tok_b else 0.0
+    tok_delta_gated_vs_core_pct = ((tok_g - tok_c) / tok_c * 100.0) if tok_c else 0.0
+
     opus_usd_b = mc_usd[("claude-opus-5-5", "baseline")]
+    opus_usd_c = mc_usd[("claude-opus-5-5", "core-rules-v0.2.0")]
     opus_usd_g = mc_usd[("claude-opus-5-5", "gated-structural")]
     opus_usd_delta_pct = (
         ((opus_usd_g - opus_usd_b) / opus_usd_b * 100.0) if opus_usd_b else 0.0
+    )
+    opus_usd_delta_gated_vs_core_pct = (
+        ((opus_usd_g - opus_usd_c) / opus_usd_c * 100.0) if opus_usd_c else 0.0
     )
 
     gated_vs_baseline_verdict = str(
@@ -720,10 +772,16 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
         cond_pass=cond_pass,
         cond_total=cond_total,
         cond_slop=cond_slop,
+        cond_duplicate_blocks=cond_duplicate_blocks,
+        cond_god_functions=cond_god_functions,
+        cond_silent_shortcuts=cond_silent_shortcuts,
         cond_mut_mean_pct=cond_mut_mean_pct,
         cond_repair_turns=cond_repair_turns,
+        cond_tokens=cond_tokens,
+        cond_usd=cond_usd,
         cond_wall_s=cond_wall_s,
         wall_delta_pct=wall_delta_pct,
+        wall_delta_gated_vs_core_pct=wall_delta_gated_vs_core_pct,
         mut_delta_gated_vs_core_pp=mut_delta_gated_vs_core_pp,
         net_improved_bg=net_improved_bg,
         net_regressed_bg=net_regressed_bg,
@@ -732,12 +790,16 @@ def compute_evolution_stats(repo_root: Path, runs_path: Path) -> EvolutionStats:
         model_god_fns=dict(mc_god_fns),
         model_slop=dict(mc_slop),
         model_mut_fails=dict(mc_mut_fails),
+        model_repair_turns=dict(mc_repair_turns),
         gated_vs_baseline_verdict=gated_vs_baseline_verdict,
         core_verdict_by_model=core_verdict_by_model,
         core_drop_short_names=tuple(core_drop_names),
         tok_delta_min_pct=tok_delta_min_pct,
         tok_delta_max_pct=tok_delta_max_pct,
+        tok_delta_gated_vs_base_pct=tok_delta_gated_vs_base_pct,
+        tok_delta_gated_vs_core_pct=tok_delta_gated_vs_core_pct,
         opus_usd_delta_pct=opus_usd_delta_pct,
+        opus_usd_delta_gated_vs_core_pct=opus_usd_delta_gated_vs_core_pct,
         gated_fail_summary=gated_fail_summary,
     )
 
@@ -1508,8 +1570,382 @@ def render_evolution_results_svg(stats: EvolutionStats, theme: Theme) -> str:
     return "\n".join(lines)
 
 
+def render_ts_evolution_results_svg(stats: EvolutionStats, theme: Theme) -> str:
+    """Render the two-panel EV2 TypeScript multi-turn quality SVG (light or dark)."""
+    width, height = 960, 476
+    t = theme
+
+    subtitle = (
+        f"{stats.experiment_id} · {stats.total_runs} runs · {stats.total_stages} stages · "
+        f"{stats.n_models} models × {stats.n_conditions} conditions × n = {stats.n_replicates} · "
+        f"{stats.word_cap_checks} word caps"
+    )
+
+    b_pass = stats.cond_pass["baseline"]
+    b_tot = stats.cond_total["baseline"]
+    c_pass = stats.cond_pass["core-rules-v0.2.0"]
+    c_tot = stats.cond_total["core-rules-v0.2.0"]
+    g_pass = stats.cond_pass["gated-structural"]
+    g_tot = stats.cond_total["gated-structural"]
+
+    b_pct = (b_pass / b_tot * 100.0) if b_tot else 0.0
+    c_pct = (c_pass / c_tot * 100.0) if c_tot else 0.0
+    g_pct = (g_pass / g_tot * 100.0) if g_tot else 0.0
+
+    arm_items: list[tuple[str, str, int, int, int, float, str, str]] = [
+        (
+            "baseline",
+            "baseline",
+            b_pass,
+            b_tot,
+            stats.cond_slop["baseline"],
+            stats.cond_mut_mean_pct["baseline"],
+            t.baseline,
+            t.ink_secondary,
+        ),
+        (
+            "core-rules-v0.2.0",
+            "core-rules",
+            c_pass,
+            c_tot,
+            stats.cond_slop["core-rules-v0.2.0"],
+            stats.cond_mut_mean_pct["core-rules-v0.2.0"],
+            t.core,
+            t.core,
+        ),
+        (
+            "gated-structural",
+            "gated-structural",
+            g_pass,
+            g_tot,
+            stats.cond_slop["gated-structural"],
+            stats.cond_mut_mean_pct["gated-structural"],
+            t.controls,
+            t.positive_ink,
+        ),
+    ]
+
+    lines: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}" role="img" aria-labelledby="title desc">',
+        f'  <title id="title">TypeScript Multi-Turn Quality: {_esc(stats.case_id)} ({stats.n_turns}-Turn Evolution)</title>',
+        f'  <desc id="desc">{_esc(subtitle)}. Overall acceptance moves from '
+        f'{b_pct:.1f}% ({b_pass}/{b_tot}, {stats.cond_slop["baseline"]} slop) baseline to '
+        f'{c_pct:.1f}% ({c_pass}/{c_tot}, {stats.cond_slop["core-rules-v0.2.0"]} slop) core-rules to '
+        f'{g_pct:.1f}% ({g_pass}/{g_tot}, {stats.cond_slop["gated-structural"]} slop) gated-structural; '
+        f'mean TS mutation kill rate rises to {stats.cond_mut_mean_pct["gated-structural"]:.1f}%.</desc>',
+        "  <style>",
+        f"    .sans {{ font-family: {FONT_SANS}; }}",
+        f"    .mono {{ font-family: {FONT_MONO}; }}",
+        "  </style>",
+        "",
+        "  <!-- Outer frame -->",
+        f'  <rect x="0.5" y="0.5" width="{width - 1}" height="{height - 1}" rx="10" fill="{t.canvas_bg}" stroke="{t.canvas_border}"/>',
+        "",
+        "  <!-- Header -->",
+        f'  <text x="28" y="38" class="sans" font-size="16.5" font-weight="700" fill="{t.ink}">TypeScript Multi-Turn Quality: {_esc(stats.case_id)} ({stats.n_turns}-Turn Evolution)</text>',
+        f'  <text x="28" y="58" class="sans" font-size="11.5" fill="{t.muted}">{_esc(subtitle)}</text>',
+        "",
+        "  <!-- Condition legend (top right) -->",
+        '  <g transform="translate(588, 26)">',
+        f'    <rect x="0" y="3" width="10" height="10" rx="2" fill="{t.baseline}"/>',
+        f'    <text x="16" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">baseline</text>',
+        f'    <rect x="80" y="3" width="10" height="10" rx="2" fill="{t.core}"/>',
+        f'    <text x="96" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">core-rules (v0.2.0)</text>',
+        f'    <rect x="224" y="3" width="10" height="10" rx="2" fill="{t.controls}"/>',
+        f'    <text x="240" y="12" class="sans" font-size="11" fill="{t.ink_secondary}">gated-structural</text>',
+        "  </g>",
+        f'  <line x1="28" y1="72" x2="{width - 28}" y2="72" stroke="{t.divider}" stroke-width="1"/>',
+        "",
+        "  <!-- Left Panel: Overall Pass Rate & Slop Findings -->",
+        f'  <rect x="24" y="84" width="400" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <text x="40" y="106" class="sans" font-size="13" font-weight="700" fill="{t.ink}">Overall Pass Rate &amp; Slop Findings</text>',
+        f'  <text x="40" y="122" class="sans" font-size="10.5" fill="{t.muted}">All {stats.n_models} models ({b_tot} runs/arm) · {stats.n_checks} mechanical {_esc(stats.case_id)} checks</text>',
+    ]
+
+    # Left panel chart area: y_top=168 (100%) to y_bottom=268 (0%), height=100
+    lp_y_top = 168.0
+    lp_y_bottom = 268.0
+    lp_h = lp_y_bottom - lp_y_top
+    lp_x_left = 74.0
+    lp_x_right = 406.0
+
+    for pct in (0, 50, 100):
+        y = lp_y_bottom - (pct / 100.0) * lp_h
+        stroke_color = t.muted if pct == 0 else t.grid
+        stroke_op = "0.45" if pct == 0 else "1"
+        dash = "" if pct == 0 else ' stroke-dasharray="3 3"'
+        lines.append(
+            f'  <line x1="{lp_x_left:.0f}" y1="{y:.1f}" x2="{lp_x_right:.0f}" y2="{y:.1f}" '
+            f'stroke="{stroke_color}" stroke-opacity="{stroke_op}" stroke-width="1"{dash}/>'
+        )
+        lines.append(
+            f'  <text x="{lp_x_left - 8:.0f}" y="{y + 3.5:.1f}" text-anchor="end" '
+            f'class="mono" font-size="10" fill="{t.muted}">{pct}%</text>'
+        )
+
+    bar_centers = (130.0, 240.0, 350.0)
+    bar_w = 64.0
+    best_mut = max(stats.cond_mut_mean_pct.values())
+    for (_cond, label, passed, total, slop, mut_pct, color, val_color), cx in zip(
+        arm_items, bar_centers
+    ):
+        pct = (passed / total * 100.0) if total else 0.0
+        bh = (pct / 100.0) * lp_h
+        bx = cx - bar_w / 2.0
+        if bh > 0:
+            by = lp_y_bottom - bh
+            lines.append(
+                f'  <rect x="{bx:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{bh:.1f}" '
+                f'rx="4" fill="{color}"/>'
+            )
+            val_y = by - 19.5
+            sub_y = by - 6.5
+        else:
+            lines.append(
+                f'  <rect x="{bx:.1f}" y="{lp_y_bottom - 3.5:.1f}" width="{bar_w:.1f}" height="3.5" '
+                f'rx="1.5" fill="{color}"/>'
+            )
+            val_y = lp_y_bottom - 24.5
+            sub_y = lp_y_bottom - 11.5
+
+        lines.append(
+            f'  <rect x="{cx - 32:.1f}" y="{val_y - 12.0:.1f}" width="64" height="27.5" '
+            f'rx="3" fill="{t.panel_bg}"/>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="{val_y:.1f}" text-anchor="middle" '
+            f'class="mono" font-size="13" font-weight="700" fill="{val_color}">{pct:.1f}%</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="{sub_y:.1f}" text-anchor="middle" '
+            f'class="mono" font-size="10" fill="{t.muted}">({passed}/{total})</text>'
+        )
+        lines.append(
+            f'  <text x="{cx:.1f}" y="285" text-anchor="middle" '
+            f'class="sans" font-size="11" font-weight="600" fill="{t.ink}">{_esc(label)}</text>'
+        )
+        slop_fill = t.positive_ink if slop == 0 else t.danger_ink
+        lines.append(
+            f'  <text x="{cx:.1f}" y="300" text-anchor="middle" '
+            f'class="mono" font-size="10" font-weight="700" fill="{slop_fill}">{slop} slop</text>'
+        )
+        mut_fill = t.positive_ink if abs(mut_pct - best_mut) < 1e-9 else t.muted
+        mut_weight = "600" if abs(mut_pct - best_mut) < 1e-9 else "400"
+        lines.append(
+            f'  <text x="{cx:.1f}" y="314" text-anchor="middle" '
+            f'class="mono" font-size="9.5" font-weight="{mut_weight}" fill="{mut_fill}">{mut_pct:.1f}% mut</text>'
+        )
+
+    non_gated_slop = stats.cond_slop["baseline"] + stats.cond_slop["core-rules-v0.2.0"]
+    non_gated_dups = (
+        stats.cond_duplicate_blocks["baseline"]
+        + stats.cond_duplicate_blocks["core-rules-v0.2.0"]
+    )
+    non_gated_gods = (
+        stats.cond_god_functions["baseline"]
+        + stats.cond_god_functions["core-rules-v0.2.0"]
+    )
+    total_silent = sum(stats.cond_silent_shortcuts.values())
+
+    lines.extend([
+        f'  <line x1="40" y1="327" x2="408" y2="327" stroke="{t.divider}" stroke-width="1"/>',
+        f'  <text x="40" y="343" class="sans" font-size="9.5" fill="{t.muted}">All {non_gated_slop} baseline/core defects were duplicate blocks ({non_gated_dups})</text>',
+        f'  <text x="40" y="358" class="sans" font-size="9.5" fill="{t.muted}">or god functions ({non_gated_gods}); {total_silent} suppression noise.</text>',
+        "",
+        "  <!-- Right Panel: Acceptance & TS Mutation Kill Rate by Model -->",
+        f'  <rect x="438" y="84" width="498" height="290" rx="8" fill="{t.panel_bg}" stroke="{t.panel_border}"/>',
+        f'  <text x="454" y="106" class="sans" font-size="13" font-weight="700" fill="{t.ink}">Acceptance &amp; TS Mutation Kill Rate by Model</text>',
+        f'  <text x="454" y="122" class="sans" font-size="10.5" fill="{t.muted}">'
+        f'n = {stats.n_replicates} per arm · Total: {b_pass}/{b_tot} → {c_pass}/{c_tot} → {g_pass}/{g_tot} '
+        f'(+{stats.net_improved_bg}/-{stats.net_regressed_bg} vs. baseline)</text>',
+        f'  <text x="920" y="138" text-anchor="end" class="mono" font-size="9.5" fill="{t.muted}">mut kill</text>',
+    ])
+
+    # Right panel grouped horizontal bars (0..3 runs) + right-aligned mut kill column
+    rp_x0 = 604.0
+    rp_x1 = 784.0
+    rp_track_w = rp_x1 - rp_x0
+    max_runs = stats.n_replicates
+    rp_y_top = 142.0
+    rp_y_bot = 330.0
+
+    for tick in range(max_runs + 1):
+        tx = rp_x0 + (tick / max_runs) * rp_track_w
+        stroke_color = t.muted if tick == 0 else t.grid
+        stroke_op = "0.45" if tick == 0 else "1"
+        dash = "" if tick == 0 else ' stroke-dasharray="3 3"'
+        lines.append(
+            f'  <line x1="{tx:.1f}" y1="{rp_y_top:.0f}" x2="{tx:.1f}" y2="{rp_y_bot:.0f}" '
+            f'stroke="{stroke_color}" stroke-opacity="{stroke_op}" stroke-width="1"{dash}/>'
+        )
+        tick_label = f"{tick}/{max_runs}" if tick == max_runs else str(tick)
+        lines.append(
+            f'  <text x="{tx:.1f}" y="346" text-anchor="middle" '
+            f'class="mono" font-size="10" fill="{t.muted}">{tick_label}</text>'
+        )
+
+    ev_cond_colors = {
+        "baseline": t.baseline,
+        "core-rules-v0.2.0": t.core,
+        "gated-structural": t.controls,
+    }
+    group_ys = (146.0, 194.0, 242.0, 290.0)
+    bar_h = 10.0
+    bar_step = 12.5
+
+    for idx, ((mid, display_name, _short), gy) in enumerate(zip(MODEL_ORDER, group_ys)):
+        if idx > 0:
+            sep_y = gy - 6.0
+            lines.append(
+                f'  <line x1="454" y1="{sep_y:.1f}" x2="920" y2="{sep_y:.1f}" '
+                f'stroke="{t.divider}" stroke-opacity="0.65" stroke-width="1"/>'
+            )
+
+        label_y = gy + 17.0
+        lines.append(
+            f'  <text x="454" y="{label_y:.1f}" class="sans" font-size="11.5" font-weight="600" fill="{t.ink}">{_esc(display_name)}</text>'
+        )
+
+        slop_b = stats.model_slop.get((mid, "baseline"), 0)
+        slop_g = stats.model_slop.get((mid, "gated-structural"), 0)
+        repairs_g = stats.model_repair_turns.get((mid, "gated-structural"), 0)
+        mut_delta_bg = (
+            stats.model_mut_mean_pct[(mid, "gated-structural")]
+            - stats.model_mut_mean_pct[(mid, "baseline")]
+        )
+
+        if repairs_g > 0 and slop_b > 0 and slop_g == 0:
+            sub_txt = f"{mut_delta_bg:+.1f}pp mut · {slop_g} slop"
+            sub_fill = t.positive_ink
+            sub_weight = "600"
+        elif slop_b > 0 and slop_g == 0:
+            sub_txt = f"slop {slop_b} → {slop_g} · {repairs_g} repairs"
+            sub_fill = t.muted
+            sub_weight = "400"
+        else:
+            sub_txt = f"{slop_g} slop · mut {mut_delta_bg:+.1f}pp"
+            sub_fill = t.muted
+            sub_weight = "400"
+
+        lines.append(
+            f'  <text x="454" y="{label_y + 13.5:.1f}" class="sans" font-size="9.5" font-weight="{sub_weight}" fill="{sub_fill}">{_esc(sub_txt)}</text>'
+        )
+
+        for c_idx, cond in enumerate(EV_CONDITIONS):
+            mc = stats.model_cond[(mid, cond)]
+            mut_val = stats.model_mut_mean_pct[(mid, cond)]
+            by = gy + c_idx * bar_step
+            bw = (mc.passed / mc.total) * rp_track_w if mc.total else 0.0
+            if bw > 0:
+                lines.append(
+                    f'  <rect x="{rp_x0:.1f}" y="{by:.1f}" width="{bw:.1f}" height="{bar_h:.1f}" '
+                    f'rx="2.5" fill="{ev_cond_colors[cond]}"/>'
+                )
+                lbl_x = rp_x0 + bw + 7.0
+            else:
+                lines.append(
+                    f'  <rect x="{rp_x0:.1f}" y="{by:.1f}" width="3.5" height="{bar_h:.1f}" '
+                    f'rx="1.5" fill="{ev_cond_colors[cond]}"/>'
+                )
+                lbl_x = rp_x0 + 3.5 + 6.5
+
+            lbl = f"{mc.passed}/{mc.total}"
+            is_gated = cond == "gated-structural"
+            lbl_weight = "700" if is_gated else "500"
+            lbl_fill = t.ink if is_gated else t.muted
+            lines.append(
+                f'  <text x="{lbl_x:.1f}" y="{by + 8.5:.1f}" '
+                f'class="mono" font-size="10" font-weight="{lbl_weight}" fill="{lbl_fill}">{_esc(lbl)}</text>'
+            )
+
+            mut_fill = (
+                t.positive_ink
+                if is_gated and mut_val >= stats.mutation_threshold_pct
+                else t.muted
+            )
+            mut_weight = "700" if is_gated else "500"
+            lines.append(
+                f'  <text x="920" y="{by + 8.5:.1f}" text-anchor="end" '
+                f'class="mono" font-size="10" font-weight="{mut_weight}" fill="{mut_fill}">{mut_val:.1f}%</text>'
+            )
+
+    lines.append(
+        f'  <text x="454" y="363" class="sans" font-size="9.5" fill="{t.muted}">'
+        f'Right column: mean JS/TS mutation kill rate per arm (min {stats.mutation_threshold_pct}% to pass, {stats.mutants_per_run} mutants/run).</text>'
+    )
+
+    # Bottom two crisp callout cards
+    pos_headline = (
+        f"Gated: {_fmt_pct_clean(b_pct)} → {_fmt_pct_clean(g_pct)} pass · "
+        f"{stats.cond_slop['gated-structural']} slop "
+        f"({stats.cond_duplicate_blocks['baseline']} dup + "
+        f"{stats.cond_god_functions['baseline']} god fn → "
+        f"{stats.cond_slop['gated-structural']})"
+    )
+    pos_detail = (
+        f"Cheaper & faster than prompts: "
+        f"{stats.tok_delta_gated_vs_core_pct:+.1f}% tokens · "
+        f"{stats.opus_usd_delta_gated_vs_core_pct:+.1f}% Opus USD · "
+        f"{stats.wall_delta_gated_vs_core_pct:+.1f}% wall"
+    )
+
+    base_perfect_names = [
+        sname
+        for mid, _, sname in MODEL_ORDER
+        if stats.model_cond[(mid, "baseline")].passed == stats.n_replicates
+    ]
+    total_repairs = stats.cond_repair_turns["gated-structural"]
+    top_rep_mid, _, top_rep_name = max(
+        MODEL_ORDER,
+        key=lambda item: stats.model_repair_turns.get((item[0], "gated-structural"), 0),
+    )
+    top_rep_count = stats.model_repair_turns.get((top_rep_mid, "gated-structural"), 0)
+    top_rep_mut_delta = (
+        stats.model_mut_mean_pct[(top_rep_mid, "gated-structural")]
+        - stats.model_mut_mean_pct[(top_rep_mid, "baseline")]
+    )
+    perfect_label = " & ".join(base_perfect_names)
+    split_headline = (
+        f"{perfect_label} hit {stats.n_replicates}/{stats.n_replicates} in baseline; "
+        f"{top_rep_name} drove {top_rep_count}/{total_repairs} repair turns "
+        f"({top_rep_mut_delta:+.1f}pp mut)"
+    )
+    split_detail = (
+        f"Total overhead vs baseline: "
+        f"{stats.tok_delta_gated_vs_base_pct:+.1f}% tokens · "
+        f"{stats.opus_usd_delta_pct:+.1f}% Opus USD · "
+        f"{stats.wall_delta_pct:+.1f}% wall"
+    )
+
+    lines.extend([
+        "",
+        "  <!-- Positive Callout: TypeScript EV2 Verdict -->",
+        "  <defs>",
+        f'    <clipPath id="clip-ts-pos-{t.name}"><rect x="24" y="388" width="448" height="68" rx="6"/></clipPath>',
+        f'    <clipPath id="clip-ts-split-{t.name}"><rect x="488" y="388" width="448" height="68" rx="6"/></clipPath>',
+        "  </defs>",
+        f'  <rect x="24" y="388" width="448" height="68" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+        f'  <rect x="24" y="388" width="4.5" height="68" fill="{t.positive}" clip-path="url(#clip-ts-pos-{t.name})"/>',
+        f'  <text x="42" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.positive_ink}">TYPESCRIPT {_esc(stats.case_id)} VERDICT: {_esc(stats.gated_vs_baseline_verdict)}</text>',
+        f'  <text x="42" y="426" class="sans" font-size="11" font-weight="700" fill="{t.ink}">{_esc(pos_headline)}</text>',
+        f'  <text x="42" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(pos_detail)}</text>',
+        "",
+        "  <!-- Model Split & Repair Profile Callout -->",
+        f'  <rect x="488" y="388" width="448" height="68" rx="6" fill="{t.caution_bg}" stroke="{t.caution_border}"/>',
+        f'  <rect x="488" y="388" width="4.5" height="68" fill="{t.caution}" clip-path="url(#clip-ts-split-{t.name})"/>',
+        f'  <text x="506" y="407" class="mono" font-size="10" font-weight="700" letter-spacing="0.4" fill="{t.caution_ink}">MODEL SPLIT &amp; REPAIR PROFILE</text>',
+        f'  <text x="506" y="426" class="sans" font-size="11" font-weight="700" fill="{t.ink}">{_esc(split_headline)}</text>',
+        f'  <text x="506" y="443" class="sans" font-size="10" fill="{t.muted}">{_esc(split_detail)}</text>',
+        "</svg>",
+        "",
+    ])
+    return "\n".join(lines)
+
+
 def render_social_preview_svg(
-    stats: PilotStats, ev_stats: EvolutionStats | None = None
+    stats: PilotStats,
+    ev_stats: EvolutionStats | None = None,
+    ts_ev_stats: EvolutionStats | None = None,
 ) -> str:
     """Render the 1280x640 dark minimalist GitHub social preview SVG."""
     width, height = 1280, 640
@@ -1526,6 +1962,122 @@ def render_social_preview_svg(
     )
     ruled_pct = (ruled_tamp / ruled_comp * 100.0) if ruled_comp else 0.0
     rw3_arrow = f"{b_pct:.1f}% → {ruled_pct:.0f}%"
+
+    if ev_stats is not None and ts_ev_stats is not None:
+        ev1_b_pct = (
+            ev_stats.cond_pass["baseline"] / ev_stats.cond_total["baseline"] * 100.0
+            if ev_stats.cond_total["baseline"]
+            else 0.0
+        )
+        ev1_g_pct = (
+            ev_stats.cond_pass["gated-structural"]
+            / ev_stats.cond_total["gated-structural"]
+            * 100.0
+            if ev_stats.cond_total["gated-structural"]
+            else 0.0
+        )
+        ev1_arrow = f"{_fmt_pct_clean(ev1_b_pct)} → {_fmt_pct_clean(ev1_g_pct)}"
+        ev1_slop = ev_stats.cond_slop["gated-structural"]
+
+        ev2_b_pct = (
+            ts_ev_stats.cond_pass["baseline"]
+            / ts_ev_stats.cond_total["baseline"]
+            * 100.0
+            if ts_ev_stats.cond_total["baseline"]
+            else 0.0
+        )
+        ev2_g_pct = (
+            ts_ev_stats.cond_pass["gated-structural"]
+            / ts_ev_stats.cond_total["gated-structural"]
+            * 100.0
+            if ts_ev_stats.cond_total["gated-structural"]
+            else 0.0
+        )
+        ev2_arrow = f"{_fmt_pct_clean(ev2_b_pct)} → {_fmt_pct_clean(ev2_g_pct)}"
+        ev2_slop = ts_ev_stats.cond_slop["gated-structural"]
+
+        lines: list[str] = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}">',
+            "  <defs>",
+            '    <pattern id="subtle-grid" width="40" height="40" patternUnits="userSpaceOnUse">',
+            '      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#161b22" stroke-width="1"/>',
+            "    </pattern>",
+            '    <clipPath id="clip-stat-bar"><rect x="76" y="472" width="1128" height="92" rx="10"/></clipPath>',
+            "  </defs>",
+            "  <style>",
+            f"    .sans {{ font-family: {FONT_SANS}; }}",
+            f"    .mono {{ font-family: {FONT_MONO}; }}",
+            "  </style>",
+            "",
+            "  <!-- Background & architectural frame -->",
+            f'  <rect x="0" y="0" width="{width}" height="{height}" fill="{t.canvas_bg}"/>',
+            f'  <rect x="0" y="0" width="{width}" height="{height}" fill="url(#subtle-grid)" opacity="0.7"/>',
+            f'  <rect x="28" y="28" width="{width - 56}" height="{height - 56}" rx="16" fill="{t.canvas_bg}" fill-opacity="0.72" stroke="{t.canvas_border}" stroke-width="1.5"/>',
+            "",
+            "  <!-- Left column: identity -->",
+            '  <g transform="translate(76, 78)">',
+            f'    <rect x="0" y="0" width="268" height="32" rx="16" fill="{t.panel_bg}" stroke="{t.canvas_border}"/>',
+            f'    <circle cx="18" cy="16" r="4.5" fill="{t.controls}"/>',
+            f'    <text x="32" y="20.5" class="mono" font-size="12" font-weight="600" fill="{t.ink_secondary}">AI-ERA CODE QUALITY · 3 PILLARS</text>',
+            "",
+            f'    <text x="0" y="108" class="mono" font-size="70" font-weight="700" letter-spacing="-2.5" fill="{t.ink}">anti-slop</text>',
+            f'    <rect x="0" y="128" width="64" height="3.5" rx="1.75" fill="{t.controls}"/>',
+            "",
+            f'    <text x="0" y="176" class="sans" font-size="21.5" font-weight="500" fill="{t.ink_secondary}">Catch shortcuts and compounding slop,</text>',
+            f'    <text x="0" y="208" class="sans" font-size="21.5" font-weight="500" fill="{t.ink_secondary}">learn verified project rules, and prove</text>',
+            f'    <text x="0" y="240" class="sans" font-size="21.5" font-weight="500" fill="{t.ink_secondary}">which rules improve real software.</text>',
+            "",
+            f'    <line x1="0" y1="278" x2="466" y2="278" stroke="{t.divider}" stroke-width="1.2"/>',
+            f'    <text x="0" y="314" class="mono" font-size="15.5" font-weight="600" fill="{t.ink}">Zero dependencies · Python stdlib · MIT</text>',
+            f'    <text x="0" y="344" class="mono" font-size="12.5" fill="{t.muted}">Plain-English review · Agent hooks · Verified R7 · EV1/EV2</text>',
+            "  </g>",
+            "",
+            "  <!-- Right column: terminal review card -->",
+            f'  <rect x="596" y="78" width="608" height="352" rx="12" fill="#090d13" stroke="{t.canvas_border}" stroke-width="1.5"/>',
+            f'  <path d="M 608 78 H 1192 Q 1204 78 1204 90 V 120 H 596 V 90 Q 596 78 608 78 Z" fill="{t.panel_bg}"/>',
+            f'  <line x1="596" y1="120" x2="1204" y2="120" stroke="{t.divider}" stroke-width="1"/>',
+            '  <circle cx="620" cy="99" r="5" fill="#30363d"/>',
+            '  <circle cx="638" cy="99" r="5" fill="#30363d"/>',
+            '  <circle cx="656" cy="99" r="5" fill="#30363d"/>',
+            f'  <text x="680" y="104" class="mono" font-size="13" fill="{t.muted}">anti-slop-review · shortcuts + structural + learned</text>',
+            "",
+            f'  <text x="622" y="155" class="mono" font-size="13.5" fill="{t.muted}">$ anti-slop-review   # CLI · hooks · pre-commit · CI</text>',
+            "",
+            f'  <text x="622" y="194" class="mono" font-size="13.5" font-weight="700" fill="{t.danger_ink}">[BLOCK] DIFF-TEST-SKIP</text>',
+            f'  <text x="822" y="194" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:8</text>',
+            f'  <text x="638" y="215" class="mono" font-size="12.8" fill="{t.ink_secondary}">skipped test instead of fixing the underlying bug</text>',
+            "",
+            f'  <text x="622" y="256" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-SILENT-FALLBACK</text>',
+            f'  <text x="880" y="256" class="mono" font-size="13" fill="{t.muted}">src/billing/sync.py:17</text>',
+            f'  <text x="638" y="277" class="mono" font-size="12.8" fill="{t.ink_secondary}">broad catch returns default 0 (hides failures)</text>',
+            "",
+            f'  <text x="622" y="318" class="mono" font-size="13.5" font-weight="700" fill="{t.core}">[RISK] STRUCT-TEST-THEATER</text>',
+            f'  <text x="856" y="318" class="mono" font-size="13" fill="{t.muted}">tests/test_sync.py:19</text>',
+            f'  <text x="638" y="339" class="mono" font-size="12.8" fill="{t.ink_secondary}">0 assertions (stays green even when code breaks)</text>',
+            "",
+            f'  <rect x="618" y="372" width="564" height="36" rx="6" fill="{t.positive_bg}" stroke="{t.positive_border}"/>',
+            f'  <text x="634" y="394.5" class="mono" font-size="12.2" font-weight="600" fill="{t.positive_ink}">+ Human-approved learned rules enforced automatically</text>',
+            "",
+            "  <!-- Full-Width Empirical Stat Bar (Python EV1 · TypeScript EV2 · RW3) -->",
+            f'  <rect x="76" y="472" width="1128" height="92" rx="10" fill="{t.positive_bg}" stroke="{t.positive_border}" stroke-width="1.5"/>',
+            f'  <rect x="76" y="472" width="6" height="92" fill="{t.positive}" clip-path="url(#clip-stat-bar)"/>',
+            "",
+            f'  <text x="108" y="511" class="mono" font-size="22" font-weight="700" fill="{t.positive_ink}">{_esc(ev1_arrow)}<tspan dx="10" class="sans" font-size="13.5" font-weight="600" fill="{t.ink}">({ev1_slop} slop)</tspan></text>',
+            f'  <text x="108" y="538" class="sans" font-size="13.5" fill="{t.muted}">Python multi-turn quality · {_esc(ev_stats.case_id)} (n = {ev_stats.n_replicates})</text>',
+            "",
+            f'  <line x1="454" y1="490" x2="454" y2="546" stroke="{t.positive_border}" stroke-width="1.2"/>',
+            "",
+            f'  <text x="484" y="511" class="mono" font-size="22" font-weight="700" fill="{t.positive_ink}">{_esc(ev2_arrow)}<tspan dx="10" class="sans" font-size="13.5" font-weight="600" fill="{t.ink}">({ev2_slop} slop)</tspan></text>',
+            f'  <text x="484" y="538" class="sans" font-size="13.5" fill="{t.muted}">TypeScript multi-turn quality · {_esc(ts_ev_stats.case_id)} (n = {ts_ev_stats.n_replicates})</text>',
+            "",
+            f'  <line x1="846" y1="490" x2="846" y2="546" stroke="{t.positive_border}" stroke-width="1.2"/>',
+            "",
+            f'  <text x="876" y="511" class="mono" font-size="22" font-weight="700" fill="{t.positive_ink}">{_esc(rw3_arrow)}<tspan dx="10" class="sans" font-size="13.5" font-weight="600" fill="{t.ink}">({ruled_tamp}/{ruled_comp})</tspan></text>',
+            f'  <text x="876" y="538" class="sans" font-size="13.5" fill="{t.muted}">Frozen-test tampering · RW3 (n = {stats.n_replicates})</text>',
+            "</svg>",
+            "",
+        ]
+        return "\n".join(lines)
 
     if ev_stats is not None:
         ev_b_pct = (
@@ -1657,6 +2209,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to EV1 runs.jsonl (default: results/pilot-evolution-v0.7.0/runs.jsonl)",
     )
     parser.add_argument(
+        "--ts-evolution-runs",
+        type=Path,
+        default=None,
+        help="Path to EV2 runs.jsonl (default: results/pilot-ts-evolution-v0.8.0/runs.jsonl)",
+    )
+    parser.add_argument(
         "--out-dir",
         type=Path,
         default=None,
@@ -1677,6 +2235,11 @@ def main(argv: list[str] | None = None) -> int:
     ev_runs_path = args.evolution_runs if args.evolution_runs is not None else (
         repo_root / "results" / "pilot-evolution-v0.7.0" / "runs.jsonl"
     )
+    ts_ev_runs_path = (
+        args.ts_evolution_runs
+        if args.ts_evolution_runs is not None
+        else (repo_root / "results" / "pilot-ts-evolution-v0.8.0" / "runs.jsonl")
+    )
     out_dir = args.out_dir if args.out_dir is not None else (
         repo_root / "docs" / "assets"
     )
@@ -1685,6 +2248,11 @@ def main(argv: list[str] | None = None) -> int:
     ev_stats = (
         compute_evolution_stats(repo_root, ev_runs_path)
         if ev_runs_path.is_file()
+        else None
+    )
+    ts_ev_stats = (
+        compute_evolution_stats(repo_root, ts_ev_runs_path)
+        if ts_ev_runs_path.is_file()
         else None
     )
 
@@ -1705,21 +2273,38 @@ def main(argv: list[str] | None = None) -> int:
         outputs[out_dir / "pilot-v0.7.0-evolution-dark.svg"] = (
             render_evolution_results_svg(ev_stats, DARK_THEME)
         )
+    if ts_ev_stats is not None:
+        outputs[out_dir / "pilot-v0.8.0-ts-evolution-light.svg"] = (
+            render_ts_evolution_results_svg(ts_ev_stats, LIGHT_THEME)
+        )
+        outputs[out_dir / "pilot-v0.8.0-ts-evolution-dark.svg"] = (
+            render_ts_evolution_results_svg(ts_ev_stats, DARK_THEME)
+        )
 
     for path, content in outputs.items():
         _write_if_changed(path, content)
 
     if args.social_svg is not None:
-        _write_if_changed(args.social_svg, render_social_preview_svg(stats, ev_stats))
+        _write_if_changed(
+            args.social_svg, render_social_preview_svg(stats, ev_stats, ts_ev_stats)
+        )
 
     ev_summary = ""
     if ev_stats is not None:
-        ev_summary = (
+        ev_summary += (
             f"; EV1 {ev_stats.cond_pass['baseline']}/{ev_stats.cond_total['baseline']} -> "
             f"{ev_stats.cond_pass['core-rules-v0.2.0']}/{ev_stats.cond_total['core-rules-v0.2.0']} -> "
             f"{ev_stats.cond_pass['gated-structural']}/{ev_stats.cond_total['gated-structural']} "
             f"({ev_stats.cond_slop['baseline']} -> {ev_stats.cond_slop['core-rules-v0.2.0']} -> "
             f"{ev_stats.cond_slop['gated-structural']} slop)"
+        )
+    if ts_ev_stats is not None:
+        ev_summary += (
+            f"; EV2 {ts_ev_stats.cond_pass['baseline']}/{ts_ev_stats.cond_total['baseline']} -> "
+            f"{ts_ev_stats.cond_pass['core-rules-v0.2.0']}/{ts_ev_stats.cond_total['core-rules-v0.2.0']} -> "
+            f"{ts_ev_stats.cond_pass['gated-structural']}/{ts_ev_stats.cond_total['gated-structural']} "
+            f"({ts_ev_stats.cond_slop['baseline']} -> {ts_ev_stats.cond_slop['core-rules-v0.2.0']} -> "
+            f"{ts_ev_stats.cond_slop['gated-structural']} slop)"
         )
 
     print(
