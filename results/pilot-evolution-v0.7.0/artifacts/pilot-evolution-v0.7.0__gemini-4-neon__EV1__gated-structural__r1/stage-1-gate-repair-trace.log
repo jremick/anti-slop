@@ -1,0 +1,12 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved all 6 `[DIFF-SUPPRESSION]` findings in [test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py) without weakening any assertions:
+
+- Removed all `# type: ignore[arg-type]` suppressions by explicitly annotating the intentionally invalid runtime input table (`invalid_cases: list[tuple[Any, Any, Any, Any, Any]]`) and `bool_days: Any = True`.
+- Verified zero remaining `type: ignore` / `noqa` suppressions across `benchmarks/sources/ev1_order_ledger/`.
+- Re-ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — all 13 tests passed (exit code `0`).
+
+STDERR:
+

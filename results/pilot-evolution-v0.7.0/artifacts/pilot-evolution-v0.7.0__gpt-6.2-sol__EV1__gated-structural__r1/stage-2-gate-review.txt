@@ -1,0 +1,12 @@
+Anti-Slop Plain-English Review
+==============================
+Must-fix shortcuts: 0 | Compounding slop risks: 1
+
+Compounding Slop Risks (Review Before Merging)
+----------------------------------------------
+1. Dead code, unreachable branch, or leftover legacy compatibility path [STRUCT-DEAD-COMPAT] (benchmarks/sources/ev1_order_ledger/pricing.py:40)
+   What was found: benchmarks/sources/ev1_order_ledger/pricing.py:40 keeps or adds legacy compatibility flag 'legacy_flat_fee' on 'compute_subtotal_cents'.
+   Why engineers flag this: Unreachable branches, unused private helpers, and uncalled '*_legacy'/'*_compat' functions clutter the codebase and make it unclear which path is actually active.
+   How it compounds across AI turns: Future AI sessions cannot easily tell dead paths from live ones: they frequently edit or copy the abandoned legacy helper instead of the real code path.
+   Reference: docs/evidence.md#ext-12, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Delete the unreachable branch, unused helper, or obsolete legacy shim cleanly and re-run tests.

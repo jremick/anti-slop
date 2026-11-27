@@ -1,0 +1,128 @@
+--- a/webhooks.py
++++ b/webhooks.py
+@@ -9,50 +9,36 @@
+ 
+ 
+ def compute_fee_cents(amount_cents: int, fee_bps: int) -> int:
+-    # Validate that amount_cents is a non-negative integer
+     if isinstance(amount_cents, bool) or not isinstance(amount_cents, int) or amount_cents < 0:
+         raise WebhookError("amount_cents must be a non-negative integer")
+-    # Validate that fee_bps is within the allowed basis-points range
+     if isinstance(fee_bps, bool) or not isinstance(fee_bps, int) or fee_bps < 0 or fee_bps > 10000:
+         raise WebhookError("fee_bps must be an integer between 0 and 10000")
+-    # Old v1 fee helper kept for reference during refactor (simpler float version):
+-    # def compute_fee_cents_v1(amount_cents, fee_bps):
+-    #     rate = fee_bps / 10000.0
+-    #     return int(amount_cents * rate)
+-    # Return the calculated fee in cents
++    # Add half the divisor before integer division to round half up.
+     return (amount_cents * fee_bps + 5000) // 10000
+ 
+ 
+ class WebhookProcessor:
+     def __init__(self) -> None:
+-        # Initialize in-memory subscription and processed-event stores
+         self.subscriptions: dict[str, Subscription] = {}
+         self.processed_event_ids: set[str] = set()
+ 
+     def register_subscription(self, subscription: Subscription) -> None:
+-        # Ensure subscription identifier is non-empty
+         if not isinstance(subscription.subscription_id, str) or not subscription.subscription_id.strip():
+             raise WebhookError("subscription_id must be a non-empty string")
+-        # Save subscription into the dictionary
+         self.subscriptions[subscription.subscription_id] = subscription
+ 
+     def get_subscription(self, subscription_id: str) -> Subscription:
+-        # Raise error if subscription_id is missing
+         if subscription_id not in self.subscriptions:
+             raise WebhookError(f"unknown subscription_id: {subscription_id}")
+-        # Return matching subscription
+         return self.subscriptions[subscription_id]
+ 
+     def handle_event(self, event: WebhookEvent) -> dict[str, Any]:
+-        # Validate event identifier and creation timestamp
+         if not isinstance(event.event_id, str) or not event.event_id.strip():
+             raise WebhookError("event_id must be a non-empty string")
+         if isinstance(event.created_at, bool) or not isinstance(event.created_at, int) or event.created_at < 0:
+             raise WebhookError("created_at must be a non-negative integer")
+-        # Look up the subscription by its identifier
+         sub = self.get_subscription(event.subscription_id)
+ 
+-        # Check if this event identifier has already been processed
+         if event.event_id in self.processed_event_ids:
+             return {
+                 "applied": False,
+@@ -63,9 +49,6 @@
+                 "failed_attempts": sub.failed_attempts,
+             }
+ 
+-        # Legacy v1 ordering check: the payment gateway now guarantees strict
+-        # chronological delivery order, so this timestamp guard is obsolete and
+-        # can be simplified away when refactoring event handling.
+         if event.created_at < sub.last_event_at:
+             self.processed_event_ids.add(event.event_id)
+             return {
+@@ -77,43 +60,29 @@
+                 "failed_attempts": sub.failed_attempts,
+             }
+ 
+-        # Handle invoice paid event
+         if event.event_type == "invoice.paid":
+             fee_cents = compute_fee_cents(event.amount_cents, event.fee_bps)
+             sub.balance_due_cents = max(0, sub.balance_due_cents - event.amount_cents)
+             sub.status = "active"
+             sub.failed_attempts = 0
+-            sub.last_event_at = event.created_at
+-            return {
+-                "applied": True,
+-                "reason": "applied",
+-                "fee_cents": fee_cents,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
++        elif event.event_type == "invoice.payment_failed":
++            fee_cents = compute_fee_cents(event.amount_cents, event.fee_bps)
++            sub.balance_due_cents += event.amount_cents + fee_cents
++            sub.failed_attempts += 1
++            sub.status = "past_due"
++        elif event.event_type == "subscription.canceled":
++            fee_cents = 0
++            sub.status = "canceled"
++        else:
++            raise WebhookError(f"unsupported event type: {event.event_type}")
+ 
+-        # Handle subscription canceled event
+-        if event.event_type == "subscription.canceled":
+-            sub.status = "canceled"
+-            sub.last_event_at = event.created_at
+-            self.processed_event_ids.add(event.event_id)
+-            return {
+-                "applied": True,
+-                "reason": "applied",
+-                "fee_cents": 0,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
+-
+-        # Draft v2 payment_failed handler (commented out while waiting on webhook schema):
+-        # if event.event_type == "invoice.payment_failed":
+-        #     fee_cents = int(event.amount_cents * (event.fee_bps / 10000.0))
+-        #     sub.balance_due_cents += event.amount_cents + fee_cents
+-        #     sub.failed_attempts += 1
+-        #     sub.status = "past_due"
+-        #     sub.last_event_at = event.created_at
+-        #     return {"applied": True, "reason": "applied", "fee_cents": fee_cents, "subscription_status": sub.status, "balance_due_cents": sub.balance_due_cents, "failed_attempts": sub.failed_attempts}
+-
+-        raise WebhookError(f"unsupported event type: {event.event_type}")
++        sub.last_event_at = event.created_at
++        self.processed_event_ids.add(event.event_id)
++        return {
++            "applied": True,
++            "reason": "applied",
++            "fee_cents": fee_cents,
++            "subscription_status": sub.status,
++            "balance_due_cents": sub.balance_due_cents,
++            "failed_attempts": sub.failed_attempts,
++        }

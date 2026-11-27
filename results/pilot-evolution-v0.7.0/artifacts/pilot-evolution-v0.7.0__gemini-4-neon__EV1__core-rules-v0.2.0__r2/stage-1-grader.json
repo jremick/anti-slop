@@ -1,0 +1,52 @@
+{
+  "case_id": "EV1",
+  "passed": false,
+  "checks": [
+    {
+      "id": "functional_all_turns",
+      "passed": true,
+      "detail": "All hidden functional contracts passed through stage 1"
+    },
+    {
+      "id": "mutation_test_strength",
+      "passed": false,
+      "detail": "baseline_tests_passed=True, killed=6/15 (40.0%, min 65%), test_theater=0; survived sample: ['ledger.py:26 bypass raise -> pass', 'api.py:78 boolean (or -> and)', 'pricing.py:46 compare (> -> >=)']"
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "passed": true,
+      "detail": "0 duplicated logic blocks across production modules"
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "passed": false,
+      "detail": "api.py:25 keeps or adds legacy compatibility flag 'legacy_flat_fee' on 'OrderService.place_order'.; pricing.py:55 keeps or adds legacy compatibility flag 'legacy_flat_fee' on 'calculate_order_totals'."
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "passed": true,
+      "detail": "prod_files=6/8, max_func=47L/5br, god_fns=0, god_files=0"
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "passed": false,
+      "detail": "4 shortcut/silent-failure finding(s): tests/test_upgrades.py:141 adds unjustified '# type: ignore[...]' without a trailing reason.; tests/test_upgrades.py:142 adds unjustified '# type: ignore[...]' without a trailing reason.; tests/test_upgrades.py:143 adds unjustified '# type: ignore[...]' without a trailing reason."
+    }
+  ],
+  "metrics": {
+    "functional_passed": true,
+    "mutation_kill_rate": 0.4,
+    "mutation_killed": 6,
+    "mutation_total": 15,
+    "duplicate_blocks": 0,
+    "dead_compat": 2,
+    "god_functions": 0,
+    "god_files": 0,
+    "test_theater": 0,
+    "silent_failures_and_shortcuts": 4,
+    "prod_files_count": 6,
+    "prod_code_lines": 367,
+    "max_func_lines": 47,
+    "max_func_branches": 5
+  }
+}

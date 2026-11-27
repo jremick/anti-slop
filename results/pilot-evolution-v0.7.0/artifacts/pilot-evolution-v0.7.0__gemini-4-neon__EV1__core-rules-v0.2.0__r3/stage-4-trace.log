@@ -1,0 +1,21 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 4
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 4 (clean removal of `legacy_flat_fee` / `LEGACY_FLAT_FEE_CENTS` and fail-closed `audit_sink` logging) and verified all checks pass.
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L130-L157)**: Removed `LEGACY_FLAT_FEE_CENTS` and the `legacy_flat_fee` parameter/branch from `calculate_order_pricing` and `calculate_order_totals` with no `**kwargs` shims or dead code.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L20-L246)**:
+  - Removed `legacy_flat_fee` from `OrderService.place_order`.
+  - Added optional `audit_sink=None` to `OrderService.__init__` and `_emit_audit(entry)` emitting `{'action': entry.kind, 'account_id': entry.account_id, 'amount_cents': entry.total_cents, 'entry_id': entry.entry_id}` for every newly committed `place_order`, `upgrade_subscription`, and `refund_order` (skipping idempotent replays).
+  - Emits the audit event before committing the order, subscription plan update, ledger entry, or idempotency key so any exception raised by `audit_sink` propagates fail-closed with zero partial state committed.
+- **[test_orders.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_orders.py)** & **[test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py)**: Removed the obsolete legacy flat-fee test and updated the fixed-promo test to no longer pass `legacy_flat_fee`.
+- **[test_turn4_cleanup_and_audit.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_turn4_cleanup_and_audit.py)**: Added tests verifying `LEGACY_FLAT_FEE_CENTS` is removed, passing `legacy_flat_fee=...` raises `TypeError`, `audit_sink` logs committed mutations while skipping idempotent replays, and failing `audit_sink` leaves orders, subscriptions, ledger entries, and idempotency keys untouched.
+
+### Verification
+- Verified zero references to `legacy_flat_fee` or `LEGACY_FLAT_FEE_CENTS` remain in `benchmarks/sources/ev1_order_ledger/*.py`.
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — exited `0` (`Ran 23 tests in 0.002s`, `OK`).
+
+STDERR:
+

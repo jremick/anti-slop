@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "cc495bc6-ca4a-4de4-b980-7e38f44f2905", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 267501, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades with idempotency, stdlib-only) in `benchmarks/sources/ev1_order_ledger/`:
+
+### Changes
+- [pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L65-L103): Added canonical proration helpers `validate_proration_window`, `compute_prorated_upgrade_cents`, and `calculate_plan_upgrade_totals` using `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and `compute_tax_cents(subtotal, new_plan.tax_bps)`, rejecting non-upgrades, invalid bounds, and booleans with `ValidationError`.
+- [ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L10-L102): Added `validate_idempotency_key`, `OrderLedger.update_subscription_plan`, `OrderLedger.lookup_idempotent_entry`, and `OrderLedger.record_idempotent_entry` with type-aware request fingerprinting so identical replays return the original `LedgerEntry` without duplication and key reuse with different arguments raises `ValidationError`.
+- [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L72-L120): Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` to validate inputs, check/record idempotency, update `subscription.plan_id`, and append a `LedgerEntry` with `kind="plan_upgrade"` and `reference_id=subscription_id`.
+- [test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py): Added 9 unit tests covering exact half-up proration and tax rounding, `new_plan.tax_bps` usage, boundary windows (`0` and full cycle), invalid IDs/non-upgrades/bounds/booleans/empty keys, idempotent replay (including after later upgrades), idempotency conflicts, and failed-request key non-poisoning.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — all 13 tests passed (exit code `0`).
+
+STDERR:
+

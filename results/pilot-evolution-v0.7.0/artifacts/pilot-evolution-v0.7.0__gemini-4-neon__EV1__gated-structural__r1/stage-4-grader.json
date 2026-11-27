@@ -1,0 +1,52 @@
+{
+  "case_id": "EV1",
+  "passed": true,
+  "checks": [
+    {
+      "id": "functional_all_turns",
+      "passed": true,
+      "detail": "All hidden functional contracts passed through stage 4"
+    },
+    {
+      "id": "mutation_test_strength",
+      "passed": true,
+      "detail": "baseline_tests_passed=True, killed=12/15 (80.0%, min 65%), test_theater=0; survived sample: ['pricing.py:47 compare (> -> >=)', 'ledger.py:38 bypass raise -> pass', 'ledger.py:39 compare (< -> <=)']"
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "passed": true,
+      "detail": "0 duplicated logic blocks across production modules"
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "passed": true,
+      "detail": "0 dead/orphaned compat paths and clean legacy_flat_fee removal"
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "passed": true,
+      "detail": "prod_files=6/8, max_func=47L/8br, god_fns=0, god_files=0"
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "passed": true,
+      "detail": "0 silent catches, silent fallbacks, test skips, suppressions, or stubs"
+    }
+  ],
+  "metrics": {
+    "functional_passed": true,
+    "mutation_kill_rate": 0.8,
+    "mutation_killed": 12,
+    "mutation_total": 15,
+    "duplicate_blocks": 0,
+    "dead_compat": 0,
+    "god_functions": 0,
+    "god_files": 0,
+    "test_theater": 0,
+    "silent_failures_and_shortcuts": 0,
+    "prod_files_count": 6,
+    "prod_code_lines": 708,
+    "max_func_lines": 47,
+    "max_func_branches": 8
+  }
+}

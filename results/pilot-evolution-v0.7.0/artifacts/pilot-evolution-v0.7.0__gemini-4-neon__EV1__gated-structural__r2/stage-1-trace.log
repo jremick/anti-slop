@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "d8425fb1-ab1c-45c3-887d-0e7a1e301d4c", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 301202, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades and idempotency) using stdlib only:
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L65-L96)**: Added canonical helpers `validate_proration_window`, `compute_prorated_cents`, and `calculate_upgrade_totals` to validate integer proration bounds (rejecting booleans and out-of-range days), reject non-upgrades (`new_plan.monthly_cents <= old_plan.monthly_cents`), compute exact integer half-up proration via `round_half_up_div`, and calculate tax via `compute_tax_cents(subtotal, new_plan.tax_bps)`.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L10-L96)**: Added `validate_non_empty_str` and canonical typed-fingerprint idempotency methods `OrderLedger.lookup_idempotent_entry` and `OrderLedger.record_idempotent_entry` to return original `LedgerEntry` objects on identical replay and raise `ValidationError` on key conflict or empty/non-string keys.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L72-L129)**: Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` coordinating input/bound validation, idempotency lookup, upgrade proration & tax calculation, `subscription.plan_id` update, and `LedgerEntry` persistence (`kind='plan_upgrade'`, `reference_id=subscription_id`).
+- **[test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)**: Added 11 unit tests covering half-up proration and tax rounding, zero/full-cycle boundaries, `new_plan.tax_bps` usage, unknown IDs, non-upgrades, invalid bounds/booleans/empty strings, keyword-only `idempotency_key`, idempotency replay (including after subsequent upgrades), and conflict detection across all arguments.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — exited `0` (`Ran 15 tests in 0.001s — OK`).
+
+STDERR:
+

@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "66798e8b-d04b-43c3-be9a-7c49f92d64f0", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 259299, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades and idempotency, stdlib only) in `benchmarks/sources/ev1_order_ledger/`:
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py)**: Added canonical helpers `validate_proration_window`, `compute_prorated_upgrade_cents`, and `calculate_upgrade_totals` computing exact integer-cent half-up proration via `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and tax via `compute_tax_cents(subtotal, new_plan.tax_bps)`, rejecting non-upgrades, invalid bounds, and booleans/non-integers with `ValidationError`.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py)**: Added canonical idempotency helpers on `OrderLedger` (`validate_idempotency_key`, `lookup_idempotent_entry`, `record_idempotent_entry`) using type-aware request fingerprints so identical replays return the original `LedgerEntry` without duplicating entries and conflicting arguments (including `bool` vs `int`) raise `ValidationError`.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py)**: Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` coordinating input validation, idempotency lookup/recording, proration/tax computation, `subscription.plan_id` update, and `LedgerEntry` creation (`kind="plan_upgrade"`, `reference_id=subscription_id`).
+- **[test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)**: Added unit tests covering exact half-up proration and tax rounding, `0` and full-cycle boundary windows, unknown IDs, non-upgrades, invalid bounds, booleans/non-ints, empty keys, idempotent replays (including after subsequent upgrades), and idempotency conflicts.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py`: **11 tests passed (`OK`, exit code 0)** (4 baseline tests in [test_orders.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_orders.py) + 7 new tests in [test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)).
+
+STDERR:
+

@@ -1,0 +1,18 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 (partial refunds with exact penny conservation and credit-note export):
+
+- **Cumulative penny-conserving tax reversal ([pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L220-L246)):** Added `compute_cumulative_refund_split` computing target cumulative tax via `round_half_up_div(order_tax_cents * (already_refunded_total + amount_cents), order_total_cents)` so every refund satisfies `refund_subtotal + refund_tax == amount_cents` and any sequence of partial refunds totalling `order.total_cents` reverses exact `order.subtotal_cents` and `order.tax_cents` with zero penny drift, raising `ValidationError` on over-refund.
+- **Ledger refund tracking ([ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L65-L132)):** Hardened `get_order` input validation and added `refund_entries_for_order` and `refunded_totals_for_order`.
+- **Service refund & credit-note methods ([api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L238-L296)):**
+  - Added `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` recording negative `LedgerEntry(kind="order_refund", subtotal_cents=-refund_subtotal, tax_cents=-refund_tax, total_cents=-amount_cents, reference_id=order_id, reason=reason)` with the same idempotency replay/conflict semantics.
+  - Added `OrderService.export_credit_note(refund_entry_id)` returning `{"entry_id", "order_id", "account_id", "subtotal_cents", "tax_cents", "total_cents", "reason"}` with positive refunded cent magnitudes and raising `ValidationError` for unknown or non-refund entries.
+- **Unit tests ([test_refunds.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py)):** Added 6 test methods covering 3-chunk and uneven discounted multi-chunk penny conservation, over-refund and zero-total order rejection, input validation, idempotency replay/conflict (including cross-operation conflict), and credit-note export.
+
+### Verification
+Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — all 29 tests passed (exit code `0`).
+
+STDERR:
+

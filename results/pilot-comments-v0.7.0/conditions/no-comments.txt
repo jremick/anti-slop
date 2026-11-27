@@ -1,0 +1,6 @@
+CM1 comment-hygiene ablation arm: no-comments
+Workspace variant: no_comments
+Pinned webhooks.py SHA-256: 06ae0ab729e3bc51265f35744bcedaf11ddd2759c873ea7f96b70b00fa5b13c3
+Delivered system instruction (identical across all 3 CM1 arms):
+
+Follow the user's request directly using only the files provided in this workspace.

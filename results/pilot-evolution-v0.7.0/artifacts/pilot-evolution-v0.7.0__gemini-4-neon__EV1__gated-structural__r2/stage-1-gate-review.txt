@@ -1,0 +1,19 @@
+Anti-Slop Plain-English Review
+==============================
+Must-fix shortcuts: 2 | Compounding slop risks: 0
+
+Must-Fix Shortcuts (Blocking)
+-----------------------------
+1. A linter or type-checker warning was silenced without explanation [DIFF-SUPPRESSION] (benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py:172)
+   What was found: benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py:172 adds unjustified '# type: ignore[...]' without a trailing reason.
+   Why engineers flag this: Blanket ignore comments hide real type mismatches and bugs instead of resolving them, leaving reviewers with no idea whether the bypass is safe.
+   How it compounds across AI turns: Once blanket suppressions appear, future AI turns mimic them to silence new warnings rather than fixing interfaces.
+   Reference: docs/evidence.md#ext-12, docs/evidence.md#oai-03
+   Fix / prompt to give your AI: Fix the underlying lint or type error. If an external library truly requires a suppression, scope it to one specific rule code with a short reason.
+
+2. A linter or type-checker warning was silenced without explanation [DIFF-SUPPRESSION] (benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py:185)
+   What was found: benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py:185 adds unjustified '# type: ignore[...]' without a trailing reason.
+   Why engineers flag this: Blanket ignore comments hide real type mismatches and bugs instead of resolving them, leaving reviewers with no idea whether the bypass is safe.
+   How it compounds across AI turns: Once blanket suppressions appear, future AI turns mimic them to silence new warnings rather than fixing interfaces.
+   Reference: docs/evidence.md#ext-12, docs/evidence.md#oai-03
+   Fix / prompt to give your AI: Fix the underlying lint or type error. If an external library truly requires a suppression, scope it to one specific rule code with a short reason.

@@ -1,0 +1,88 @@
+--- a/webhooks.py
++++ b/webhooks.py
+@@ -14,6 +14,17 @@
+     if isinstance(fee_bps, bool) or not isinstance(fee_bps, int) or fee_bps < 0 or fee_bps > 10000:
+         raise WebhookError("fee_bps must be an integer between 0 and 10000")
+     return (amount_cents * fee_bps + 5000) // 10000
++
++
++def _result(sub: Subscription, *, applied: bool, reason: str, fee_cents: int = 0) -> dict[str, Any]:
++    return {
++        "applied": applied,
++        "reason": reason,
++        "fee_cents": fee_cents,
++        "subscription_status": sub.status,
++        "balance_due_cents": sub.balance_due_cents,
++        "failed_attempts": sub.failed_attempts,
++    }
+ 
+ 
+ class WebhookProcessor:
+@@ -39,52 +50,28 @@
+         sub = self.get_subscription(event.subscription_id)
+ 
+         if event.event_id in self.processed_event_ids:
+-            return {
+-                "applied": False,
+-                "reason": "duplicate",
+-                "fee_cents": 0,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
++            return _result(sub, applied=False, reason="duplicate")
+ 
+         if event.created_at < sub.last_event_at:
+             self.processed_event_ids.add(event.event_id)
+-            return {
+-                "applied": False,
+-                "reason": "stale_event",
+-                "fee_cents": 0,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
++            return _result(sub, applied=False, reason="stale_event")
+ 
+         if event.event_type == "invoice.paid":
+             fee_cents = compute_fee_cents(event.amount_cents, event.fee_bps)
+             sub.balance_due_cents = max(0, sub.balance_due_cents - event.amount_cents)
+             sub.status = "active"
+             sub.failed_attempts = 0
+-            sub.last_event_at = event.created_at
+-            return {
+-                "applied": True,
+-                "reason": "applied",
+-                "fee_cents": fee_cents,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
++        elif event.event_type == "invoice.payment_failed":
++            fee_cents = compute_fee_cents(event.amount_cents, event.fee_bps)
++            sub.balance_due_cents += event.amount_cents + fee_cents
++            sub.failed_attempts += 1
++            sub.status = "past_due"
++        elif event.event_type == "subscription.canceled":
++            fee_cents = 0
++            sub.status = "canceled"
++        else:
++            raise WebhookError(f"unsupported event type: {event.event_type}")
+ 
+-        if event.event_type == "subscription.canceled":
+-            sub.status = "canceled"
+-            sub.last_event_at = event.created_at
+-            self.processed_event_ids.add(event.event_id)
+-            return {
+-                "applied": True,
+-                "reason": "applied",
+-                "fee_cents": 0,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
+-
+-        raise WebhookError(f"unsupported event type: {event.event_type}")
++        sub.last_event_at = event.created_at
++        self.processed_event_ids.add(event.event_id)
++        return _result(sub, applied=True, reason="applied", fee_cents=fee_cents)

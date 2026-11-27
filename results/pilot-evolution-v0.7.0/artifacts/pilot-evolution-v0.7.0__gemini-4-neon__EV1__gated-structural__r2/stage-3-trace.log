@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 partial refunds with cumulative penny conservation and credit-note export:
+
+### Changes
+- [pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L210-L240): Added `calculate_refund_allocation`, which enforces `already_refunded + amount_cents <= order.total_cents` and computes cumulative proportional tax reversal via exact integer half-up rounding (`target_cumulative_tax - already_refunded_tax`), ensuring `refund_subtotal_cents + refund_tax_cents == amount_cents` per chunk and zero penny drift across any sequence of partial refunds totalling `order.total_cents`.
+- [ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L115-L126): Added `OrderLedger.entries_for_reference(reference_id, *, kind=None)` to query recorded refund entries directly from the ledger.
+- [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L233-L297):
+  - Added `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` with fail-closed validation, over-refund rejection, idempotency replay/conflict semantics (checked before over-refund so retries of full refunds succeed), and negative `LedgerEntry(kind="order_refund", ...)` recording.
+  - Added `OrderService.export_credit_note(refund_entry_id)` returning positive refunded cent magnitudes (`entry_id`, `order_id`, `account_id`, `subtotal_cents`, `tax_cents`, `total_cents`, `reason`) and raising `ValidationError` for unknown or non-refund entries.
+- [test_refunds.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py): Added 7 test cases covering multi-chunk and 1-cent-at-a-time penny-conserving refunds, discounted and zero-tax order refunds, over-refund/zero-total/invalid-input rejection, idempotency replay and cross-operation conflict, and credit-note export validation.
+
+### Verification
+- Ran [run_checks.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/run_checks.py): all 31 tests passed (`OK`), with zero lint/type suppressions.
+
+STDERR:
+

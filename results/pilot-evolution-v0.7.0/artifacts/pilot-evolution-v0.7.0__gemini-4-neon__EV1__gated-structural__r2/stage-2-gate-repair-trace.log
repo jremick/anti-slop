@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved all 3 structural review findings without weakening any tests:
+
+1. **Split `OrderService.upgrade_subscription` (`[STRUCT-GOD-FUNCTION]`)**:
+   - In [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L114-L227), extracted `_build_upgrade_fingerprint` (validation and idempotency fingerprinting) and `_commit_upgrade` (entry creation, subscription update, and idempotent recording), reducing `upgrade_subscription` to 47 lines (all functions in the package are now ≤ 53 lines).
+2. **Removed redundant `legacy_flat_fee` propagation in `pricing.py` (`[STRUCT-DEAD-COMPAT]`)**:
+   - In [pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L90-L149), removed `calculate_order_pricing` and restored `calculate_order_totals` untouched, keeping promo + tax logic exclusively in `calculate_discounted_totals` (with `_compute_promo_discount_cents` extracted for clarity).
+   - Updated `OrderService.place_order` in [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L58-L71) to compute pre-discount subtotal via `calculate_order_totals(..., tax_bps=0, legacy_flat_fee=legacy_flat_fee)` and delegate discount + tax calculation directly to `calculate_discounted_totals`.
+   - Updated `test_shared_canonical_pricing_helper_parity` in [test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py#L365-L401) to assert parity across `calculate_discounted_totals`, `OrderService.place_order`, `OrderService.upgrade_subscription`, and `calculate_upgrade_pricing`.
+
+### Verification
+- Verified all functions across `benchmarks/sources/ev1_order_ledger/*.py` are ≤ 53 lines and no lint/type suppressions exist.
+- Ran [run_checks.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/run_checks.py): all 24 tests passed (`OK`).
+
+STDERR:
+

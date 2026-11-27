@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "308d150f-6701-4894-a0ea-f19bbb1f2cb9", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 102688, "cost_usd": null}
+RC: 0
+STDOUT:
+Updated [webhooks.py](file://<TMP_WORKSPACE>/webhooks.py) (leaving [tests/test_webhooks.py](file://<TMP_WORKSPACE>/tests/test_webhooks.py) and [run_checks.py](file://<TMP_WORKSPACE>/run_checks.py) unmodified):
+
+- **Fixed `invoice.paid` idempotency** ([webhooks.py](file://<TMP_WORKSPACE>/webhooks.py#L62-L76)): Recorded `event.event_id` in `self.processed_event_ids` after applying `invoice.paid`, so retries return `applied: False, reason: "duplicate"` without deducting `balance_due_cents` again.
+- **Implemented `invoice.payment_failed`** ([webhooks.py](file://<TMP_WORKSPACE>/webhooks.py#L78-L92)): Computes `fee_cents` with `compute_fee_cents(event.amount_cents, event.fee_bps)`, adds `event.amount_cents + fee_cents` to `sub.balance_due_cents`, increments `sub.failed_attempts`, sets `sub.status = "past_due"`, updates `sub.last_event_at = event.created_at`, records `event.event_id` in `self.processed_event_ids`, and returns the standard result dictionary.
+- **Preserved invariants & cleanliness**: Kept existing event-ordering checks, exact integer-cent half-up fee arithmetic, and clean code with no dead commented-out blocks.
+
+### Verification
+- Ran `python3 run_checks.py`: all 5 tests passed (exit code `0`).
+- Verified edge cases (half-up rounding boundaries, stale event ordering, repeated failed attempts, and atomic error handling on invalid amounts).
+
+STDERR:
+

@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "68a3be5e-6b86-4992-9f25-98464919eab9", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 231818, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades and idempotency) for `ev1_order_ledger` using only the Python standard library:
+
+- **Canonical proration helpers ([pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L65-L105)):** Added `validate_proration_window`, `compute_prorated_upgrade_cents`, and `calculate_upgrade_totals` using exact integer-cent `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and `compute_tax_cents(subtotal, new_plan.tax_bps)`, rejecting non-upgrades, invalid bounds, non-integers, and booleans with `ValidationError`.
+- **Canonical idempotency helpers ([ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L10-L100)):** Added `validate_idempotency_key`, typed request fingerprinting (preventing `bool`/`int` collisions such as `True == 1`), `OrderLedger.get_idempotent_entry`, and `OrderLedger.record_idempotent_entry`, plus string validation on `get_plan` and `get_subscription`.
+- **Service method ([api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L68-L117)):** Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` that validates inputs, resolves idempotency replay/conflict before mutating state, updates `subscription.plan_id`, and records a `LedgerEntry` with `kind="plan_upgrade"` and `reference_id=subscription_id`.
+- **Unit tests ([test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)):** Added 9 unit test methods covering half-up rounding ties (`0.5`, `2.5`, `750.5`), boundary windows (`days_remaining == 0` and `days_remaining == cycle_days`), `new_plan.tax_bps` taxation, unknown IDs, non-upgrades, invalid bounds, booleans, empty/invalid `idempotency_key`, idempotency replay (including after further upgrades), conflict errors, and canonical helper invariants.
+
+### Verification
+Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — all 13 tests passed (exit code `0`).
+
+STDERR:
+

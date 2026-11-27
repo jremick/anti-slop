@@ -1,0 +1,23 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "85d2c287-2ced-4e63-9a37-3553efaf6af7", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 223855, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades with idempotency, stdlib only) in `benchmarks/sources/ev1_order_ledger/`:
+
+### Changes
+- **Pricing helpers** ([pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L65-L103)):
+  - Added `validate_proration_window`, `compute_prorated_upgrade_cents`, and `calculate_prorated_upgrade_totals` using `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and `compute_tax_cents(subtotal, new_plan.tax_bps)`.
+  - Rejects non-upgrades (`new_monthly_cents <= old_monthly_cents`), invalid bounds (`cycle_days <= 0`, `days_remaining < 0`, `days_remaining > cycle_days`), booleans, and non-integers with `ValidationError`.
+- **Ledger idempotency helpers** ([ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L10-L106)):
+  - Added `validate_idempotency_key`, `OrderLedger.lookup_idempotent_entry`, and `OrderLedger.record_idempotent_entry` with runtime-typed fingerprints so `int`/`bool` values cannot collide.
+  - Replays with identical arguments return the original `LedgerEntry` without adding duplicate entries; conflicting arguments raise `ValidationError`.
+- **Service facade** ([api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L72-L133)):
+  - Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` to validate inputs, check idempotency before mutating state, compute prorated subtotal/tax/total, update `subscription.plan_id`, and record a `LedgerEntry` with `kind="plan_upgrade"` and `reference_id=subscription_id`.
+- **Unit tests** ([test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)):
+  - Added 7 test methods covering mid-cycle upgrades with `new_plan.tax_bps`, half-up proration/tax rounding ties, boundary days (`0` and `cycle_days`), unknown IDs/non-upgrades/invalid bounds/booleans/empty keys, failed-call non-poisoning, and idempotency replay/conflict.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — **11/11 tests passed** (exit code `0`).
+
+STDERR:
+

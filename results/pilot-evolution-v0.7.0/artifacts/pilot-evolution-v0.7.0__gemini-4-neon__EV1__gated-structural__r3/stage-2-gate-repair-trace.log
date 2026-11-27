@@ -1,0 +1,13 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved both stage 2 anti-slop review findings:
+
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L109-L223)** (`[STRUCT-GOD-FUNCTION]`): Split `OrderService.upgrade_subscription` into focused helpers `_validate_upgrade_fingerprint` (validation + idempotency fingerprint construction) and `_build_upgrade_entry` (proration, promo/tax calculation, and ledger entry creation), bringing `upgrade_subscription` down to 41 lines.
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L129-L140)** & **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L58-L67)** (`[STRUCT-DEAD-COMPAT]`): Removed the newly introduced `compute_order_pre_tax_subtotal` helper that repeated `legacy_flat_fee`, computing the pre-tax subtotal directly via `compute_subtotal_cents` before delegating to `apply_promo_and_tax`.
+
+Verification: `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` exited `0` (18/18 tests passing).
+
+STDERR:
+

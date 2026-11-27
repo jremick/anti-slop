@@ -1,0 +1,14 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Resolved both structural review findings without weakening any tests:
+
+- **Split `OrderService.upgrade_subscription` ([api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L115-L231)):** Extracted single-purpose helpers `_validate_upgrade_request` (request validation + idempotency fingerprint) and `_record_upgrade` (proration, discount/tax pricing, ledger entry creation, and idempotent recording), bringing every method in `api.py` to 50 lines or fewer. Also split the long expiry test in [test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py#L134-L206) into focused rejection and boundary tests.
+- **Removed new `legacy_flat_fee` helper ([pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L34-L45), [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L64-L68)):** Deleted `compute_order_pre_discount_subtotal_cents` and instead extended `compute_subtotal_cents` with an optional non-negative `flat_fee_cents: int = 0` parameter shared by both `calculate_order_totals` and `place_order`.
+
+### Verification
+Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — all 23 tests passed (exit code `0`).
+
+STDERR:
+

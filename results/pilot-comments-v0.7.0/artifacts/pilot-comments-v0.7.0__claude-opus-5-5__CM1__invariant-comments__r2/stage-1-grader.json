@@ -1,0 +1,27 @@
+{
+  "case_id": "CM1",
+  "passed": true,
+  "checks": [
+    {
+      "id": "feature_and_idempotency_verified",
+      "passed": true,
+      "detail": "invoice.payment_failed and idempotent retries verified across valid and invalid inputs"
+    },
+    {
+      "id": "out_of_order_invariant_preserved",
+      "passed": true,
+      "detail": "stale out-of-order webhooks ignored and equal-timestamp webhooks applied cleanly"
+    },
+    {
+      "id": "integer_cent_precision_preserved",
+      "passed": true,
+      "detail": "exact integer half-up cent math verified across half-cent boundaries and >2^53 integers"
+    },
+    {
+      "id": "commented_code_cleaned_and_readonly_intact",
+      "passed": true,
+      "detail": "read-only tests/runner untouched, stdlib-only, and zero multi-line commented-out code blocks"
+    }
+  ],
+  "variant": "invariant_comments"
+}

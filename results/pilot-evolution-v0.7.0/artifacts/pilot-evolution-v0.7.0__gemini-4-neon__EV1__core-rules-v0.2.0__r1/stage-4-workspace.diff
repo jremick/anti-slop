@@ -1,0 +1,1669 @@
+--- a/benchmarks/sources/ev1_order_ledger/__init__.py
++++ b/benchmarks/sources/ev1_order_ledger/__init__.py
+@@ -2,7 +2,16 @@
+ 
+ from .api import OrderService
+ from .ledger import OrderLedger
+-from .models import BillingError, LedgerEntry, LineItem, Order, Plan, Subscription, ValidationError
++from .models import (
++    BillingError,
++    LedgerEntry,
++    LineItem,
++    Order,
++    Plan,
++    PromoCode,
++    Subscription,
++    ValidationError,
++)
+ 
+ __all__ = [
+     "BillingError",
+@@ -12,6 +21,7 @@
+     "OrderLedger",
+     "OrderService",
+     "Plan",
++    "PromoCode",
+     "Subscription",
+     "ValidationError",
+ ]
+
+--- a/benchmarks/sources/ev1_order_ledger/api.py
++++ b/benchmarks/sources/ev1_order_ledger/api.py
+@@ -2,34 +2,84 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Dict, Sequence
+-
+-from .ledger import OrderLedger
+-from .models import LedgerEntry, LineItem, Order, Plan, Subscription, ValidationError
+-from .pricing import calculate_order_totals
++from typing import Callable, Dict, Sequence
++
++from .ledger import OrderLedger, validate_idempotency_key
++from .models import LedgerEntry, LineItem, Order, Plan, PromoCode, Subscription, ValidationError
++from .pricing import (
++    apply_promo_and_tax,
++    compute_cumulative_refund_split,
++    compute_prorated_upgrade_cents,
++    compute_subtotal_cents,
++    parse_iso_date,
++    validate_positive_int,
++    validate_promo_code_str,
++    validate_proration_window,
++)
+ 
+ 
+ class OrderService:
+-    def __init__(self, ledger: OrderLedger | None = None) -> None:
++    def __init__(
++        self,
++        ledger: OrderLedger | None = None,
++        audit_sink: Callable[[Dict[str, object]], None] | None = None,
++    ) -> None:
++        if audit_sink is not None and not callable(audit_sink):
++            raise ValidationError("audit_sink must be callable or None")
+         self.ledger = ledger if ledger is not None else OrderLedger()
++        self.audit_sink = audit_sink
++
++    def _emit_audit(self, entry: LedgerEntry) -> None:
++        if self.audit_sink is not None:
++            self.audit_sink(
++                {
++                    "action": entry.kind,
++                    "account_id": entry.account_id,
++                    "amount_cents": entry.total_cents,
++                    "entry_id": entry.entry_id,
++                }
++            )
+ 
+     def register_plan(self, plan: Plan) -> None:
+         self.ledger.add_plan(plan)
+ 
++    def register_promo(
++        self,
++        code: str,
++        *,
++        percent_off: int | None = None,
++        amount_off_cents: int | None = None,
++        expires_on: str | None = None,
++        min_subtotal_cents: int = 0,
++    ) -> PromoCode:
++        promo = PromoCode(
++            code=code,
++            percent_off=percent_off,
++            amount_off_cents=amount_off_cents,
++            expires_on=expires_on,
++            min_subtotal_cents=min_subtotal_cents,
++        )
++        self.ledger.add_promo(promo)
++        return promo
++
+     def place_order(
+         self,
+         account_id: str,
+         items: Sequence[LineItem],
+         *,
+         tax_bps: int = 0,
+-        legacy_flat_fee: bool = False,
++        promo_code: str | None = None,
++        as_of: str | None = None,
+     ) -> Order:
+         if not account_id.strip():
+             raise ValidationError("account_id must be non-empty")
+-        subtotal, tax, total = calculate_order_totals(
+-            items,
+-            tax_bps=tax_bps,
+-            legacy_flat_fee=legacy_flat_fee,
++        promo = self.ledger.get_promo(promo_code) if promo_code is not None else None
++        gross_subtotal = compute_subtotal_cents(items)
++        subtotal, discount, tax, total = apply_promo_and_tax(
++            gross_subtotal,
++            tax_bps,
++            promo=promo,
++            as_of=as_of,
+         )
+         order_id = self.ledger.next_id("ord")
+         order = Order(
+@@ -39,8 +89,14 @@
+             subtotal_cents=subtotal,
+             tax_cents=tax,
+             total_cents=total,
+-        )
+-        self.ledger.save_order(order)
++            discount_cents=discount,
++            promo_code=promo.code if promo is not None else None,
++        )
++        metadata = (
++            {"promo_code": promo.code, "discount_cents": discount}
++            if promo is not None
++            else {}
++        )
+         entry = LedgerEntry(
+             entry_id=self.ledger.next_id("ent"),
+             account_id=account_id,
+@@ -49,7 +105,10 @@
+             tax_cents=tax,
+             total_cents=total,
+             reference_id=order_id,
+-        )
++            metadata=metadata,
++        )
++        self._emit_audit(entry)
++        self.ledger.save_order(order)
+         self.ledger.record_entry(entry)
+         return order
+ 
+@@ -65,6 +124,149 @@
+         self.ledger.save_subscription(sub)
+         return sub
+ 
++    def upgrade_subscription(
++        self,
++        subscription_id: str,
++        new_plan_id: str,
++        days_remaining: int,
++        cycle_days: int,
++        *,
++        idempotency_key: str,
++        promo_code: str | None = None,
++        as_of: str | None = None,
++    ) -> LedgerEntry:
++        validate_idempotency_key(idempotency_key)
++        if not isinstance(subscription_id, str) or not subscription_id.strip():
++            raise ValidationError("subscription_id must be a non-empty string")
++        if not isinstance(new_plan_id, str) or not new_plan_id.strip():
++            raise ValidationError("new_plan_id must be a non-empty string")
++        validate_proration_window(days_remaining, cycle_days)
++        if promo_code is not None:
++            validate_promo_code_str(promo_code)
++        if as_of is not None:
++            parse_iso_date(as_of, "as_of")
++
++        fingerprint = (
++            "upgrade_subscription",
++            subscription_id,
++            new_plan_id,
++            days_remaining,
++            cycle_days,
++            promo_code,
++            as_of,
++        )
++        existing = self.ledger.get_idempotent_entry(idempotency_key, fingerprint)
++        if existing is not None:
++            return existing
++
++        sub = self.ledger.get_subscription(subscription_id)
++        old_plan = self.ledger.get_plan(sub.plan_id)
++        new_plan = self.ledger.get_plan(new_plan_id)
++        promo = self.ledger.get_promo(promo_code) if promo_code is not None else None
++        gross_subtotal = compute_prorated_upgrade_cents(
++            old_plan.monthly_cents,
++            new_plan.monthly_cents,
++            days_remaining,
++            cycle_days,
++        )
++        subtotal, discount, tax, total = apply_promo_and_tax(
++            gross_subtotal,
++            new_plan.tax_bps,
++            promo=promo,
++            as_of=as_of,
++        )
++
++        entry = LedgerEntry(
++            entry_id=self.ledger.next_id("ent"),
++            account_id=sub.account_id,
++            kind="plan_upgrade",
++            subtotal_cents=subtotal,
++            tax_cents=tax,
++            total_cents=total,
++            reference_id=subscription_id,
++            metadata={
++                "old_plan_id": old_plan.plan_id,
++                "new_plan_id": new_plan.plan_id,
++                "days_remaining": days_remaining,
++                "cycle_days": cycle_days,
++                "idempotency_key": idempotency_key,
++                "discount_cents": discount,
++                "promo_code": promo.code if promo is not None else None,
++            },
++        )
++        self._emit_audit(entry)
++        sub.plan_id = new_plan_id
++        self.ledger.save_subscription(sub)
++        return self.ledger.record_idempotent_entry(idempotency_key, fingerprint, entry)
++
++    def refund_order(
++        self,
++        order_id: str,
++        amount_cents: int,
++        *,
++        reason: str,
++        idempotency_key: str,
++    ) -> LedgerEntry:
++        validate_idempotency_key(idempotency_key)
++        if not isinstance(order_id, str) or not order_id.strip():
++            raise ValidationError("order_id must be a non-empty string")
++        if not isinstance(reason, str) or not reason.strip():
++            raise ValidationError("reason must be a non-empty string")
++        validate_positive_int(amount_cents, "amount_cents")
++
++        fingerprint = ("refund_order", order_id, amount_cents, reason)
++        existing = self.ledger.get_idempotent_entry(idempotency_key, fingerprint)
++        if existing is not None:
++            return existing
++
++        order = self.ledger.get_order(order_id)
++        prior_refunds = self.ledger.refund_entries_for_order(order_id)
++        prior_refunded_total = sum(-e.total_cents for e in prior_refunds)
++        prior_refunded_tax = sum(-e.tax_cents for e in prior_refunds)
++
++        refund_subtotal, refund_tax = compute_cumulative_refund_split(
++            order.subtotal_cents,
++            order.tax_cents,
++            order.total_cents,
++            prior_refunded_total,
++            prior_refunded_tax,
++            amount_cents,
++        )
++
++        entry = LedgerEntry(
++            entry_id=self.ledger.next_id("ent"),
++            account_id=order.account_id,
++            kind="order_refund",
++            subtotal_cents=-refund_subtotal,
++            tax_cents=-refund_tax,
++            total_cents=-amount_cents,
++            reference_id=order_id,
++            reason=reason,
++            metadata={"idempotency_key": idempotency_key},
++        )
++        self._emit_audit(entry)
++        return self.ledger.record_idempotent_entry(idempotency_key, fingerprint, entry)
++
++    def export_credit_note(self, refund_entry_id: str) -> Dict[str, object]:
++        if not isinstance(refund_entry_id, str) or not refund_entry_id.strip():
++            raise ValidationError("refund_entry_id must be a non-empty string")
++        entry = self.ledger.get_entry(refund_entry_id)
++        if entry is None:
++            raise ValidationError(f"Unknown refund_entry_id: {refund_entry_id}")
++        if entry.kind != "order_refund":
++            raise ValidationError(
++                f"Ledger entry {refund_entry_id} has kind {entry.kind!r}, expected 'order_refund'"
++            )
++        return {
++            "entry_id": entry.entry_id,
++            "order_id": entry.reference_id,
++            "account_id": entry.account_id,
++            "subtotal_cents": -entry.subtotal_cents,
++            "tax_cents": -entry.tax_cents,
++            "total_cents": -entry.total_cents,
++            "reason": entry.reason,
++        }
++
+     def get_statement(self, account_id: str) -> Dict[str, object]:
+         entries = self.ledger.entries_for_account(account_id)
+         return {
+
+--- a/benchmarks/sources/ev1_order_ledger/ledger.py
++++ b/benchmarks/sources/ev1_order_ledger/ledger.py
+@@ -2,18 +2,35 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Dict, List, Optional
++from typing import Dict, List, Optional, Tuple
+ 
+-from .models import LedgerEntry, Order, Plan, Subscription, ValidationError
++from .models import LedgerEntry, Order, Plan, PromoCode, Subscription, ValidationError
++from .pricing import validate_promo_code, validate_promo_code_str
++
++
++def validate_idempotency_key(idempotency_key: str) -> str:
++    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
++        raise ValidationError("idempotency_key must be a non-empty string")
++    return idempotency_key
++
++
++def _typed_fingerprint(
++    fingerprint: Tuple[object, ...],
++) -> Tuple[Tuple[type, object], ...]:
++    return tuple((type(part), part) for part in fingerprint)
+ 
+ 
+ class OrderLedger:
+     def __init__(self) -> None:
+         self._plans: Dict[str, Plan] = {}
++        self._promos: Dict[str, PromoCode] = {}
+         self._orders: Dict[str, Order] = {}
+         self._subscriptions: Dict[str, Subscription] = {}
+         self._entries: Dict[str, LedgerEntry] = {}
+         self._entry_order: List[str] = []
++        self._idempotency_records: Dict[
++            str, Tuple[Tuple[Tuple[type, object], ...], str]
++        ] = {}
+         self._seq = 0
+ 
+     def next_id(self, prefix: str) -> str:
+@@ -32,6 +49,17 @@
+         if plan is None:
+             raise ValidationError(f"Unknown plan_id: {plan_id}")
+         return plan
++
++    def add_promo(self, promo: PromoCode) -> None:
++        validate_promo_code(promo)
++        self._promos[promo.code] = promo
++
++    def get_promo(self, code: str) -> PromoCode:
++        validate_promo_code_str(code)
++        promo = self._promos.get(code)
++        if promo is None:
++            raise ValidationError(f"Unknown promo_code: {code}")
++        return promo
+ 
+     def save_order(self, order: Order) -> None:
+         self._orders[order.order_id] = order
+@@ -55,6 +83,38 @@
+         self._entries[entry.entry_id] = entry
+         self._entry_order.append(entry.entry_id)
+ 
++    def get_idempotent_entry(
++        self,
++        idempotency_key: str,
++        request_fingerprint: Tuple[object, ...],
++    ) -> Optional[LedgerEntry]:
++        """Return existing entry on identical replay, None if unseen, or raise on conflict."""
++        validate_idempotency_key(idempotency_key)
++        existing = self._idempotency_records.get(idempotency_key)
++        if existing is None:
++            return None
++        stored_fingerprint, entry_id = existing
++        if stored_fingerprint != _typed_fingerprint(request_fingerprint):
++            raise ValidationError(f"Idempotency key conflict: {idempotency_key}")
++        return self._entries[entry_id]
++
++    def record_idempotent_entry(
++        self,
++        idempotency_key: str,
++        request_fingerprint: Tuple[object, ...],
++        entry: LedgerEntry,
++    ) -> LedgerEntry:
++        """Record a ledger entry under an idempotency key, enforcing replay/conflict rules."""
++        existing = self.get_idempotent_entry(idempotency_key, request_fingerprint)
++        if existing is not None:
++            return existing
++        self.record_entry(entry)
++        self._idempotency_records[idempotency_key] = (
++            _typed_fingerprint(request_fingerprint),
++            entry.entry_id,
++        )
++        return entry
++
+     def get_entry(self, entry_id: str) -> Optional[LedgerEntry]:
+         return self._entries.get(entry_id)
+ 
+@@ -65,5 +125,13 @@
+             if self._entries[eid].account_id == account_id
+         ]
+ 
++    def refund_entries_for_order(self, order_id: str) -> List[LedgerEntry]:
++        return [
++            self._entries[eid]
++            for eid in self._entry_order
++            if self._entries[eid].kind == "order_refund"
++            and self._entries[eid].reference_id == order_id
++        ]
++
+     def account_balance_cents(self, account_id: str) -> int:
+         return sum(e.total_cents for e in self.entries_for_account(account_id))
+
+--- a/benchmarks/sources/ev1_order_ledger/models.py
++++ b/benchmarks/sources/ev1_order_ledger/models.py
+@@ -20,6 +20,15 @@
+     name: str
+     monthly_cents: int
+     tax_bps: int = 0
++
++
++@dataclass(frozen=True)
++class PromoCode:
++    code: str
++    percent_off: int | None = None
++    amount_off_cents: int | None = None
++    expires_on: str | None = None
++    min_subtotal_cents: int = 0
+ 
+ 
+ @dataclass(frozen=True)
+
+--- a/benchmarks/sources/ev1_order_ledger/pricing.py
++++ b/benchmarks/sources/ev1_order_ledger/pricing.py
+@@ -2,12 +2,51 @@
+ 
+ from __future__ import annotations
+ 
++from datetime import date
+ from typing import Sequence, Tuple
+ 
+-from .models import LineItem, ValidationError
+-
+-
+-LEGACY_FLAT_FEE_CENTS = 500
++from .models import LineItem, Plan, PromoCode, ValidationError
++
++
++_MULTI_CODE_DELIMITERS = (",", ";", "+", "|")
++
++
++def parse_iso_date(value: str, field_name: str) -> date:
++    if not isinstance(value, str) or len(value) != 10 or value[4] != "-" or value[7] != "-":
++        raise ValidationError(f"{field_name} must be a YYYY-MM-DD date string")
++    year_str, month_str, day_str = value[:4], value[5:7], value[8:10]
++    if not (year_str.isdigit() and month_str.isdigit() and day_str.isdigit()):
++        raise ValidationError(f"{field_name} must be a YYYY-MM-DD date string")
++    try:
++        return date(int(year_str), int(month_str), int(day_str))
++    except ValueError as exc:
++        raise ValidationError(f"{field_name} is not a valid calendar date: {value}") from exc
++
++
++def validate_promo_code_str(code: str) -> str:
++    if not isinstance(code, str) or not code.strip():
++        raise ValidationError("promo_code must be a non-empty string")
++    if any(ch in code for ch in _MULTI_CODE_DELIMITERS) or any(ch.isspace() for ch in code):
++        raise ValidationError(f"Invalid or stacked promo_code: {code!r}")
++    return code
++
++
++def validate_promo_code(promo: PromoCode) -> PromoCode:
++    validate_promo_code_str(promo.code)
++    has_percent = promo.percent_off is not None
++    has_amount = promo.amount_off_cents is not None
++    if has_percent == has_amount:
++        raise ValidationError("Exactly one of percent_off or amount_off_cents must be specified")
++    if has_percent:
++        validate_positive_int(promo.percent_off, "percent_off")
++        if promo.percent_off > 100:
++            raise ValidationError("percent_off must be between 1 and 100")
++    if has_amount:
++        validate_positive_int(promo.amount_off_cents, "amount_off_cents")
++    validate_non_negative_int(promo.min_subtotal_cents, "min_subtotal_cents")
++    if promo.expires_on is not None:
++        parse_iso_date(promo.expires_on, "expires_on")
++    return promo
+ 
+ 
+ def validate_non_negative_int(value: int, field_name: str) -> int:
+@@ -48,15 +87,131 @@
+     return round_half_up_div(taxable_cents * tax_bps, 10_000)
+ 
+ 
++def apply_promo_and_tax(
++    subtotal_cents: int,
++    tax_bps: int,
++    *,
++    promo: PromoCode | None = None,
++    as_of: str | None = None,
++) -> Tuple[int, int, int, int]:
++    """Apply optional promo discount (clamped at 0) and compute tax on discounted subtotal.
++
++    Returns (discounted_subtotal_cents, discount_cents, tax_cents, total_cents).
++    """
++    validate_non_negative_int(subtotal_cents, "subtotal_cents")
++    as_of_date = parse_iso_date(as_of, "as_of") if as_of is not None else None
++    discount_cents = 0
++    if promo is not None:
++        validate_promo_code(promo)
++        if promo.expires_on is not None:
++            if as_of_date is None:
++                raise ValidationError(
++                    f"as_of date is required for expiring promo code: {promo.code}"
++                )
++            expires_date = parse_iso_date(promo.expires_on, "expires_on")
++            if as_of_date > expires_date:
++                raise ValidationError(
++                    f"Promo code {promo.code} expired on {promo.expires_on}"
++                )
++        if subtotal_cents < promo.min_subtotal_cents:
++            raise ValidationError(
++                f"Subtotal {subtotal_cents} is below min_subtotal_cents {promo.min_subtotal_cents}"
++            )
++        if promo.percent_off is not None:
++            raw_discount = round_half_up_div(subtotal_cents * promo.percent_off, 100)
++        else:
++            assert promo.amount_off_cents is not None
++            raw_discount = promo.amount_off_cents
++        discount_cents = min(subtotal_cents, raw_discount)
++
++    discounted_subtotal = subtotal_cents - discount_cents
++    tax_cents = compute_tax_cents(discounted_subtotal, tax_bps)
++    return discounted_subtotal, discount_cents, tax_cents, discounted_subtotal + tax_cents
++
++
+ def calculate_order_totals(
+     items: Sequence[LineItem],
+     *,
+     tax_bps: int = 0,
+-    legacy_flat_fee: bool = False,
+ ) -> Tuple[int, int, int]:
+     """Return (subtotal_cents, tax_cents, total_cents) using exact integer cents."""
+     subtotal = compute_subtotal_cents(items)
+-    if legacy_flat_fee:
+-        subtotal += LEGACY_FLAT_FEE_CENTS
+-    tax = compute_tax_cents(subtotal, tax_bps)
+-    return subtotal, tax, subtotal + tax
++    net_subtotal, _discount, tax, total = apply_promo_and_tax(subtotal, tax_bps)
++    return net_subtotal, tax, total
++
++
++def validate_proration_window(days_remaining: int, cycle_days: int) -> Tuple[int, int]:
++    validate_positive_int(cycle_days, "cycle_days")
++    validate_non_negative_int(days_remaining, "days_remaining")
++    if days_remaining > cycle_days:
++        raise ValidationError("days_remaining cannot exceed cycle_days")
++    return days_remaining, cycle_days
++
++
++def compute_prorated_upgrade_cents(
++    old_monthly_cents: int,
++    new_monthly_cents: int,
++    days_remaining: int,
++    cycle_days: int,
++) -> int:
++    """Compute exact integer-cent half-up proration for a mid-cycle plan upgrade."""
++    validate_non_negative_int(old_monthly_cents, "old_monthly_cents")
++    validate_non_negative_int(new_monthly_cents, "new_monthly_cents")
++    validate_proration_window(days_remaining, cycle_days)
++    delta_cents = new_monthly_cents - old_monthly_cents
++    if delta_cents <= 0:
++        raise ValidationError("new_plan must have a higher monthly_cents than old_plan")
++    return round_half_up_div(delta_cents * days_remaining, cycle_days)
++
++
++def calculate_plan_upgrade_totals(
++    old_plan: Plan,
++    new_plan: Plan,
++    days_remaining: int,
++    cycle_days: int,
++) -> Tuple[int, int, int]:
++    """Return (subtotal_cents, tax_cents, total_cents) for a mid-cycle plan upgrade."""
++    subtotal = compute_prorated_upgrade_cents(
++        old_plan.monthly_cents,
++        new_plan.monthly_cents,
++        days_remaining,
++        cycle_days,
++    )
++    net_subtotal, _discount, tax, total = apply_promo_and_tax(subtotal, new_plan.tax_bps)
++    return net_subtotal, tax, total
++
++
++def compute_cumulative_refund_split(
++    order_subtotal_cents: int,
++    order_tax_cents: int,
++    order_total_cents: int,
++    prior_refunded_total_cents: int,
++    prior_refunded_tax_cents: int,
++    refund_amount_cents: int,
++) -> Tuple[int, int]:
++    """Return (refund_subtotal_cents, refund_tax_cents) with cumulative penny conservation."""
++    validate_non_negative_int(order_subtotal_cents, "order_subtotal_cents")
++    validate_non_negative_int(order_tax_cents, "order_tax_cents")
++    validate_non_negative_int(order_total_cents, "order_total_cents")
++    if order_subtotal_cents + order_tax_cents != order_total_cents:
++        raise ValidationError(
++            "order_subtotal_cents + order_tax_cents must equal order_total_cents"
++        )
++    validate_non_negative_int(prior_refunded_total_cents, "prior_refunded_total_cents")
++    validate_non_negative_int(prior_refunded_tax_cents, "prior_refunded_tax_cents")
++    validate_positive_int(refund_amount_cents, "amount_cents")
++
++    new_cumulative_total = prior_refunded_total_cents + refund_amount_cents
++    if new_cumulative_total > order_total_cents:
++        raise ValidationError(
++            f"Refund amount {refund_amount_cents} exceeds remaining refundable total "
++            f"{order_total_cents - prior_refunded_total_cents}"
++        )
++
++    new_cumulative_tax = round_half_up_div(
++        order_tax_cents * new_cumulative_total,
++        order_total_cents,
++    )
++    refund_tax = new_cumulative_tax - prior_refunded_tax_cents
++    refund_subtotal = refund_amount_cents - refund_tax
++    return refund_subtotal, refund_tax
+
+--- a/benchmarks/sources/ev1_order_ledger/tests/test_orders.py
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_orders.py
+@@ -27,17 +27,6 @@
+         self.assertEqual(stmt["balance_cents"], 4328)
+         self.assertEqual(stmt["entry_count"], 1)
+ 
+-    def test_legacy_flat_fee_adds_500_cents_before_tax(self) -> None:
+-        order = self.svc.place_order(
+-            "acct_1",
+-            [LineItem(sku="seat", unit_cents=1000, quantity=1)],
+-            tax_bps=1000,
+-            legacy_flat_fee=True,
+-        )
+-        self.assertEqual(order.subtotal_cents, 1500)
+-        self.assertEqual(order.tax_cents, 150)
+-        self.assertEqual(order.total_cents, 1650)
+-
+     def test_invalid_order_inputs_fail_closed(self) -> None:
+         with self.assertRaises(ValidationError):
+             self.svc.place_order("", [LineItem(sku="x", unit_cents=100, quantity=1)])
+
+--- /dev/null
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_audit_and_cleanup.py
+@@ -0,0 +1,175 @@
++"""Unit tests for Turn 4: legacy_flat_fee removal and fail-closed audit logging."""
++
++from __future__ import annotations
++
++from typing import Dict, List
++import unittest
++
++from ev1_order_ledger import pricing
++from ev1_order_ledger.api import OrderService
++from ev1_order_ledger.models import LineItem, Plan, ValidationError
++
++
++class AuditFailure(RuntimeError):
++    """Test error raised by a failing audit sink."""
++
++
++class LegacyCleanupAndAuditTests(unittest.TestCase):
++    def test_legacy_flat_fee_is_completely_removed(self) -> None:
++        self.assertFalse(hasattr(pricing, "LEGACY_FLAT_FEE_CENTS"))
++
++        items = [LineItem(sku="seat", unit_cents=1000, quantity=1)]
++        with self.assertRaises(TypeError):
++            pricing.calculate_order_totals(items, tax_bps=1000, legacy_flat_fee=True)
++        with self.assertRaises(TypeError):
++            pricing.calculate_order_totals(items, legacy_flat_fee=False)
++
++        svc = OrderService()
++        with self.assertRaises(TypeError):
++            svc.place_order("acct_1", items, tax_bps=1000, legacy_flat_fee=True)
++        with self.assertRaises(TypeError):
++            svc.place_order("acct_1", items, legacy_flat_fee=False)
++
++    def test_audit_sink_logs_newly_committed_mutations_and_skips_replays(self) -> None:
++        events: List[Dict[str, object]] = []
++        svc = OrderService(audit_sink=events.append)
++        svc.register_plan(Plan(plan_id="starter", name="Starter", monthly_cents=1000, tax_bps=825))
++        svc.register_plan(Plan(plan_id="pro", name="Pro", monthly_cents=3000, tax_bps=825))
++
++        # Non-ledger operations do not emit audit events
++        sub = svc.start_subscription("acct_audit", "starter")
++        self.assertEqual(events, [])
++
++        # 1. place_order
++        order = svc.place_order(
++            "acct_audit",
++            [LineItem(sku="seat", unit_cents=1000, quantity=1)],
++            tax_bps=1000,
++        )
++        order_entry = svc.ledger.entries_for_account("acct_audit")[0]
++        self.assertEqual(
++            events,
++            [
++                {
++                    "action": "order_charge",
++                    "account_id": "acct_audit",
++                    "amount_cents": 1100,
++                    "entry_id": order_entry.entry_id,
++                }
++            ],
++        )
++
++        # 2. upgrade_subscription + replay (replay must not emit)
++        upg = svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            15,
++            30,
++            idempotency_key="audit-upg-1",
++        )
++        upg_replay = svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            15,
++            30,
++            idempotency_key="audit-upg-1",
++        )
++        self.assertIs(upg_replay, upg)
++        self.assertEqual(len(events), 2)
++        self.assertEqual(
++            events[1],
++            {
++                "action": "plan_upgrade",
++                "account_id": "acct_audit",
++                "amount_cents": upg.total_cents,
++                "entry_id": upg.entry_id,
++            },
++        )
++
++        # 3. refund_order + replay (replay must not emit)
++        ref = svc.refund_order(
++            order.order_id,
++            500,
++            reason="partial",
++            idempotency_key="audit-ref-1",
++        )
++        ref_replay = svc.refund_order(
++            order.order_id,
++            500,
++            reason="partial",
++            idempotency_key="audit-ref-1",
++        )
++        self.assertIs(ref_replay, ref)
++        self.assertEqual(len(events), 3)
++        self.assertEqual(
++            events[2],
++            {
++                "action": "order_refund",
++                "account_id": "acct_audit",
++                "amount_cents": -500,
++                "entry_id": ref.entry_id,
++            },
++        )
++
++    def test_audit_sink_failure_is_fail_closed_and_atomic_for_all_mutations(self) -> None:
++        should_fail = {"flag": False}
++        events: List[Dict[str, object]] = []
++
++        def flaky_sink(event: Dict[str, object]) -> None:
++            if should_fail["flag"]:
++                raise AuditFailure("audit sink unavailable")
++            events.append(event)
++
++        svc = OrderService(audit_sink=flaky_sink)
++        svc.register_plan(Plan(plan_id="starter", name="Starter", monthly_cents=1000, tax_bps=825))
++        svc.register_plan(Plan(plan_id="pro", name="Pro", monthly_cents=3000, tax_bps=825))
++        sub = svc.start_subscription("acct_fail", "starter")
++
++        # 1. Failing place_order commits neither order nor ledger entry
++        should_fail["flag"] = True
++        with self.assertRaises(AuditFailure):
++            svc.place_order("acct_fail", [LineItem(sku="x", unit_cents=1000, quantity=1)], tax_bps=1000)
++        self.assertEqual(svc.get_statement("acct_fail"), {"account_id": "acct_fail", "balance_cents": 0, "entry_count": 0})
++        self.assertEqual(svc.ledger._orders, {})
++        self.assertEqual(events, [])
++
++        # 2. Failing upgrade_subscription commits neither plan_id update, ledger entry, nor idempotency key
++        with self.assertRaises(AuditFailure):
++            svc.upgrade_subscription(sub.subscription_id, "pro", 15, 30, idempotency_key="retry-upg")
++        self.assertEqual(svc.ledger.get_subscription(sub.subscription_id).plan_id, "starter")
++        self.assertEqual(svc.get_statement("acct_fail")["entry_count"], 0)
++
++        # Once audit sink recovers, retrying the same idempotency key succeeds
++        should_fail["flag"] = False
++        upg = svc.upgrade_subscription(sub.subscription_id, "pro", 15, 30, idempotency_key="retry-upg")
++        self.assertEqual(svc.ledger.get_subscription(sub.subscription_id).plan_id, "pro")
++        self.assertEqual(svc.get_statement("acct_fail")["entry_count"], 1)
++        self.assertEqual(len(events), 1)
++
++        # Create a real order while sink is healthy so we can test failing refund_order
++        order = svc.place_order("acct_fail", [LineItem(sku="x", unit_cents=1000, quantity=1)], tax_bps=1000)
++        balance_before_refund = svc.get_statement("acct_fail")["balance_cents"]
++        entries_before_refund = svc.get_statement("acct_fail")["entry_count"]
++
++        # 3. Failing refund_order commits neither ledger entry nor idempotency key
++        should_fail["flag"] = True
++        with self.assertRaises(AuditFailure):
++            svc.refund_order(order.order_id, 500, reason="broken", idempotency_key="retry-ref")
++        self.assertEqual(svc.get_statement("acct_fail")["balance_cents"], balance_before_refund)
++        self.assertEqual(svc.get_statement("acct_fail")["entry_count"], entries_before_refund)
++        self.assertEqual(svc.ledger.refund_entries_for_order(order.order_id), [])
++
++        # Once audit sink recovers, retrying the same refund idempotency key succeeds
++        should_fail["flag"] = False
++        ref = svc.refund_order(order.order_id, 500, reason="broken", idempotency_key="retry-ref")
++        self.assertEqual(ref.total_cents, -500)
++        self.assertEqual(svc.get_statement("acct_fail")["balance_cents"], balance_before_refund - 500)
++        self.assertEqual(len(events), 3)
++
++    def test_non_callable_audit_sink_raises_validation_error(self) -> None:
++        with self.assertRaises(ValidationError):
++            OrderService(audit_sink="not-callable")
++
++
++if __name__ == "__main__":
++    unittest.main()
+
+--- /dev/null
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_plan_upgrades.py
+@@ -0,0 +1,273 @@
++"""Unit tests for Turn 1: mid-cycle prorated plan upgrades and idempotency."""
++
++from __future__ import annotations
++
++import unittest
++
++from ev1_order_ledger.api import OrderService
++from ev1_order_ledger.ledger import OrderLedger
++from ev1_order_ledger.models import LedgerEntry, Plan, ValidationError
++from ev1_order_ledger.pricing import (
++    calculate_plan_upgrade_totals,
++    compute_prorated_upgrade_cents,
++)
++
++
++class PlanUpgradeTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.svc = OrderService()
++        self.svc.register_plan(Plan(plan_id="free", name="Free", monthly_cents=0, tax_bps=0))
++        self.svc.register_plan(Plan(plan_id="starter", name="Starter", monthly_cents=1000, tax_bps=500))
++        self.svc.register_plan(Plan(plan_id="starter_alt", name="Starter Alt", monthly_cents=1000, tax_bps=825))
++        self.svc.register_plan(Plan(plan_id="plus", name="Plus", monthly_cents=2005, tax_bps=100))
++        self.svc.register_plan(Plan(plan_id="pro", name="Pro", monthly_cents=3000, tax_bps=825))
++        self.svc.register_plan(Plan(plan_id="enterprise", name="Enterprise", monthly_cents=10000, tax_bps=1000))
++
++    def test_proration_half_up_rounding_and_new_plan_tax_rate(self) -> None:
++        sub = self.svc.start_subscription("acct_1", "starter")
++        # delta = 2005 - 1000 = 1005; 1005 * 15 / 30 = 502.5 -> half-up rounds to 503 (not banker's 502)
++        # tax uses new_plan.tax_bps (100, not starter's 500): 503 * 100 / 10000 = 5.03 -> 5
++        entry = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "plus",
++            15,
++            30,
++            idempotency_key="upg-half-up-1",
++        )
++        self.assertEqual(entry.account_id, "acct_1")
++        self.assertEqual(entry.kind, "plan_upgrade")
++        self.assertEqual(entry.reference_id, sub.subscription_id)
++        self.assertEqual(entry.subtotal_cents, 503)
++        self.assertEqual(entry.tax_cents, 5)
++        self.assertEqual(entry.total_cents, 508)
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "plus")
++
++        stmt = self.svc.get_statement("acct_1")
++        self.assertEqual(stmt["balance_cents"], 508)
++        self.assertEqual(stmt["entry_count"], 1)
++
++    def test_proration_half_up_for_both_subtotal_and_tax_ties(self) -> None:
++        self.svc.register_plan(Plan(plan_id="mid", name="Mid", monthly_cents=1500, tax_bps=100))
++        sub = self.svc.start_subscription("acct_2", "starter")
++        # delta = 500; 500 * 15 / 30 = 250; tax = 250 * 100 / 10000 = 2.5 -> 3 (half-up, not 2)
++        entry = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "mid",
++            15,
++            30,
++            idempotency_key="upg-tax-tie",
++        )
++        self.assertEqual(entry.subtotal_cents, 250)
++        self.assertEqual(entry.tax_cents, 3)
++        self.assertEqual(entry.total_cents, 253)
++
++    def test_proration_fractional_rounding_down_and_up(self) -> None:
++        # 5 * 1 / 2 = 2.5 -> 3 (half-up)
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 1005, 1, 2), 3)
++        # 1000 * 1 / 3 = 333.333... -> 333
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 2000, 1, 3), 333)
++        # 2000 * 1 / 3 = 666.666... -> 667
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 3000, 1, 3), 667)
++
++        old_plan = Plan(plan_id="a", name="A", monthly_cents=1000, tax_bps=0)
++        new_plan = Plan(plan_id="b", name="B", monthly_cents=3000, tax_bps=825)
++        # subtotal = 667, tax = 667 * 825 / 10000 = 55.0275 -> 55
++        self.assertEqual(calculate_plan_upgrade_totals(old_plan, new_plan, 1, 3), (667, 55, 722))
++
++    def test_proration_boundary_days_zero_full_cycle_and_free_plan(self) -> None:
++        sub_zero = self.svc.start_subscription("acct_zero", "starter")
++        entry_zero = self.svc.upgrade_subscription(
++            sub_zero.subscription_id,
++            "pro",
++            0,
++            30,
++            idempotency_key="upg-zero-days",
++        )
++        self.assertEqual((entry_zero.subtotal_cents, entry_zero.tax_cents, entry_zero.total_cents), (0, 0, 0))
++        self.assertEqual(self.svc.ledger.get_subscription(sub_zero.subscription_id).plan_id, "pro")
++
++        sub_full = self.svc.start_subscription("acct_full", "free")
++        entry_full = self.svc.upgrade_subscription(
++            sub_full.subscription_id,
++            "pro",
++            30,
++            30,
++            idempotency_key="upg-full-cycle",
++        )
++        # delta = 3000, tax = 3000 * 825 / 10000 = 247.5 -> 248
++        self.assertEqual((entry_full.subtotal_cents, entry_full.tax_cents, entry_full.total_cents), (3000, 248, 3248))
++        self.assertEqual(self.svc.ledger.get_subscription(sub_full.subscription_id).plan_id, "pro")
++
++    def test_rejects_unknown_ids_non_upgrades_bounds_booleans_and_empty_key(self) -> None:
++        sub = self.svc.start_subscription("acct_err", "pro")
++
++        invalid_calls = [
++            # Unknown IDs
++            ("sub_missing", "enterprise", 15, 30, "k-unknown-sub"),
++            (sub.subscription_id, "plan_missing", 15, 30, "k-unknown-plan"),
++            ("", "enterprise", 15, 30, "k-empty-sub"),
++            (sub.subscription_id, "   ", 15, 30, "k-blank-plan"),
++            # Non-upgrades (same plan, same price, downgrade)
++            (sub.subscription_id, "pro", 15, 30, "k-same-plan"),
++            (sub.subscription_id, "starter", 15, 30, "k-downgrade"),
++            # Invalid bounds
++            (sub.subscription_id, "enterprise", 15, 0, "k-zero-cycle"),
++            (sub.subscription_id, "enterprise", 15, -30, "k-neg-cycle"),
++            (sub.subscription_id, "enterprise", -1, 30, "k-neg-days"),
++            (sub.subscription_id, "enterprise", 31, 30, "k-days-gt-cycle"),
++            # Booleans and invalid types
++            (sub.subscription_id, "enterprise", True, 30, "k-bool-days-true"),
++            (sub.subscription_id, "enterprise", False, 30, "k-bool-days-false"),
++            (sub.subscription_id, "enterprise", 1, True, "k-bool-cycle-true"),
++            (sub.subscription_id, "enterprise", 0, False, "k-bool-cycle-false"),
++            (True, "enterprise", 15, 30, "k-bool-sub"),
++            (sub.subscription_id, False, 15, 30, "k-bool-plan"),
++            # Empty / invalid idempotency_key
++            (sub.subscription_id, "enterprise", 15, 30, ""),
++            (sub.subscription_id, "enterprise", 15, 30, "   "),
++            (sub.subscription_id, "enterprise", 15, 30, True),
++            (sub.subscription_id, "enterprise", 15, 30, None),
++        ]
++
++        for sub_id, plan_id, days_rem, cycle_days, key in invalid_calls:
++            with self.subTest(sub_id=sub_id, plan_id=plan_id, days_rem=days_rem, cycle_days=cycle_days, key=key):
++                with self.assertRaises(ValidationError):
++                    self.svc.upgrade_subscription(
++                        sub_id,
++                        plan_id,
++                        days_rem,
++                        cycle_days,
++                        idempotency_key=key,
++                    )
++
++        # Also test equal-price different plan
++        sub_starter = self.svc.start_subscription("acct_err", "starter")
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub_starter.subscription_id,
++                "starter_alt",
++                10,
++                30,
++                idempotency_key="k-equal-price",
++            )
++
++        # None of the failed attempts mutated subscriptions or recorded entries
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "pro")
++        self.assertEqual(self.svc.ledger.get_subscription(sub_starter.subscription_id).plan_id, "starter")
++        self.assertEqual(self.svc.get_statement("acct_err")["entry_count"], 0)
++
++        # A key from a failed call is not burned and can succeed on a valid request
++        ok_entry = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "enterprise",
++            15,
++            30,
++            idempotency_key="k-downgrade",
++        )
++        self.assertEqual(ok_entry.subtotal_cents, 3500)
++        self.assertEqual(self.svc.get_statement("acct_err")["entry_count"], 1)
++
++    def test_idempotency_replay_returns_original_entry_without_duplicate(self) -> None:
++        sub = self.svc.start_subscription("acct_idem", "starter")
++        first = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            10,
++            30,
++            idempotency_key="idem-replay-1",
++        )
++        replay = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            10,
++            30,
++            idempotency_key="idem-replay-1",
++        )
++        self.assertIs(replay, first)
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "pro")
++        stmt = self.svc.get_statement("acct_idem")
++        self.assertEqual(stmt["entry_count"], 1)
++        self.assertEqual(stmt["balance_cents"], first.total_cents)
++
++        # Even after a subsequent upgrade to enterprise, replaying the first key still returns first entry
++        second = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "enterprise",
++            10,
++            30,
++            idempotency_key="idem-replay-2",
++        )
++        self.assertNotEqual(second.entry_id, first.entry_id)
++        replay_after_second = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            10,
++            30,
++            idempotency_key="idem-replay-1",
++        )
++        self.assertIs(replay_after_second, first)
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "enterprise")
++        self.assertEqual(self.svc.get_statement("acct_idem")["entry_count"], 2)
++
++    def test_idempotency_conflict_raises_validation_error(self) -> None:
++        sub1 = self.svc.start_subscription("acct_conf", "starter")
++        sub2 = self.svc.start_subscription("acct_conf", "starter")
++
++        original = self.svc.upgrade_subscription(
++            sub1.subscription_id,
++            "pro",
++            1,
++            30,
++            idempotency_key="idem-conflict-1",
++        )
++
++        conflicts = [
++            # Different plan
++            (sub1.subscription_id, "enterprise", 1, 30),
++            # Different days_remaining
++            (sub1.subscription_id, "pro", 2, 30),
++            # Different cycle_days (even if same ratio)
++            (sub1.subscription_id, "pro", 2, 60),
++            # Different subscription_id
++            (sub2.subscription_id, "pro", 1, 30),
++            # Boolean where int 1 was used
++            (sub1.subscription_id, "pro", True, 30),
++        ]
++
++        for sub_id, plan_id, days_rem, cycle_days in conflicts:
++            with self.subTest(sub_id=sub_id, plan_id=plan_id, days_rem=days_rem, cycle_days=cycle_days):
++                with self.assertRaises(ValidationError):
++                    self.svc.upgrade_subscription(
++                        sub_id,
++                        plan_id,
++                        days_rem,
++                        cycle_days,
++                        idempotency_key="idem-conflict-1",
++                    )
++
++        # Ledger and subscriptions unchanged by conflicts
++        self.assertEqual(self.svc.get_statement("acct_conf")["entry_count"], 1)
++        self.assertEqual(self.svc.get_statement("acct_conf")["balance_cents"], original.total_cents)
++        self.assertEqual(self.svc.ledger.get_subscription(sub1.subscription_id).plan_id, "pro")
++        self.assertEqual(self.svc.ledger.get_subscription(sub2.subscription_id).plan_id, "starter")
++
++    def test_ledger_idempotency_helper_distinguishes_bool_and_int(self) -> None:
++        ledger = OrderLedger()
++        entry = LedgerEntry(
++            entry_id=ledger.next_id("ent"),
++            account_id="acct_1",
++            kind="plan_upgrade",
++            subtotal_cents=100,
++            tax_cents=10,
++            total_cents=110,
++            reference_id="sub_0001",
++        )
++        recorded = ledger.record_idempotent_entry("key-1", ("op", 1, 30), entry)
++        self.assertIs(recorded, entry)
++        self.assertIs(ledger.get_idempotent_entry("key-1", ("op", 1, 30)), entry)
++        with self.assertRaises(ValidationError):
++            ledger.get_idempotent_entry("key-1", ("op", True, 30))
++
++
++if __name__ == "__main__":
++    unittest.main()
+
+--- /dev/null
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_promos.py
+@@ -0,0 +1,305 @@
++"""Unit tests for Turn 2: promo codes across orders and plan upgrades."""
++
++from __future__ import annotations
++
++import unittest
++
++from ev1_order_ledger.api import OrderService
++from ev1_order_ledger.models import LineItem, Plan, ValidationError
++
++
++class PromoCodeTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.svc = OrderService()
++        self.svc.register_plan(Plan(plan_id="starter", name="Starter", monthly_cents=1000, tax_bps=500))
++        self.svc.register_plan(Plan(plan_id="pro", name="Pro", monthly_cents=3000, tax_bps=825))
++        self.svc.register_plan(Plan(plan_id="enterprise", name="Enterprise", monthly_cents=10000, tax_bps=1000))
++
++    def test_register_promo_validation(self) -> None:
++        # Valid registrations
++        p1 = self.svc.register_promo("PCT10", percent_off=10)
++        self.assertEqual(p1.code, "PCT10")
++        self.assertEqual(p1.percent_off, 10)
++        self.assertIsNone(p1.amount_off_cents)
++
++        p2 = self.svc.register_promo(
++            "FLAT500",
++            amount_off_cents=500,
++            expires_on="2026-12-31",
++            min_subtotal_cents=1000,
++        )
++        self.assertEqual(p2.amount_off_cents, 500)
++        self.assertEqual(p2.expires_on, "2026-12-31")
++        self.assertEqual(p2.min_subtotal_cents, 1000)
++
++        # Boundary valid values
++        self.svc.register_promo("MIN1", percent_off=1, min_subtotal_cents=0)
++        self.svc.register_promo("FREE100", percent_off=100)
++        self.svc.register_promo("CENT1", amount_off_cents=1)
++
++        invalid_kwargs = [
++            # Empty / invalid / multi-code
++            ("", {"percent_off": 10}),
++            ("   ", {"percent_off": 10}),
++            ("A,B", {"percent_off": 10}),
++            ("A;B", {"percent_off": 10}),
++            ("A+B", {"percent_off": 10}),
++            ("A B", {"percent_off": 10}),
++            (True, {"percent_off": 10}),
++            # Neither or both discount modes
++            ("NONE", {}),
++            ("BOTH", {"percent_off": 10, "amount_off_cents": 100}),
++            ("BOTH_ZERO", {"percent_off": 0, "amount_off_cents": 100}),
++            ("BOTH_ZERO2", {"percent_off": 10, "amount_off_cents": 0}),
++            # Invalid percent_off
++            ("PCT0", {"percent_off": 0}),
++            ("PCT_NEG", {"percent_off": -5}),
++            ("PCT101", {"percent_off": 101}),
++            ("PCT_BOOL", {"percent_off": True}),
++            # Invalid amount_off_cents
++            ("AMT0", {"amount_off_cents": 0}),
++            ("AMT_NEG", {"amount_off_cents": -100}),
++            ("AMT_BOOL", {"amount_off_cents": True}),
++            # Invalid min_subtotal_cents
++            ("MIN_NEG", {"percent_off": 10, "min_subtotal_cents": -1}),
++            ("MIN_BOOL", {"percent_off": 10, "min_subtotal_cents": True}),
++            # Invalid expires_on
++            ("EXP_FMT", {"percent_off": 10, "expires_on": "2026/01/01"}),
++            ("EXP_COMPACT", {"percent_off": 10, "expires_on": "20260101"}),
++            ("EXP_BAD_DAY", {"percent_off": 10, "expires_on": "2026-02-29"}),
++            ("EXP_EMPTY", {"percent_off": 10, "expires_on": ""}),
++            ("EXP_BOOL", {"percent_off": 10, "expires_on": True}),
++        ]
++        for code, kwargs in invalid_kwargs:
++            with self.subTest(code=code, kwargs=kwargs):
++                with self.assertRaises(ValidationError):
++                    self.svc.register_promo(code, **kwargs)
++
++    def test_percentage_promo_on_order_half_up_discount_and_tax_on_discounted_subtotal(self) -> None:
++        self.svc.register_promo("TEN", percent_off=10)
++        # gross subtotal = 1005
++        # discount = round_half_up_div(1005 * 10, 100) = 100.5 -> 101
++        # discounted subtotal = 904
++        # tax (1000 bps = 10%) = round_half_up_div(904 * 1000, 10000) = 90.4 -> 90
++        # total = 994
++        order = self.svc.place_order(
++            "acct_1",
++            [LineItem(sku="widget", unit_cents=1005, quantity=1)],
++            tax_bps=1000,
++            promo_code="TEN",
++        )
++        self.assertEqual(order.subtotal_cents, 904)
++        self.assertEqual(order.discount_cents, 101)
++        self.assertEqual(order.promo_code, "TEN")
++        self.assertEqual(order.tax_cents, 90)
++        self.assertEqual(order.total_cents, 994)
++
++        stmt = self.svc.get_statement("acct_1")
++        self.assertEqual(stmt["balance_cents"], 994)
++        self.assertEqual(stmt["entry_count"], 1)
++
++    def test_fixed_promo_clamps_subtotal_at_zero_and_zeroes_tax(self) -> None:
++        self.svc.register_promo("BIGOFF", amount_off_cents=5000)
++        order = self.svc.place_order(
++            "acct_clamp",
++            [LineItem(sku="seat", unit_cents=1200, quantity=1)],
++            tax_bps=825,
++            promo_code="BIGOFF",
++        )
++        self.assertEqual(order.subtotal_cents, 0)
++        self.assertEqual(order.discount_cents, 1200)
++        self.assertEqual(order.promo_code, "BIGOFF")
++        self.assertEqual(order.tax_cents, 0)
++        self.assertEqual(order.total_cents, 0)
++
++        # Exact-amount fixed promo leaving positive remainder
++        self.svc.register_promo("OFF300", amount_off_cents=300)
++        order2 = self.svc.place_order(
++            "acct_clamp",
++            [LineItem(sku="seat", unit_cents=1000, quantity=1)],
++            tax_bps=1000,
++            promo_code="OFF300",
++        )
++        self.assertEqual(order2.subtotal_cents, 700)
++        self.assertEqual(order2.discount_cents, 300)
++        self.assertEqual(order2.tax_cents, 70)
++        self.assertEqual(order2.total_cents, 770)
++
++    def test_expiry_stacking_unknown_and_min_subtotal_fail_closed(self) -> None:
++        self.svc.register_promo("A", percent_off=10)
++        self.svc.register_promo("B", amount_off_cents=100)
++        self.svc.register_promo("EXP", percent_off=20, expires_on="2026-06-30")
++        self.svc.register_promo("MIN1000", amount_off_cents=200, min_subtotal_cents=1000)
++
++        items_small = [LineItem(sku="x", unit_cents=999, quantity=1)]
++        items_ok = [LineItem(sku="x", unit_cents=1000, quantity=1)]
++
++        # Unknown promo
++        with self.assertRaises(ValidationError):
++            self.svc.place_order("acct_fail", items_ok, promo_code="UNKNOWN")
++
++        # Multi-code / stacking strings
++        for stacked in ("A,B", "A, B", "A;B", "A+B", "A B", "", "   ", ["A", "B"]):
++            with self.subTest(stacked=stacked):
++                with self.assertRaises(ValidationError):
++                    self.svc.place_order("acct_fail", items_ok, promo_code=stacked)
++
++        # Below min_subtotal_cents fails closed (never silently 0 discount)
++        with self.assertRaises(ValidationError):
++            self.svc.place_order("acct_fail", items_small, promo_code="MIN1000")
++
++        # Expiring promo without as_of fails closed
++        with self.assertRaises(ValidationError):
++            self.svc.place_order("acct_fail", items_ok, promo_code="EXP")
++
++        # Expiring promo past expires_on fails closed
++        with self.assertRaises(ValidationError):
++            self.svc.place_order("acct_fail", items_ok, promo_code="EXP", as_of="2026-07-01")
++
++        # Malformed as_of fails closed
++        with self.assertRaises(ValidationError):
++            self.svc.place_order("acct_fail", items_ok, promo_code="EXP", as_of="2026-06-31")
++
++        # No side effects on any failed calls
++        self.assertEqual(self.svc.get_statement("acct_fail")["entry_count"], 0)
++        self.assertEqual(self.svc.get_statement("acct_fail")["balance_cents"], 0)
++
++        # Boundary valid: exact expires_on date succeeds
++        ok_exp = self.svc.place_order("acct_ok", items_ok, tax_bps=1000, promo_code="EXP", as_of="2026-06-30")
++        self.assertEqual(ok_exp.subtotal_cents, 800)
++        self.assertEqual(ok_exp.discount_cents, 200)
++        self.assertEqual(ok_exp.tax_cents, 80)
++        self.assertEqual(ok_exp.total_cents, 880)
++
++        # Boundary valid: exact min_subtotal_cents succeeds
++        ok_min = self.svc.place_order("acct_ok", items_ok, tax_bps=1000, promo_code="MIN1000")
++        self.assertEqual(ok_min.subtotal_cents, 800)
++        self.assertEqual(ok_min.discount_cents, 200)
++        self.assertEqual(ok_min.total_cents, 880)
++
++    def test_upgrade_with_promo_and_idempotency(self) -> None:
++        self.svc.register_promo("UPG25", percent_off=25, expires_on="2026-06-30", min_subtotal_cents=500)
++        self.svc.register_promo("FLAT2000", amount_off_cents=2000)
++
++        sub = self.svc.start_subscription("acct_upg", "starter")
++
++        # Proration = 2000 * 15 / 30 = 1000; below min_subtotal if days_remaining=5 (333 < 500)
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub.subscription_id,
++                "pro",
++                5,
++                30,
++                idempotency_key="upg-promo-1",
++                promo_code="UPG25",
++                as_of="2026-06-15",
++            )
++        # Missing as_of for expiring promo fails closed
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub.subscription_id,
++                "pro",
++                15,
++                30,
++                idempotency_key="upg-promo-1",
++                promo_code="UPG25",
++            )
++        # Expired promo fails closed
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub.subscription_id,
++                "pro",
++                15,
++                30,
++                idempotency_key="upg-promo-1",
++                promo_code="UPG25",
++                as_of="2026-07-01",
++            )
++        # Stacked promo fails closed
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub.subscription_id,
++                "pro",
++                15,
++                30,
++                idempotency_key="upg-promo-1",
++                promo_code="UPG25,FLAT2000",
++                as_of="2026-06-15",
++            )
++        # Subscription unchanged and key not burned
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "starter")
++        self.assertEqual(self.svc.get_statement("acct_upg")["entry_count"], 0)
++
++        # Valid upgrade + promo:
++        # gross proration = 2000 * 15 / 30 = 1000
++        # 25% discount = 250 -> discounted subtotal = 750
++        # tax (pro tax_bps = 825) = 750 * 825 / 10000 = 61.875 -> 62
++        # total = 812
++        entry = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            15,
++            30,
++            idempotency_key="upg-promo-1",
++            promo_code="UPG25",
++            as_of="2026-06-30",
++        )
++        self.assertEqual(entry.kind, "plan_upgrade")
++        self.assertEqual(entry.subtotal_cents, 750)
++        self.assertEqual(entry.tax_cents, 62)
++        self.assertEqual(entry.total_cents, 812)
++        self.assertEqual(entry.metadata["discount_cents"], 250)
++        self.assertEqual(entry.metadata["promo_code"], "UPG25")
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "pro")
++
++        # Replay with identical promo_code and as_of returns original entry
++        replay = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "pro",
++            15,
++            30,
++            idempotency_key="upg-promo-1",
++            promo_code="UPG25",
++            as_of="2026-06-30",
++        )
++        self.assertIs(replay, entry)
++        self.assertEqual(self.svc.get_statement("acct_upg")["entry_count"], 1)
++
++        # Reusing same key with different promo_code or as_of raises ValidationError
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub.subscription_id,
++                "pro",
++                15,
++                30,
++                idempotency_key="upg-promo-1",
++                promo_code=None,
++                as_of="2026-06-30",
++            )
++        with self.assertRaises(ValidationError):
++            self.svc.upgrade_subscription(
++                sub.subscription_id,
++                "pro",
++                15,
++                30,
++                idempotency_key="upg-promo-1",
++                promo_code="UPG25",
++                as_of="2026-06-29",
++            )
++
++        # Clamped fixed promo on upgrade (gross proration = 7000 * 3 / 30 = 700, off 2000 -> clamped at 0)
++        entry2 = self.svc.upgrade_subscription(
++            sub.subscription_id,
++            "enterprise",
++            3,
++            30,
++            idempotency_key="upg-promo-clamp",
++            promo_code="FLAT2000",
++        )
++        self.assertEqual((entry2.subtotal_cents, entry2.tax_cents, entry2.total_cents), (0, 0, 0))
++        self.assertEqual(entry2.metadata["discount_cents"], 700)
++        self.assertEqual(self.svc.ledger.get_subscription(sub.subscription_id).plan_id, "enterprise")
++
++
++if __name__ == "__main__":
++    unittest.main()
+
+--- /dev/null
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py
+@@ -0,0 +1,246 @@
++"""Unit tests for Turn 3: partial refunds, penny conservation, and credit notes."""
++
++from __future__ import annotations
++
++import unittest
++
++from ev1_order_ledger.api import OrderService
++from ev1_order_ledger.models import LineItem, Plan, ValidationError
++
++
++class RefundAndCreditNoteTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.svc = OrderService()
++        self.svc.register_plan(Plan(plan_id="starter", name="Starter", monthly_cents=1000, tax_bps=825))
++        self.svc.register_plan(Plan(plan_id="pro", name="Pro", monthly_cents=3000, tax_bps=825))
++
++    def test_multi_chunk_partial_refunds_conserve_exact_tax_and_subtotal(self) -> None:
++        order = self.svc.place_order(
++            "acct_1",
++            [LineItem(sku="seat", unit_cents=1999, quantity=2)],
++            tax_bps=825,
++        )
++        # subtotal=3998, tax=330, total=4328
++        self.assertEqual((order.subtotal_cents, order.tax_cents, order.total_cents), (3998, 330, 4328))
++
++        chunks = [1000, 1000, 1000, 1328]
++        refund_entries = []
++        for idx, amount in enumerate(chunks, start=1):
++            entry = self.svc.refund_order(
++                order.order_id,
++                amount,
++                reason=f"partial_{idx}",
++                idempotency_key=f"ref-chunk-{idx}",
++            )
++            self.assertEqual(entry.kind, "order_refund")
++            self.assertEqual(entry.reference_id, order.order_id)
++            self.assertEqual(entry.account_id, "acct_1")
++            self.assertEqual(entry.reason, f"partial_{idx}")
++            self.assertEqual(entry.total_cents, -amount)
++            self.assertEqual(entry.subtotal_cents + entry.tax_cents, entry.total_cents)
++            self.assertLessEqual(entry.subtotal_cents, 0)
++            self.assertLessEqual(entry.tax_cents, 0)
++            refund_entries.append(entry)
++
++        self.assertEqual(sum(-e.subtotal_cents for e in refund_entries), order.subtotal_cents)
++        self.assertEqual(sum(-e.tax_cents for e in refund_entries), order.tax_cents)
++        self.assertEqual(sum(-e.total_cents for e in refund_entries), order.total_cents)
++        self.assertEqual(self.svc.get_statement("acct_1")["balance_cents"], 0)
++        self.assertEqual(self.svc.get_statement("acct_1")["entry_count"], 5)
++
++    def test_one_cent_incremental_refunds_have_zero_penny_drift(self) -> None:
++        # subtotal=100, tax_bps=3333 -> tax=33, total=133
++        # Naive per-chunk rounding would reverse 0 tax on every 1-cent refund;
++        # cumulative rounding reverses exact 33 cents tax and 100 cents subtotal.
++        order = self.svc.place_order(
++            "acct_micro",
++            [LineItem(sku="unit", unit_cents=100, quantity=1)],
++            tax_bps=3333,
++        )
++        self.assertEqual((order.subtotal_cents, order.tax_cents, order.total_cents), (100, 33, 133))
++
++        refunds = [
++            self.svc.refund_order(
++                order.order_id,
++                1,
++                reason="micro",
++                idempotency_key=f"micro-{i}",
++            )
++            for i in range(order.total_cents)
++        ]
++        for entry in refunds:
++            self.assertEqual(entry.subtotal_cents + entry.tax_cents, -1)
++            self.assertIn((entry.subtotal_cents, entry.tax_cents), {(-1, 0), (0, -1)})
++
++        self.assertEqual(sum(-e.subtotal_cents for e in refunds), 100)
++        self.assertEqual(sum(-e.tax_cents for e in refunds), 33)
++        self.assertEqual(sum(-e.total_cents for e in refunds), 133)
++        self.assertEqual(self.svc.get_statement("acct_micro")["balance_cents"], 0)
++
++    def test_refund_on_discounted_promo_order_and_zero_tax_order(self) -> None:
++        self.svc.register_promo("OFF25", percent_off=25)
++        order = self.svc.place_order(
++            "acct_promo",
++            [LineItem(sku="seat", unit_cents=1000, quantity=1)],
++            tax_bps=825,
++            promo_code="OFF25",
++        )
++        # discounted subtotal=750, tax=62, total=812
++        self.assertEqual((order.subtotal_cents, order.tax_cents, order.total_cents), (750, 62, 812))
++
++        r1 = self.svc.refund_order(order.order_id, 400, reason="half1", idempotency_key="promo-r1")
++        r2 = self.svc.refund_order(order.order_id, 412, reason="half2", idempotency_key="promo-r2")
++        self.assertEqual(-(r1.subtotal_cents + r2.subtotal_cents), 750)
++        self.assertEqual(-(r1.tax_cents + r2.tax_cents), 62)
++        self.assertEqual(self.svc.get_statement("acct_promo")["balance_cents"], 0)
++
++        # Zero-tax order
++        no_tax = self.svc.place_order("acct_notax", [LineItem(sku="x", unit_cents=500, quantity=1)], tax_bps=0)
++        nr = self.svc.refund_order(no_tax.order_id, 200, reason="partial", idempotency_key="nt-1")
++        self.assertEqual((nr.subtotal_cents, nr.tax_cents, nr.total_cents), (-200, 0, -200))
++
++    def test_over_refund_and_invalid_inputs_fail_closed(self) -> None:
++        order = self.svc.place_order(
++            "acct_err",
++            [LineItem(sku="seat", unit_cents=1000, quantity=1)],
++            tax_bps=1000,
++        )
++        # total = 1100
++        self.assertEqual(order.total_cents, 1100)
++
++        # Invalid arguments
++        invalid_calls = [
++            ("ord_unknown", 100, "r", "k1"),
++            ("", 100, "r", "k2"),
++            (True, 100, "r", "k3"),
++            (order.order_id, 0, "r", "k4"),
++            (order.order_id, -50, "r", "k5"),
++            (order.order_id, True, "r", "k6"),
++            (order.order_id, False, "r", "k7"),
++            (order.order_id, 100, "", "k8"),
++            (order.order_id, 100, "   ", "k9"),
++            (order.order_id, 100, True, "k10"),
++            (order.order_id, 100, "r", ""),
++            (order.order_id, 100, "r", "   "),
++            (order.order_id, 100, "r", None),
++            # Single over-refund
++            (order.order_id, 1101, "too much", "k-over-single"),
++        ]
++        for oid, amt, reason, key in invalid_calls:
++            with self.subTest(oid=oid, amt=amt, reason=reason, key=key):
++                with self.assertRaises(ValidationError):
++                    self.svc.refund_order(oid, amt, reason=reason, idempotency_key=key)
++
++        # Refund 600 succeeds, then 501 fails as cumulative over-refund (600 + 501 > 1100)
++        self.svc.refund_order(order.order_id, 600, reason="part1", idempotency_key="k-part1")
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(order.order_id, 501, reason="part2", idempotency_key="k-over-cum")
++
++        # Failed over-refund did not burn its key and exact remaining 500 still succeeds
++        rem = self.svc.refund_order(order.order_id, 500, reason="part2", idempotency_key="k-over-cum")
++        self.assertEqual(rem.total_cents, -500)
++        self.assertEqual(self.svc.get_statement("acct_err")["balance_cents"], 0)
++
++        # Further 1-cent refund fails
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(order.order_id, 1, reason="extra", idempotency_key="k-extra")
++
++        # 100%-discounted order (total=0) cannot be refunded
++        self.svc.register_promo("FREE", percent_off=100)
++        free_order = self.svc.place_order(
++            "acct_free",
++            [LineItem(sku="x", unit_cents=500, quantity=1)],
++            tax_bps=1000,
++            promo_code="FREE",
++        )
++        self.assertEqual(free_order.total_cents, 0)
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(free_order.order_id, 1, reason="free", idempotency_key="k-free")
++
++    def test_refund_idempotency_replay_and_conflict(self) -> None:
++        order1 = self.svc.place_order("acct_idem", [LineItem(sku="x", unit_cents=1000, quantity=1)], tax_bps=1000)
++        order2 = self.svc.place_order("acct_idem", [LineItem(sku="x", unit_cents=1000, quantity=1)], tax_bps=1000)
++
++        # Full refund of order1
++        first = self.svc.refund_order(
++            order1.order_id,
++            1100,
++            reason="customer_request",
++            idempotency_key="ref-idem-1",
++        )
++        # Replaying identical full refund returns original entry (must not fail as over-refund!)
++        replay = self.svc.refund_order(
++            order1.order_id,
++            1100,
++            reason="customer_request",
++            idempotency_key="ref-idem-1",
++        )
++        self.assertIs(replay, first)
++        self.assertEqual(self.svc.get_statement("acct_idem")["balance_cents"], 1100)
++        self.assertEqual(self.svc.get_statement("acct_idem")["entry_count"], 3)
++
++        # Conflicts: different amount, different reason, different order_id
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(order1.order_id, 500, reason="customer_request", idempotency_key="ref-idem-1")
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(order1.order_id, 1100, reason="other_reason", idempotency_key="ref-idem-1")
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(order2.order_id, 1100, reason="customer_request", idempotency_key="ref-idem-1")
++
++        # Cross-operation idempotency key conflict with upgrade_subscription
++        sub = self.svc.start_subscription("acct_idem", "starter")
++        self.svc.upgrade_subscription(sub.subscription_id, "pro", 15, 30, idempotency_key="shared-key")
++        with self.assertRaises(ValidationError):
++            self.svc.refund_order(order2.order_id, 100, reason="dup", idempotency_key="shared-key")
++
++    def test_export_credit_note_positive_magnitudes_and_rejection(self) -> None:
++        order = self.svc.place_order(
++            "acct_cn",
++            [LineItem(sku="seat", unit_cents=1999, quantity=2)],
++            tax_bps=825,
++        )
++        refund = self.svc.refund_order(
++            order.order_id,
++            1000,
++            reason="damaged_item",
++            idempotency_key="cn-ref-1",
++        )
++
++        credit_note = self.svc.export_credit_note(refund.entry_id)
++        self.assertEqual(
++            credit_note,
++            {
++                "entry_id": refund.entry_id,
++                "order_id": order.order_id,
++                "account_id": "acct_cn",
++                "subtotal_cents": -refund.subtotal_cents,
++                "tax_cents": -refund.tax_cents,
++                "total_cents": 1000,
++                "reason": "damaged_item",
++            },
++        )
++        self.assertGreater(credit_note["subtotal_cents"], 0)
++        self.assertGreater(credit_note["tax_cents"], 0)
++        self.assertEqual(
++            credit_note["subtotal_cents"] + credit_note["tax_cents"],
++            credit_note["total_cents"],
++        )
++
++        # Rejects unknown, empty, boolean, order_charge, and plan_upgrade entries
++        charge_entry = self.svc.ledger.entries_for_account("acct_cn")[0]
++        self.assertEqual(charge_entry.kind, "order_charge")
++
++        sub = self.svc.start_subscription("acct_cn", "starter")
++        upgrade_entry = self.svc.upgrade_subscription(
++            sub.subscription_id, "pro", 15, 30, idempotency_key="cn-upg-1"
++        )
++        self.assertEqual(upgrade_entry.kind, "plan_upgrade")
++
++        for bad_id in ("ent_unknown", "", "   ", True, None, charge_entry.entry_id, upgrade_entry.entry_id):
++            with self.subTest(bad_id=bad_id):
++                with self.assertRaises(ValidationError):
++                    self.svc.export_credit_note(bad_id)
++
++
++if __name__ == "__main__":
++    unittest.main()

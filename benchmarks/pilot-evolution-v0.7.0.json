@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "pilot-evolution-v0.7.0",
-  "status": "planned",
+  "status": "completed",
   "standard_version": "0.2.0",
   "suite": "multi-turn-compounding-quality",
   "cases": [
@@ -63,10 +63,20 @@
       "planned_matched_pairs": 12,
       "planned_run_records": 24,
       "planned_generation_stages": 96
+    },
+    {
+      "track_id": "core-rules-v0.2.0-vs-gated-structural",
+      "baseline": "core-rules-v0.2.0",
+      "treatment": "gated-structural",
+      "description": "Head-to-head comparison of standing prose core rules versus automated mechanical diff + structural gating across 4 sequential turns.",
+      "case_ids": ["EV1"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 96
     }
   ],
   "limits": [
-    "Status is planned (0 live model runs executed yet); do not report unrun planned tracks as measured results.",
+    "Completed with 36/36 isolated live 4-turn runs recorded in results/pilot-evolution-v0.7.0/runs.jsonl (0 timeouts, 0 failures, 0 blocked).",
     "EV1 is an initial constructed 4-turn Python evolution scenario; expand with additional stacks and real-work evolution chains before generalizing across all codebases.",
     "Zero word-cap checks are included by design: rules must prove value on functional bugs, mutation-tested test strength, duplication, dead code, sprawl, and silent failures, or be dropped via benchmarks/evolution.py compare."
   ]

@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 (partial refunds with cumulative penny conservation and credit-note export):
+
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L179-L202)**: Added canonical `compute_cumulative_refund_split(...)` computing `target_cumulative_tax = round_half_up_div(order_tax_cents * new_refunded_total, order_total_cents)` so every refund satisfies `refund_subtotal_cents + refund_tax_cents == amount_cents` and any multi-chunk sequence totalling `order.total_cents` reverses exact `order.tax_cents` and `order.subtotal_cents` with zero penny drift while failing closed on over-refunds.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L116-L129)**: Added `OrderLedger.refund_entries_for_order` and `OrderLedger.refunded_totals_for_order` to track cumulative refunded total and tax magnitudes per order.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L227-L285)**:
+  - Added `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` recording negative `LedgerEntry(kind='order_refund', subtotal_cents=-refund_subtotal, tax_cents=-refund_tax, total_cents=-amount_cents, reference_id=order_id, reason=reason)` with the shared idempotency replay/conflict semantics.
+  - Added `OrderService.export_credit_note(refund_entry_id)` returning `{'entry_id', 'order_id', 'account_id', 'subtotal_cents', 'tax_cents', 'total_cents', 'reason'}` with positive refunded cent magnitudes and raising `ValidationError` for unknown or non-refund entries.
+- **[test_refunds.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py)**: Added unit tests covering uneven multi-chunk and 1-cent penny-conserving refunds, over-refund and input validation, idempotency replay/conflict (including cross-operation key reuse), and credit-note export/rejection.
+
+Verification: `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` exited `0` (23/23 tests passing).
+
+STDERR:
+

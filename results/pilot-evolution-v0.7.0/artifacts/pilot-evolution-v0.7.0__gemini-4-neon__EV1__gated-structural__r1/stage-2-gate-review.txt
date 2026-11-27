@@ -1,0 +1,19 @@
+Anti-Slop Plain-English Review
+==============================
+Must-fix shortcuts: 0 | Compounding slop risks: 2
+
+Compounding Slop Risks (Review Before Merging)
+----------------------------------------------
+1. Function is growing too long or tangled to reason about safely [STRUCT-GOD-FUNCTION] (benchmarks/sources/ev1_order_ledger/api.py:114)
+   What was found: benchmarks/sources/ev1_order_ledger/api.py:114 function 'upgrade_subscription' is growing too complex (70 code lines > 60) [Heuristic].
+   Why engineers flag this: Functions with dozens of lines and deeply nested branches pack multiple responsibilities together, making edge cases easy to miss and hard to unit-test.
+   How it compounds across AI turns: AI models degrade fastest when patching long, high-branch functions: each new turn bolts on another 'if' branch instead of clarifying the structure.
+   Reference: docs/evidence.md#ext-07, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Split this function into smaller single-purpose helpers with clear names and focused tests.
+
+2. Dead code, unreachable branch, or leftover legacy compatibility path [STRUCT-DEAD-COMPAT] (benchmarks/sources/ev1_order_ledger/pricing.py:166)
+   What was found: benchmarks/sources/ev1_order_ledger/pricing.py:166 keeps or adds legacy compatibility flag 'legacy_flat_fee' on 'compute_order_pre_discount_subtotal_cents'.
+   Why engineers flag this: Unreachable branches, unused private helpers, and uncalled '*_legacy'/'*_compat' functions clutter the codebase and make it unclear which path is actually active.
+   How it compounds across AI turns: Future AI sessions cannot easily tell dead paths from live ones: they frequently edit or copy the abandoned legacy helper instead of the real code path.
+   Reference: docs/evidence.md#ext-12, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Delete the unreachable branch, unused helper, or obsolete legacy shim cleanly and re-run tests.

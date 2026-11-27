@@ -703,12 +703,12 @@ class EvolutionBenchmarkTests(unittest.TestCase):
         shutil.copytree(FIXTURE_DIR, dst)
         return dst
 
-    def test_ev1_case_and_planned_pilot_manifest_validate_cleanly(self) -> None:
+    def test_ev1_case_and_completed_pilot_manifest_validate_cleanly(self) -> None:
         cases = benchmark.load_cases(REPO_ROOT / "benchmarks/cases", REPO_ROOT)
         self.assertIn(("EV1", "0.7.0"), cases)
         pilot = benchmark.read_json(REPO_ROOT / "benchmarks/pilot-evolution-v0.7.0.json")
         validated = benchmark.validate_pilot(pilot, cases, "benchmarks/pilot-evolution-v0.7.0.json")
-        self.assertEqual(validated["status"], "planned")
+        self.assertEqual(validated["status"], "completed")
         self.assertEqual(validated["experiment_id"], "pilot-evolution-v0.7.0")
 
     def test_unpatched_fixture_fails_stage4_grader_cleanly(self) -> None:

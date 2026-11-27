@@ -1,0 +1,214 @@
+--- a/benchmarks/sources/ev1_order_ledger/api.py
++++ b/benchmarks/sources/ev1_order_ledger/api.py
+@@ -65,6 +65,20 @@
+         self.ledger.save_subscription(sub)
+         return sub
+ 
++    def upgrade_subscription(
++        self,
++        subscription_id: str,
++        new_plan_id: str,
++        days_remaining: int,
++        cycle_days: int,
++        *,
++        idempotency_key: str,
++    ) -> LedgerEntry:
++        return self.ledger.upgrade_subscription(
++            subscription_id, new_plan_id, days_remaining, cycle_days,
++            idempotency_key=idempotency_key,
++        )
++
+     def get_statement(self, account_id: str) -> Dict[str, object]:
+         entries = self.ledger.entries_for_account(account_id)
+         return {
+
+--- a/benchmarks/sources/ev1_order_ledger/ledger.py
++++ b/benchmarks/sources/ev1_order_ledger/ledger.py
+@@ -2,9 +2,11 @@
+ 
+ from __future__ import annotations
+ 
++from threading import Lock
+ from typing import Dict, List, Optional
+ 
+ from .models import LedgerEntry, Order, Plan, Subscription, ValidationError
++from .pricing import calculate_upgrade_totals, validate_proration_days
+ 
+ 
+ class OrderLedger:
+@@ -14,6 +16,8 @@
+         self._subscriptions: Dict[str, Subscription] = {}
+         self._entries: Dict[str, LedgerEntry] = {}
+         self._entry_order: List[str] = []
++        self._upgrades: dict[str, tuple[tuple[str, str, int, int], LedgerEntry]] = {}
++        self._upgrade_lock = Lock()
+         self._seq = 0
+ 
+     def next_id(self, prefix: str) -> str:
+@@ -51,6 +55,50 @@
+             raise ValidationError(f"Unknown subscription_id: {subscription_id}")
+         return sub
+ 
++    def upgrade_subscription(
++        self,
++        subscription_id: str,
++        new_plan_id: str,
++        days_remaining: int,
++        cycle_days: int,
++        *,
++        idempotency_key: str,
++    ) -> LedgerEntry:
++        for name, value in (
++            ("subscription_id", subscription_id),
++            ("new_plan_id", new_plan_id),
++            ("idempotency_key", idempotency_key),
++        ):
++            if not isinstance(value, str) or not value.strip():
++                raise ValidationError(f"{name} must be a non-empty string")
++        validate_proration_days(days_remaining, cycle_days)
++        request = (subscription_id, new_plan_id, days_remaining, cycle_days)
++        with self._upgrade_lock:
++            previous = self._upgrades.get(idempotency_key)
++            if previous is not None:
++                original_request, entry = previous
++                if original_request != request:
++                    raise ValidationError("idempotency_key already used for a different upgrade")
++                return entry
++
++            sub = self.get_subscription(subscription_id)
++            subtotal, tax, total = calculate_upgrade_totals(
++                self.get_plan(sub.plan_id), self.get_plan(new_plan_id), days_remaining, cycle_days
++            )
++            entry = LedgerEntry(
++                entry_id=self.next_id("ent"),
++                account_id=sub.account_id,
++                kind="plan_upgrade",
++                subtotal_cents=subtotal,
++                tax_cents=tax,
++                total_cents=total,
++                reference_id=subscription_id,
++            )
++            self.record_entry(entry)
++            sub.plan_id = new_plan_id
++            self._upgrades[idempotency_key] = (request, entry)
++            return entry
++
+     def record_entry(self, entry: LedgerEntry) -> None:
+         self._entries[entry.entry_id] = entry
+         self._entry_order.append(entry.entry_id)
+
+--- a/benchmarks/sources/ev1_order_ledger/pricing.py
++++ b/benchmarks/sources/ev1_order_ledger/pricing.py
+@@ -4,7 +4,7 @@
+ 
+ from typing import Sequence, Tuple
+ 
+-from .models import LineItem, ValidationError
++from .models import LineItem, Plan, ValidationError
+ 
+ 
+ LEGACY_FLAT_FEE_CENTS = 500
+@@ -60,3 +60,21 @@
+         subtotal += LEGACY_FLAT_FEE_CENTS
+     tax = compute_tax_cents(subtotal, tax_bps)
+     return subtotal, tax, subtotal + tax
++
++
++def validate_proration_days(days_remaining: int, cycle_days: int) -> None:
++    validate_positive_int(cycle_days, "cycle_days")
++    validate_non_negative_int(days_remaining, "days_remaining")
++    if days_remaining > cycle_days:
++        raise ValidationError("days_remaining cannot exceed cycle_days")
++
++
++def calculate_upgrade_totals(
++    old_plan: Plan, new_plan: Plan, days_remaining: int, cycle_days: int
++) -> Tuple[int, int, int]:
++    difference = new_plan.monthly_cents - old_plan.monthly_cents
++    if difference <= 0:
++        raise ValidationError("new plan must have a higher monthly price")
++    subtotal = round_half_up_div(difference * days_remaining, cycle_days)
++    tax = compute_tax_cents(subtotal, new_plan.tax_bps)
++    return subtotal, tax, subtotal + tax
+
+--- /dev/null
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py
+@@ -0,0 +1,78 @@
++import unittest
++
++from ev1_order_ledger.api import OrderService
++from ev1_order_ledger.models import Plan, ValidationError
++
++
++class SubscriptionUpgradeTests(unittest.TestCase):
++    def setUp(self):
++        self.service = OrderService()
++        for plan in (
++            Plan("base", "Base", 1000),
++            Plan("pro", "Pro", 1005, 5000),
++            Plan("premium", "Premium", 2000),
++            Plan("equal", "Equal", 1000),
++            Plan("cheaper", "Cheaper", 999),
++        ):
++            self.service.register_plan(plan)
++        self.sub = self.service.start_subscription("acct", "base")
++        self.request = dict(subscription_id=self.sub.subscription_id, new_plan_id="pro",
++                            days_remaining=1, cycle_days=2, idempotency_key="upgrade")
++
++    def upgrade(self, **changes):
++        return self.service.upgrade_subscription(**{**self.request, **changes})
++
++    def test_rounds_proration_then_tax_half_up(self):
++        entry = self.upgrade()
++        # Five cents for half a cycle rounds to three, then 50% tax rounds to two.
++        self.assertEqual((entry.subtotal_cents, entry.tax_cents, entry.total_cents), (3, 2, 5))
++        self.assertEqual((entry.kind, entry.reference_id), ("plan_upgrade", self.sub.subscription_id))
++        self.assertEqual(self.sub.plan_id, "pro")
++        self.assertEqual(self.service.ledger.entries_for_account("acct"), [entry])
++        self.assertEqual(self.service.get_statement("acct")["balance_cents"], 5)
++
++    def test_zero_partial_and_full_cycle(self):
++        for days, expected in [(0, 0), (1, 1), (4, 5)]:
++            with self.subTest(days=days):
++                sub = self.service.start_subscription("acct", "base")
++                entry = self.upgrade(subscription_id=sub.subscription_id, days_remaining=days,
++                                     cycle_days=4, idempotency_key=sub.subscription_id)
++                self.assertEqual(entry.subtotal_cents, expected)
++                self.assertEqual(sub.plan_id, "pro")
++
++    def test_invalid_requests_leave_plan_ledger_and_key_untouched(self):
++        for changes in (
++            dict(subscription_id="missing"), dict(new_plan_id="missing"),
++            dict(new_plan_id="base"), dict(new_plan_id="equal"), dict(new_plan_id="cheaper"),
++            dict(cycle_days=0), dict(cycle_days=-1), dict(days_remaining=-1),
++            dict(days_remaining=3), dict(days_remaining=True), dict(cycle_days=True),
++            dict(days_remaining=1.0), dict(cycle_days=2.0), dict(subscription_id=False),
++            dict(new_plan_id=True), dict(idempotency_key=""), dict(idempotency_key=" "),
++            dict(idempotency_key=False),
++        ):
++            with self.subTest(changes=changes), self.assertRaises(ValidationError):
++                self.upgrade(**changes)
++        self.assertEqual(self.sub.plan_id, "base")
++        self.assertEqual(self.service.ledger.entries_for_account("acct"), [])
++        self.upgrade()
++
++    def test_replay_after_further_upgrade_returns_original_entry(self):
++        original = self.upgrade()
++        later = self.upgrade(new_plan_id="premium", idempotency_key="second")
++        self.service = OrderService(self.service.ledger)
++        self.assertIs(self.upgrade(), original)
++        self.assertEqual(self.sub.plan_id, "premium")
++        self.assertEqual(self.service.ledger.entries_for_account("acct"), [original, later])
++
++    def test_conflict_checks_all_arguments(self):
++        original = self.upgrade()
++        other = self.service.start_subscription("acct", "base")
++        for changes in (
++            dict(subscription_id=other.subscription_id), dict(new_plan_id="premium"),
++            dict(days_remaining=0), dict(cycle_days=3), dict(days_remaining=True),
++        ):
++            with self.subTest(changes=changes), self.assertRaises(ValidationError):
++                self.upgrade(**changes)
++        self.assertEqual(other.plan_id, "base")
++        self.assertEqual(self.sub.plan_id, "pro")
++        self.assertEqual(self.service.ledger.entries_for_account("acct"), [original])

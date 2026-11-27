@@ -1,0 +1,3 @@
+Follow the user's request directly using only the files provided in this workspace.
+
+After each stage, an automated anti-slop diff and structural review gate inspects your workspace changes. If it reports blocking shortcuts or compounding slop risks, resolve every reported finding before finalizing.

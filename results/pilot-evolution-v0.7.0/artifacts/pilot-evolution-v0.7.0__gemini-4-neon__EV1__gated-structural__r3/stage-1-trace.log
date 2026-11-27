@@ -1,0 +1,15 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "c40a3c61-2dfe-4760-a997-35893d65dd2e", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 322361, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades with idempotency, stdlib only):
+
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py)**: Added canonical helpers `validate_upgrade_cycle_bounds`, `compute_prorated_upgrade_cents`, and `calculate_upgrade_totals` using exact integer-cent half-up division via `round_half_up_div` and tax calculation via `compute_tax_cents(subtotal, new_plan.tax_bps)`, rejecting non-upgrades, out-of-range bounds, and booleans with `ValidationError`.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py)**: Added `validate_idempotency_key`, `OrderLedger.lookup_idempotent_entry`, and `OrderLedger.record_idempotent_entry` with type-strict request fingerprinting to return the original `LedgerEntry` on identical replay and raise `ValidationError` on conflicting reuse.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py)**: Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` coordinating input validation, idempotency replay/conflict enforcement, proration/tax computation, `subscription.plan_id` update, and `LedgerEntry` recording (`kind="plan_upgrade"`, `reference_id=subscription_id`).
+- **[test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)**: Added unit tests covering mid-cycle proration & half-up rounding, `new_plan.tax_bps` usage, zero/full-cycle day bounds, fail-closed validation without state mutation, and idempotency replay/conflict/bool-vs-int isolation.
+
+Verification: `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` exited `0` (11/11 tests passing).
+
+STDERR:
+

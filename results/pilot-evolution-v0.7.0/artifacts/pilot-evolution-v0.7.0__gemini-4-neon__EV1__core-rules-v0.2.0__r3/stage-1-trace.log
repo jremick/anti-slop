@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "09d716f4-4a02-4fcb-aeb8-2799a8ce935c", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 231425, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades with idempotency, stdlib only) and verified all checks pass.
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L65-L104)**: Added canonical helpers `validate_proration_window`, `compute_prorated_upgrade_cents`, and `calculate_upgrade_totals` using exact integer-cent `round_half_up_div((new_plan.monthly_cents - old_plan.monthly_cents) * days_remaining, cycle_days)` and `compute_tax_cents(subtotal, new_plan.tax_bps)`, rejecting non-upgrades, out-of-range bounds, and booleans/non-integers with `ValidationError`.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L17-L99)**: Added canonical idempotency helpers `validate_idempotency_key`, `lookup_idempotent_entry`, and `record_idempotent_entry` on `OrderLedger` with type-aware argument fingerprinting so replays return the original `LedgerEntry` without duplicating entries and conflicting reuses raise `ValidationError`.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L68-L116)**: Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` to validate inputs, resolve idempotent replays before state checks, update `subscription.plan_id`, and record a `LedgerEntry` with `kind="plan_upgrade"` and `reference_id=subscription_id`.
+- **[test_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py)**: Added 6 unit tests covering prorated upgrade totals and `new_plan.tax_bps`, half-up `.5` tie rounding and boundary windows (`0` and `cycle_days`), validation errors (unknown IDs, non-upgrades, invalid bounds, booleans/floats, empty/invalid keys), idempotency replay and conflict detection, and key non-consumption after failed validation.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — exited `0` (`Ran 10 tests in 0.001s`, `OK`).
+
+STDERR:
+

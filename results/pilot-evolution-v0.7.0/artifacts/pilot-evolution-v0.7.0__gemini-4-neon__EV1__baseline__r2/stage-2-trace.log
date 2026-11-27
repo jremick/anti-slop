@@ -1,0 +1,25 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 (promo codes across orders and mid-cycle plan upgrades via a single shared pricing helper):
+
+### Changes
+- **Model & exports** ([models.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/models.py#L25-L31), [__init__.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/__init__.py#L5-L18)):
+  - Added frozen dataclass `Promo` and exported it from the package.
+- **Canonical pricing & promo validation** ([pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L52-L197)):
+  - Added `parse_iso_date`, `validate_promo_code`, `validate_promo`, and the shared canonical `apply_promo_and_tax(gross_subtotal_cents, tax_bps, *, promo=None, as_of=None)` helper.
+  - Both `calculate_order_pricing` and `calculate_prorated_upgrade_pricing` (as well as the existing `calculate_order_totals` / `calculate_prorated_upgrade_totals`) delegate to `apply_promo_and_tax`, applying pre-tax discounts (clamped at `0`) before computing tax on the discounted subtotal.
+- **Ledger storage** ([ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L44-L55)):
+  - Added `OrderLedger.add_promo` and `OrderLedger.get_promo`, failing closed with `ValidationError` on invalid, stacked, or unknown codes.
+- **Service API** ([api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L23-L186)):
+  - Added `OrderService.register_promo(code, *, percent_off=None, amount_off_cents=None, expires_on=None, min_subtotal_cents=0)`.
+  - Extended `place_order` and `upgrade_subscription` with optional `promo_code=None` and `as_of=None`; populated `Order.subtotal_cents` (discounted), `Order.discount_cents`, and `Order.promo_code`; included `(promo_code, as_of)` in `upgrade_subscription`'s idempotency fingerprint.
+- **Unit tests** ([test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py)):
+  - Added tests for promo registration validation, percentage and fixed promos (including 0-clamping and `legacy_flat_fee`), expiry/`as_of` boundaries, minimum subtotal, unknown/stacked code rejection, and upgrade + promo pricing + idempotency.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — **19/19 tests passed** (exit code `0`).
+
+STDERR:
+

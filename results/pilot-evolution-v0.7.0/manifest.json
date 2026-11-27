@@ -1,0 +1,228 @@
+{
+  "experiment_id": "pilot-evolution-v0.7.0",
+  "created_at_utc": "2026-11-27T01:27:47Z",
+  "source_snapshot_id": "git-2f06ef584068",
+  "seed": 20261127,
+  "timeout_seconds": 720,
+  "max_workers": 3,
+  "child_max_rss_mb": 1536,
+  "cases": [
+    "EV1"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gemini-4-neon"
+  ],
+  "conditions": {
+    "baseline": {
+      "path": "results/pilot-evolution-v0.7.0/conditions/baseline.txt",
+      "sha256": "6bdfa57671846de79a50da481e4b83de2ac57b56d00570e52f7912b22c4e561a"
+    },
+    "core-rules-v0.2.0": {
+      "path": "results/pilot-evolution-v0.7.0/conditions/core-rules-v0.2.0.txt",
+      "sha256": "7339ed05c02bda723409895d95ddbb3bcb14b453c21b41e6beaac80e362ae53e"
+    },
+    "gated-structural": {
+      "path": "results/pilot-evolution-v0.7.0/conditions/gated-structural.txt",
+      "sha256": "7e9177026ac2f28e43246d70b669a4c7a1b99e77a1a23515a42c4d457e407b6e"
+    }
+  },
+  "cli_versions": {
+    "claude-opus-5-5": "2.1.330 (Claude Code)",
+    "gpt-6.2-astra": "codex-cli 0.171.0",
+    "gpt-6.2-sol": "codex-cli 0.171.0",
+    "gemini-4-neon": "1.5.18"
+  },
+  "schedule": {
+    "claude-opus-5-5": [
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 3
+      }
+    ],
+    "gpt-6.2-astra": [
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 3
+      }
+    ],
+    "gpt-6.2-sol": [
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 3
+      }
+    ],
+    "gemini-4-neon": [
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "EV1",
+        "condition": "baseline",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "EV1",
+        "condition": "gated-structural",
+        "replicate": 3
+      }
+    ]
+  }
+}

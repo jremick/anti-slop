@@ -1,0 +1,50 @@
+--- a/webhooks.py
++++ b/webhooks.py
+@@ -67,27 +67,24 @@
+             sub.balance_due_cents = max(0, sub.balance_due_cents - event.amount_cents)
+             sub.status = "active"
+             sub.failed_attempts = 0
+-            sub.last_event_at = event.created_at
+-            return {
+-                "applied": True,
+-                "reason": "applied",
+-                "fee_cents": fee_cents,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
++        elif event.event_type == "invoice.payment_failed":
++            fee_cents = compute_fee_cents(event.amount_cents, event.fee_bps)
++            sub.balance_due_cents += event.amount_cents + fee_cents
++            sub.failed_attempts += 1
++            sub.status = "past_due"
++        elif event.event_type == "subscription.canceled":
++            fee_cents = 0
++            sub.status = "canceled"
++        else:
++            raise WebhookError(f"unsupported event type: {event.event_type}")
+ 
+-        if event.event_type == "subscription.canceled":
+-            sub.status = "canceled"
+-            sub.last_event_at = event.created_at
+-            self.processed_event_ids.add(event.event_id)
+-            return {
+-                "applied": True,
+-                "reason": "applied",
+-                "fee_cents": 0,
+-                "subscription_status": sub.status,
+-                "balance_due_cents": sub.balance_due_cents,
+-                "failed_attempts": sub.failed_attempts,
+-            }
+-
+-        raise WebhookError(f"unsupported event type: {event.event_type}")
++        sub.last_event_at = event.created_at
++        self.processed_event_ids.add(event.event_id)
++        return {
++            "applied": True,
++            "reason": "applied",
++            "fee_cents": fee_cents,
++            "subscription_status": sub.status,
++            "balance_due_cents": sub.balance_due_cents,
++            "failed_attempts": sub.failed_attempts,
++        }

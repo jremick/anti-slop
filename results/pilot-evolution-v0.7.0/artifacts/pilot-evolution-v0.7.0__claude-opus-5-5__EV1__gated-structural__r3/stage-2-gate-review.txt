@@ -1,0 +1,12 @@
+Anti-Slop Plain-English Review
+==============================
+Must-fix shortcuts: 0 | Compounding slop risks: 1
+
+Compounding Slop Risks (Review Before Merging)
+----------------------------------------------
+1. Tests that look green without actually proving the code works [STRUCT-TEST-THEATER] (benchmarks/sources/ev1_order_ledger/tests/test_promos.py:51)
+   What was found: benchmarks/sources/ev1_order_ledger/tests/test_promos.py:51 test 'test_percent_bounds_are_inclusive' contains zero assertions (only checks that code does not crash).
+   Why engineers flag this: Tests with zero assertions, tautologies like 'assert True', or heavy mocking without checking real outputs stay green even when you introduce an obvious bug. Follow the Verification Hierarchy: prefer real end-to-end or live functional verification first, then real-input behavioral tests validated with diff-scoped mutation testing (anti-slop-mutate), over heavily-mocked unit tests.
+   How it compounds across AI turns: Future AI turns trust the green test run and ship regressions believing the suite checked behavior that was never tested, while copying the same mock-heavy test patterns into new modules.
+   Reference: docs/evidence.md#ext-13, docs/ai-era-rules.md
+   Fix / prompt to give your AI: Follow the Verification Hierarchy: prefer real end-to-end/live functional verification or real-input behavioral tests that assert concrete outputs, state changes, or error conditions instead of heavy mocks, then verify mutant kill strength with anti-slop-mutate.

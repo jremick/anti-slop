@@ -1,0 +1,18 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 (promo codes across orders and plan upgrades via one shared canonical pricing helper):
+
+### Changes
+- [models.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/models.py#L25-L31) & [__init__.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/__init__.py): Added and exported the frozen `Promo` dataclass.
+- [pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L55-L157): Added `parse_iso_date`, `validate_promo_code`, `validate_promo`, `compute_order_gross_subtotal_cents`, and the single shared canonical `apply_promo_and_tax` helper (used by both order and upgrade flows) that enforces expiry (`as_of` required and `as_of <= expires_on`), `min_subtotal_cents`, single-code validation, pre-tax discount clamped at `0`, and exact half-up tax on the discounted subtotal.
+- [ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L22-L54): Added promo storage with `add_promo` and fail-closed `get_promo`.
+- [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L26-L185): Added `OrderService.register_promo(...)` and optional `promo_code=None, as_of=None` on both `place_order` and `upgrade_subscription` (including `promo_code` and `as_of` in the upgrade idempotency fingerprint), populating `Order.subtotal_cents`, `Order.discount_cents`, `Order.promo_code`, and ledger entries.
+- [test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py): Added 7 unit tests covering `register_promo` validation, percentage/fixed discounts and zero clamping, expiry and stacking rejection, minimum subtotal enforcement, and upgrade+promo calculation + idempotency.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — all 20 tests passed (exit code `0`).
+
+STDERR:
+

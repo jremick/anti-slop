@@ -1,0 +1,23 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 (promo codes across orders and mid-cycle upgrades via a shared canonical pricing helper):
+
+- **Domain model & exports** ([models.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/models.py), [__init__.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/__init__.py)):
+  - Added frozen `Promo` dataclass and exported it from the package.
+- **Shared canonical promo + tax helper** ([pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py)):
+  - Added `parse_iso_date`, `validate_promo_code`, `validate_promo`, and the single shared helper `apply_promo_and_tax(subtotal_cents, *, tax_bps=0, promo=None, as_of=None)`.
+  - Enforces single-code syntax (rejecting empty, whitespace, and multi-code separators like `,`, `;`, `+`, `|`), exact `YYYY-MM-DD` dates, required `as_of` and `as_of <= expires_on` for expiring promos, `subtotal_cents >= min_subtotal_cents`, half-up percentage rounding (`1..100`) or fixed `amount_off_cents` (`> 0`), pre-tax clamping at `0`, and tax calculation on the discounted subtotal.
+  - Wired both `calculate_order_pricing` / `calculate_order_totals` and `calculate_upgrade_pricing` / `calculate_upgrade_totals` through `apply_promo_and_tax`.
+- **Ledger & service integration** ([ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py), [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py)):
+  - Added `OrderLedger.add_promo` / `get_promo` and `OrderService.register_promo(code, *, percent_off=None, amount_off_cents=None, expires_on=None, min_subtotal_cents=0)`.
+  - Added optional `promo_code=None` and `as_of=None` to `OrderService.place_order` and `OrderService.upgrade_subscription` (including `promo_code` and `as_of` in the upgrade idempotency fingerprint), setting `Order.subtotal_cents` to the discounted subtotal with `Order.discount_cents` and `Order.promo_code` populated.
+- **Unit tests** ([test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py)):
+  - Added tests covering `register_promo` validation, percentage & fixed promos, clamping to `0`, expiry & missing/malformed `as_of`, multi-code/stacking & unknown code rejection, minimum subtotal enforcement, and upgrade + promo + idempotency behavior.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — **18 tests passed (`OK`, exit code `0`)**.
+
+STDERR:
+

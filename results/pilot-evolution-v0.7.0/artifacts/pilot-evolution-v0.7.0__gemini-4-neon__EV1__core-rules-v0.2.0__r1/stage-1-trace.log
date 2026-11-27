@@ -1,0 +1,17 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "052c2103-9911-4cdf-942a-0c91bc4be80b", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 341476, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 1 (mid-cycle prorated plan upgrades and idempotency, stdlib only) in `benchmarks/sources/ev1_order_ledger/`:
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py)**: Added canonical helpers `validate_proration_window`, `compute_prorated_upgrade_cents` (exact integer half-up proration via `round_half_up_div((new_monthly_cents - old_monthly_cents) * days_remaining, cycle_days)`), and `calculate_plan_upgrade_totals` (applying `compute_tax_cents(subtotal, new_plan.tax_bps)`), rejecting non-upgrades, invalid bounds, and booleans with `ValidationError`.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py)**: Added `validate_idempotency_key` and canonical `OrderLedger` helpers `get_idempotent_entry` and `record_idempotent_entry` with type-safe request fingerprinting (distinguishing `bool` from `int`) to return the original `LedgerEntry` on identical replay and raise `ValidationError` on conflicting reuse.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py)**: Added `OrderService.upgrade_subscription(subscription_id, new_plan_id, days_remaining, cycle_days, *, idempotency_key)` backed by the `pricing.py` and `ledger.py` helpers, updating `subscription.plan_id` and recording a `LedgerEntry` with `kind="plan_upgrade"` and `reference_id=subscription_id` only after validation succeeds.
+- **[test_plan_upgrades.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_plan_upgrades.py)**: Added unit tests covering half-up proration and tax rounding ties, `new_plan.tax_bps` selection, boundary windows (`days_remaining=0`, full cycle, free-to-paid), invalid IDs/bounds/non-upgrades/booleans/empty keys, non-burning of failed keys, and idempotency replay and conflict behavior.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — **12 tests ran, OK (exit code 0)**.
+
+STDERR:
+

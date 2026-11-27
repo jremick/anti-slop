@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "pilot-comments-v0.7.0",
-  "status": "planned",
+  "status": "completed",
   "standard_version": "0.2.0",
   "suite": "comment-hygiene-ablation",
   "cases": [
@@ -81,7 +81,7 @@
     }
   ],
   "limits": [
-    "Status is planned (0 live model runs executed yet); do not report unrun planned tracks as measured results.",
+    "Completed with 36/36 isolated live runs recorded in results/pilot-comments-v0.7.0/runs.jsonl (0 timeouts, 0 failures, 0 blocked).",
     "CM1 isolates comment effects on one constructed stdlib Python webhook processor with 100% identical executable AST across all three arms; replicate across additional languages and real-work repositories before generalizing.",
     "100% mechanically graded by benchmarks/graders/grade_cm1.py with zero word caps or subjective rubric scoring."
   ]

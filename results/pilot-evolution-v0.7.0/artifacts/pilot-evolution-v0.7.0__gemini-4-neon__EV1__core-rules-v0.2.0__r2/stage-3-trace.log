@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 (partial refunds with exact cumulative penny conservation and credit-note export):
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py)**: Added `compute_cumulative_refund_split`, computing proportional tax reversal cumulatively via `round_half_up_div(order_tax_cents * (already_refunded_total_cents + refund_amount_cents), order_total_cents) - already_refunded_tax_cents` so every chunk satisfies `refund_subtotal_cents + refund_tax_cents == amount_cents` and any sequence totalling `order.total_cents` reverses exact `order.tax_cents` and `order.subtotal_cents` with zero penny drift.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py)**: Added `refund_entries_for_order` and `order_refunded_totals` deriving refunded totals directly from canonical `order_refund` ledger entries.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py)**:
+  - Added `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` with validation (positive non-bool `amount_cents`, non-empty `reason`/`idempotency_key`, known `order_id`, over-refund rejection), negative `LedgerEntry(kind="order_refund", ...)` recording, and shared idempotency replay/conflict enforcement.
+  - Added `OrderService.export_credit_note(refund_entry_id)` returning `{"entry_id", "order_id", "account_id", "subtotal_cents", "tax_cents", "total_cents", "reason"}` with positive cent magnitudes and raising `ValidationError` on unknown or non-refund entries.
+- **[test_refunds.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py)**: Added unit tests for multi-chunk and 1-cent-at-a-time penny conservation, discounted-order refunds, over-refund and input validation, idempotency replay/conflict (including cross-operation conflict), and credit-note export.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py`: **25 tests passed (`OK`, exit code 0)**.
+
+STDERR:
+

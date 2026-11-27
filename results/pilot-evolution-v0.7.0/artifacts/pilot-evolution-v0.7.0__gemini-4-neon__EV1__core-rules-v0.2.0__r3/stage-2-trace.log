@@ -1,0 +1,22 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 (promo codes across orders and plan upgrades through one shared canonical pricing helper) and verified all checks pass.
+
+### Changes
+- **[models.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/models.py#L25-L32)** & **[__init__.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/__init__.py)**: Added and exported the frozen `Promo` dataclass.
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L51-L199)**:
+  - Added `validate_promo_code`, `parse_iso_date`, and `validate_promo` enforcing non-empty single promo codes (rejecting multi-code stacking strings/delimiters/whitespace), exactly one of `percent_off` (`1..100`) or `amount_off_cents` (`> 0`), non-negative `min_subtotal_cents`, and strict `YYYY-MM-DD` dates.
+  - Added the single shared canonical helper `calculate_discounted_totals` (invoked by both `calculate_order_pricing` and `calculate_upgrade_pricing`), applying discounts pre-tax (clamped at `0`), enforcing `min_subtotal_cents` and expiry/`as_of` rules fail-closed, and computing tax via `compute_tax_cents` on the discounted subtotal.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L14-L47)**: Added `add_promo` and `get_promo` on `OrderLedger` with fail-closed validation and unknown-code rejection.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L25-L157)**:
+  - Added `OrderService.register_promo(code, *, percent_off=None, amount_off_cents=None, expires_on=None, min_subtotal_cents=0)`.
+  - Added optional `promo_code=None` and `as_of=None` to both `place_order` (populating `Order.subtotal_cents`, `Order.discount_cents`, and `Order.promo_code`) and `upgrade_subscription` (including `promo_code` and `as_of` in the idempotency fingerprint).
+- **[test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py)**: Added 5 unit test suites covering `register_promo` validation, percentage/fixed promos and zero-clamping, expiry/unknown/stacking/min-subtotal fail-closed checks, and upgrade+promo calculation with idempotency.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — exited `0` (`Ran 15 tests in 0.001s`, `OK`).
+
+STDERR:
+

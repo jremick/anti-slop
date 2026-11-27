@@ -1,0 +1,16 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 2 (promo codes across orders and mid-cycle plan upgrades via a single canonical pricing helper):
+
+- **[models.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/models.py#L25-L31)** & **[__init__.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/__init__.py#L5-L18)**: Added and exported the frozen `Promo` dataclass.
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L52-L122)**: Added `parse_iso_date`, `validate_promo_code`, `validate_promo`, `compute_order_pre_tax_subtotal`, and the shared canonical `apply_promo_and_tax(subtotal_cents, tax_bps, *, promo=None, as_of=None)` helper used by both orders and upgrades. Validates single-code tokens (rejecting multi-code stacking strings such as `'A,B'`), strict `YYYY-MM-DD` dates, required/unexpired `as_of`, and `min_subtotal_cents`, applies pre-tax discount clamped at `0`, and computes tax on the discounted subtotal.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L46-L61)**: Added `OrderLedger.add_promo` and `OrderLedger.get_promo` delegating to canonical promo validators and failing closed on unknown/invalid codes.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L27-L162)**: Added `OrderService.register_promo(...)` and optional `promo_code=None, as_of=None` to both `place_order` and `upgrade_subscription` (including `promo_code` and `as_of` in upgrade idempotency fingerprints and populating `Order.subtotal_cents`, `Order.discount_cents`, and `Order.promo_code`).
+- **[test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py)**: Added unit tests for promo registration validation, percentage and fixed-amount discounts with zero clamping, expiry/stacking/unknown/min-subtotal fail-closed checks, and upgrade+promo idempotency.
+
+Verification: `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` exited `0` (18/18 tests passing).
+
+STDERR:
+

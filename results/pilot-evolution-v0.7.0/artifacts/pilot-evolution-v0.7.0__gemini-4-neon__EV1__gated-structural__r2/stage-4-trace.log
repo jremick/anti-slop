@@ -1,0 +1,23 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 4
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 4 removal of `legacy_flat_fee` and fail-closed audit logging:
+
+### Changes
+- **Complete `legacy_flat_fee` removal**:
+  - [pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L89-L97): Deleted `LEGACY_FLAT_FEE_CENTS` and removed `legacy_flat_fee` from `calculate_order_totals` with no `**kwargs` shims or dead branches.
+  - [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L64-L114): Removed `legacy_flat_fee` from `OrderService.place_order`, computing pre-discount subtotal directly via `compute_subtotal_cents(items)` and delegating discount + tax to `calculate_discounted_totals`.
+  - [test_orders.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_orders.py) & [test_promos.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_promos.py): Removed old `legacy_flat_fee=True` assertions.
+- **Fail-closed atomic `audit_sink`**:
+  - [api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L21-L44): Added optional `audit_sink=None` to `OrderService.__init__` and `_emit_audit(entry)` emitting `{'action': entry.kind, 'account_id': entry.account_id, 'amount_cents': entry.total_cents, 'entry_id': entry.entry_id}`.
+  - Emits right before committing in `place_order`, `_commit_upgrade` (called only on non-replay upgrades), and `refund_order` (called only on non-replay refunds), so any exception from `audit_sink` propagates fail-closed without committing the order, subscription update, ledger entry, or idempotency key.
+- **Unit tests**:
+  - [test_audit_and_removal.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_audit_and_removal.py): Added 5 test cases verifying `LEGACY_FLAT_FEE_CENTS` is removed, `legacy_flat_fee=...` raises `TypeError` on both `calculate_order_totals` and `place_order`, `audit_sink` logs newly committed mutations while skipping idempotent replays, and `audit_sink` exceptions fail closed atomically without poisoning idempotency keys.
+
+### Verification
+- Verified zero remaining references to `legacy_flat_fee` or `LEGACY_FLAT_FEE_CENTS` in production modules, zero lint/type suppressions, and all production functions ≤ 55 lines.
+- Ran [run_checks.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/run_checks.py): all 35 tests passed (`OK`).
+
+STDERR:
+

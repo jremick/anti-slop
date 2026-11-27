@@ -1,0 +1,52 @@
+{
+  "case_id": "EV1",
+  "passed": false,
+  "checks": [
+    {
+      "id": "functional_all_turns",
+      "passed": true,
+      "detail": "All hidden functional contracts passed through stage 2"
+    },
+    {
+      "id": "mutation_test_strength",
+      "passed": false,
+      "detail": "baseline_tests_passed=True, killed=8/14 (57.1%, min 65%), test_theater=0; survived sample: ['ledger.py:27 bypass raise -> pass', 'pricing.py:61 compare (> -> >=)', 'api.py:100 bypass raise -> pass']"
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "passed": true,
+      "detail": "0 duplicated logic blocks across production modules"
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "passed": false,
+      "detail": "api.py:59 keeps or adds legacy compatibility flag 'legacy_flat_fee' on 'OrderService.place_order'.; pricing.py:144 keeps or adds legacy compatibility flag 'legacy_flat_fee' on 'calculate_order_totals'."
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "passed": true,
+      "detail": "prod_files=6/8, max_func=51L/5br, god_fns=0, god_files=0"
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "passed": true,
+      "detail": "0 silent catches, silent fallbacks, test skips, suppressions, or stubs"
+    }
+  ],
+  "metrics": {
+    "functional_passed": true,
+    "mutation_kill_rate": 0.5714,
+    "mutation_killed": 8,
+    "mutation_total": 14,
+    "duplicate_blocks": 0,
+    "dead_compat": 2,
+    "god_functions": 0,
+    "god_files": 0,
+    "test_theater": 0,
+    "silent_failures_and_shortcuts": 0,
+    "prod_files_count": 6,
+    "prod_code_lines": 468,
+    "max_func_lines": 51,
+    "max_func_branches": 5
+  }
+}

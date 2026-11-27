@@ -1,0 +1,52 @@
+{
+  "case_id": "EV1",
+  "passed": false,
+  "checks": [
+    {
+      "id": "functional_all_turns",
+      "passed": true,
+      "detail": "All hidden functional contracts passed through stage 4"
+    },
+    {
+      "id": "mutation_test_strength",
+      "passed": false,
+      "detail": "baseline_tests_passed=True, killed=9/15 (60.0%, min 65%), test_theater=0; survived sample: ['ledger.py:29 bypass raise -> pass', 'pricing.py:55 compare (> -> >=)', 'ledger.py:30 boolean (or -> and)']"
+    },
+    {
+      "id": "no_duplicate_code_growth",
+      "passed": true,
+      "detail": "0 duplicated logic blocks across production modules"
+    },
+    {
+      "id": "no_dead_or_legacy_code",
+      "passed": true,
+      "detail": "0 dead/orphaned compat paths and clean legacy_flat_fee removal"
+    },
+    {
+      "id": "no_sprawl_or_god_functions",
+      "passed": true,
+      "detail": "prod_files=6/8, max_func=54L/7br, god_fns=0, god_files=0"
+    },
+    {
+      "id": "no_silent_failures_or_shortcuts",
+      "passed": false,
+      "detail": "3 shortcut/silent-failure finding(s): tests/test_refunds.py:127 adds unjustified '# type: ignore[...]' without a trailing reason.; tests/test_upgrades.py:135 adds unjustified '# type: ignore[...]' without a trailing reason.; tests/test_upgrades.py:137 adds unjustified '# type: ignore[...]' without a trailing reason."
+    }
+  ],
+  "metrics": {
+    "functional_passed": true,
+    "mutation_kill_rate": 0.6,
+    "mutation_killed": 9,
+    "mutation_total": 15,
+    "duplicate_blocks": 0,
+    "dead_compat": 0,
+    "god_functions": 0,
+    "god_files": 0,
+    "test_theater": 0,
+    "silent_failures_and_shortcuts": 3,
+    "prod_files_count": 6,
+    "prod_code_lines": 558,
+    "max_func_lines": 54,
+    "max_func_branches": 7
+  }
+}

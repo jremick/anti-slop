@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 (partial refunds with cumulative penny conservation and credit-note export) and verified all checks pass.
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py#L244-L271)**: Added `calculate_refund_breakdown` computing cumulative proportional tax reversal via `round_half_up_div(order_tax_cents * new_refunded_total, order_total_cents) - already_refunded_tax_cents` and `refund_subtotal = amount_cents - refund_tax`, enforcing `already_refunded + amount_cents <= order.total_cents` and guaranteeing zero penny drift across any refund sequence.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py#L117-L132)**: Added `refund_entries_for_order` and `refunded_totals_for_order` on `OrderLedger` to derive cumulative refunded totals directly from recorded `order_refund` ledger entries.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py#L179-L240)**:
+  - Added `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` validating inputs, enforcing idempotency replay/conflict semantics before over-refund checks, and recording negative `LedgerEntry(kind="order_refund", subtotal_cents=-refund_subtotal, tax_cents=-refund_tax, total_cents=-amount_cents, reference_id=order_id, reason=reason)`.
+  - Added `OrderService.export_credit_note(refund_entry_id)` returning positive refunded cent magnitudes (`entry_id`, `order_id`, `account_id`, `subtotal_cents`, `tax_cents`, `total_cents`, `reason`) and raising `ValidationError` for unknown or non-refund entries.
+- **[test_refunds.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py)**: Added 5 test suites covering 3-way and 1-cent-at-a-time penny-conserving refunds, over-refund and input validation rejections, idempotency replay/conflict (including cross-operation conflict), and credit-note export.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — exited `0` (`Ran 20 tests in 0.003s`, `OK`).
+
+STDERR:
+

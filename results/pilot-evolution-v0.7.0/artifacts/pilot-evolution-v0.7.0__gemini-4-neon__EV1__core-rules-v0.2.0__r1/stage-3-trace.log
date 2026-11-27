@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 3
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented Turn 3 (partial refunds with cumulative penny conservation and credit-note export) in `benchmarks/sources/ev1_order_ledger/`:
+
+### Changes
+- **[pricing.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/pricing.py)**: Added canonical `compute_cumulative_refund_split` computing cumulative proportional tax reversal via `round_half_up_div(order_tax_cents * new_cumulative_total, order_total_cents) - prior_refunded_tax_cents`, ensuring `refund_subtotal_cents + refund_tax_cents == refund_amount_cents` on every refund and exact conservation of `order.tax_cents` and `order.subtotal_cents` across arbitrary partial-refund sequences while raising `ValidationError` on over-refunds.
+- **[ledger.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/ledger.py)**: Added `OrderLedger.refund_entries_for_order(order_id)` to derive cumulative refunded totals directly from recorded `order_refund` ledger entries.
+- **[api.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/api.py)**:
+  - Added `OrderService.refund_order(order_id, amount_cents, *, reason, idempotency_key)` validating inputs, enforcing idempotency replay/conflict semantics (including replay after full refund and cross-operation key conflict rejection), rejecting over-refunds, and recording negative `LedgerEntry(kind="order_refund", subtotal_cents=-refund_subtotal, tax_cents=-refund_tax, total_cents=-amount_cents, reference_id=order_id, reason=reason)`.
+  - Added `OrderService.export_credit_note(refund_entry_id)` returning `{'entry_id', 'order_id', 'account_id', 'subtotal_cents', 'tax_cents', 'total_cents', 'reason'}` with positive refunded cent magnitudes and raising `ValidationError` for unknown or non-refund entries.
+- **[test_refunds.py](file://<TMP_WORKSPACE>/benchmarks/sources/ev1_order_ledger/tests/test_refunds.py)**: Added unit tests covering multi-chunk and 1-cent-at-a-time penny conservation, promo-discounted and zero-tax order refunds, single/cumulative over-refund rejection, idempotency replay/conflict, and credit-note export.
+
+### Verification
+- Ran `python3 benchmarks/sources/ev1_order_ledger/run_checks.py` — **23 tests ran, OK (exit code 0)**.
+
+STDERR:
+

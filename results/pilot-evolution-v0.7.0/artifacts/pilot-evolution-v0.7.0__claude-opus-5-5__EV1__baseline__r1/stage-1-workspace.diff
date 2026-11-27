@@ -1,0 +1,393 @@
+--- a/benchmarks/sources/ev1_order_ledger/api.py
++++ b/benchmarks/sources/ev1_order_ledger/api.py
+@@ -6,7 +6,12 @@
+ 
+ from .ledger import OrderLedger
+ from .models import LedgerEntry, LineItem, Order, Plan, Subscription, ValidationError
+-from .pricing import calculate_order_totals
++from .pricing import (
++    calculate_order_totals,
++    calculate_upgrade_totals,
++    validate_non_negative_int,
++    validate_positive_int,
++)
+ 
+ 
+ class OrderService:
+@@ -65,6 +70,62 @@
+         self.ledger.save_subscription(sub)
+         return sub
+ 
++    def upgrade_subscription(
++        self,
++        subscription_id: str,
++        new_plan_id: str,
++        days_remaining: int,
++        cycle_days: int,
++        *,
++        idempotency_key: str,
++    ) -> LedgerEntry:
++        """Move a subscription to a pricier plan mid-cycle and charge the prorated difference.
++
++        Replaying the same ``idempotency_key`` with identical arguments returns the
++        original entry without charging again; reusing it with different arguments
++        raises ValidationError.
++        """
++        _require_non_empty_str(subscription_id, "subscription_id")
++        _require_non_empty_str(new_plan_id, "new_plan_id")
++        _require_non_empty_str(idempotency_key, "idempotency_key")
++        # Type-check before the idempotency lookup: True == 1, so a boolean
++        # would otherwise match a stored integer fingerprint.
++        validate_positive_int(cycle_days, "cycle_days")
++        validate_non_negative_int(days_remaining, "days_remaining")
++        fingerprint = ("plan_upgrade", subscription_id, new_plan_id, days_remaining, cycle_days)
++        # Check before business validation: after a successful upgrade the
++        # subscription is already on new_plan_id, so a replay would otherwise
++        # be rejected as a non-upgrade.
++        previous = self.ledger.lookup_idempotent_entry(idempotency_key, fingerprint)
++        if previous is not None:
++            return previous
++
++        sub = self.ledger.get_subscription(subscription_id)
++        old_plan = self.ledger.get_plan(sub.plan_id)
++        new_plan = self.ledger.get_plan(new_plan_id)
++        subtotal, tax, total = calculate_upgrade_totals(old_plan, new_plan, days_remaining, cycle_days)
++
++        entry = LedgerEntry(
++            entry_id=self.ledger.next_id("ent"),
++            account_id=sub.account_id,
++            kind="plan_upgrade",
++            subtotal_cents=subtotal,
++            tax_cents=tax,
++            total_cents=total,
++            reference_id=subscription_id,
++            reason=f"Upgrade {old_plan.plan_id} -> {new_plan.plan_id}",
++            metadata={
++                "old_plan_id": old_plan.plan_id,
++                "new_plan_id": new_plan.plan_id,
++                "days_remaining": days_remaining,
++                "cycle_days": cycle_days,
++                "idempotency_key": idempotency_key,
++            },
++        )
++        self.ledger.record_idempotent_entry(idempotency_key, fingerprint, entry)
++        sub.plan_id = new_plan.plan_id
++        return entry
++
+     def get_statement(self, account_id: str) -> Dict[str, object]:
+         entries = self.ledger.entries_for_account(account_id)
+         return {
+@@ -72,3 +133,9 @@
+             "balance_cents": self.ledger.account_balance_cents(account_id),
+             "entry_count": len(entries),
+         }
++
++
++def _require_non_empty_str(value: object, field_name: str) -> str:
++    if not isinstance(value, str) or not value.strip():
++        raise ValidationError(f"{field_name} must be a non-empty string")
++    return value
+
+--- a/benchmarks/sources/ev1_order_ledger/ledger.py
++++ b/benchmarks/sources/ev1_order_ledger/ledger.py
+@@ -2,7 +2,7 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Dict, List, Optional
++from typing import Dict, List, Optional, Tuple
+ 
+ from .models import LedgerEntry, Order, Plan, Subscription, ValidationError
+ 
+@@ -15,6 +15,8 @@
+         self._entries: Dict[str, LedgerEntry] = {}
+         self._entry_order: List[str] = []
+         self._seq = 0
++        # idempotency_key -> (request fingerprint, entry_id)
++        self._idempotency: Dict[str, Tuple[tuple, str]] = {}
+ 
+     def next_id(self, prefix: str) -> str:
+         self._seq += 1
+@@ -67,3 +69,25 @@
+ 
+     def account_balance_cents(self, account_id: str) -> int:
+         return sum(e.total_cents for e in self.entries_for_account(account_id))
++
++    def lookup_idempotent_entry(self, idempotency_key: str, fingerprint: tuple) -> Optional[LedgerEntry]:
++        """Return the entry previously recorded under ``idempotency_key``, or None if unused.
++
++        Raises ValidationError if the key was already used for a different request.
++        """
++        stored = self._idempotency.get(idempotency_key)
++        if stored is None:
++            return None
++        stored_fingerprint, entry_id = stored
++        if stored_fingerprint != fingerprint:
++            raise ValidationError(
++                f"idempotency_key {idempotency_key!r} was already used with different arguments"
++            )
++        return self._entries[entry_id]
++
++    def record_idempotent_entry(self, idempotency_key: str, fingerprint: tuple, entry: LedgerEntry) -> None:
++        """Record ``entry`` and bind it to ``idempotency_key`` in one step."""
++        if idempotency_key in self._idempotency:
++            raise ValidationError(f"idempotency_key {idempotency_key!r} is already in use")
++        self.record_entry(entry)
++        self._idempotency[idempotency_key] = (fingerprint, entry.entry_id)
+
+--- a/benchmarks/sources/ev1_order_ledger/pricing.py
++++ b/benchmarks/sources/ev1_order_ledger/pricing.py
+@@ -4,7 +4,7 @@
+ 
+ from typing import Sequence, Tuple
+ 
+-from .models import LineItem, ValidationError
++from .models import LineItem, Plan, ValidationError
+ 
+ 
+ LEGACY_FLAT_FEE_CENTS = 500
+@@ -60,3 +60,42 @@
+         subtotal += LEGACY_FLAT_FEE_CENTS
+     tax = compute_tax_cents(subtotal, tax_bps)
+     return subtotal, tax, subtotal + tax
++
++
++def compute_prorated_upgrade_cents(
++    old_monthly_cents: int,
++    new_monthly_cents: int,
++    days_remaining: int,
++    cycle_days: int,
++) -> int:
++    """Prorated charge for moving to a pricier plan with ``days_remaining`` of ``cycle_days`` left.
++
++    Uses exact integer half-up rounding:
++    ``round_half_up_div((new - old) * days_remaining, cycle_days)``.
++    """
++    validate_non_negative_int(old_monthly_cents, "old_monthly_cents")
++    validate_non_negative_int(new_monthly_cents, "new_monthly_cents")
++    validate_positive_int(cycle_days, "cycle_days")
++    validate_non_negative_int(days_remaining, "days_remaining")
++    if days_remaining > cycle_days:
++        raise ValidationError("days_remaining cannot exceed cycle_days")
++    if new_monthly_cents <= old_monthly_cents:
++        raise ValidationError("new plan must cost more than the current plan")
++    return round_half_up_div((new_monthly_cents - old_monthly_cents) * days_remaining, cycle_days)
++
++
++def calculate_upgrade_totals(
++    old_plan: Plan,
++    new_plan: Plan,
++    days_remaining: int,
++    cycle_days: int,
++) -> Tuple[int, int, int]:
++    """Return (subtotal_cents, tax_cents, total_cents) for a mid-cycle plan upgrade.
++
++    Tax is charged at the new plan's rate on the prorated subtotal.
++    """
++    subtotal = compute_prorated_upgrade_cents(
++        old_plan.monthly_cents, new_plan.monthly_cents, days_remaining, cycle_days
++    )
++    tax = compute_tax_cents(subtotal, new_plan.tax_bps)
++    return subtotal, tax, subtotal + tax
+
+--- /dev/null
++++ b/benchmarks/sources/ev1_order_ledger/tests/test_upgrades.py
+@@ -0,0 +1,198 @@
++"""Unit tests for mid-cycle prorated plan upgrades with idempotency."""
++
++from __future__ import annotations
++
++import unittest
++
++from ev1_order_ledger.api import OrderService
++from ev1_order_ledger.models import LedgerEntry, Plan, ValidationError
++from ev1_order_ledger.pricing import calculate_upgrade_totals, compute_prorated_upgrade_cents
++
++
++class ProrationPricingTests(unittest.TestCase):
++    def test_exact_division(self) -> None:
++        # (3000 - 1000) * 15 / 30 = 1000 exactly
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 3000, 15, 30), 1000)
++
++    def test_half_rounds_up(self) -> None:
++        # 1 * 15 / 30 = 0.5 -> 1
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 1001, 15, 30), 1)
++        # 101 * 1 / 2 = 50.5 -> 51
++        self.assertEqual(compute_prorated_upgrade_cents(0, 101, 1, 2), 51)
++
++    def test_below_half_rounds_down_above_half_rounds_up(self) -> None:
++        # 1000 * 10 / 30 = 333.33 -> 333
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 2000, 10, 30), 333)
++        # 1000 * 20 / 30 = 666.67 -> 667
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 2000, 20, 30), 667)
++
++    def test_boundaries_of_days_remaining(self) -> None:
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 3000, 0, 30), 0)
++        self.assertEqual(compute_prorated_upgrade_cents(1000, 3000, 30, 30), 2000)
++
++    def test_large_values_stay_exact(self) -> None:
++        # Would lose precision with floats: (10**17 + 1) * 1 / 2 = 5e16 + 0.5 -> round up
++        self.assertEqual(compute_prorated_upgrade_cents(0, 10**17 + 1, 1, 2), 5 * 10**16 + 1)
++
++    def test_tax_uses_new_plan_rate_on_prorated_subtotal(self) -> None:
++        old = Plan("a", "A", 1000, tax_bps=0)
++        new = Plan("b", "B", 2999, tax_bps=825)
++        # subtotal = 1999 * 11 / 30 = 732.97 -> 733; tax = 733 * 0.0825 = 60.4725 -> 60
++        self.assertEqual(calculate_upgrade_totals(old, new, 11, 30), (733, 60, 793))
++
++    def test_tax_half_up(self) -> None:
++        old = Plan("a", "A", 0)
++        new = Plan("b", "B", 200, tax_bps=25)
++        # subtotal 200; tax = 200 * 25 / 10000 = 0.5 -> 1
++        self.assertEqual(calculate_upgrade_totals(old, new, 30, 30), (200, 1, 201))
++
++    def test_pricing_rejects_invalid_inputs(self) -> None:
++        bad = [
++            (1000, 1000, 10, 30),  # same price
++            (2000, 1000, 10, 30),  # downgrade
++            (1000, 2000, 10, 0),   # cycle_days == 0
++            (1000, 2000, 10, -30),
++            (1000, 2000, -1, 30),
++            (1000, 2000, 31, 30),
++            (1000, 2000, True, 30),
++            (1000, 2000, 10, True),
++            (1000, 2000, 1.0, 30),
++        ]
++        for args in bad:
++            with self.subTest(args=args), self.assertRaises(ValidationError):
++                compute_prorated_upgrade_cents(*args)
++
++
++class UpgradeSubscriptionTests(unittest.TestCase):
++    def setUp(self) -> None:
++        self.svc = OrderService()
++        self.svc.register_plan(Plan(plan_id="starter", name="Starter", monthly_cents=1000, tax_bps=825))
++        self.svc.register_plan(Plan(plan_id="pro", name="Pro", monthly_cents=3000, tax_bps=825))
++        self.svc.register_plan(Plan(plan_id="team", name="Team", monthly_cents=5000, tax_bps=1000))
++        self.sub = self.svc.start_subscription("acct_1", "starter")
++
++    def _upgrade(self, **overrides) -> LedgerEntry:
++        kwargs = dict(
++            subscription_id=self.sub.subscription_id,
++            new_plan_id="pro",
++            days_remaining=10,
++            cycle_days=30,
++            idempotency_key="key-1",
++        )
++        kwargs.update(overrides)
++        return self.svc.upgrade_subscription(**kwargs)
++
++    def _entries(self):
++        return self.svc.ledger.entries_for_account("acct_1")
++
++    def test_upgrade_records_entry_and_switches_plan(self) -> None:
++        entry = self._upgrade()
++        # 2000 * 10 / 30 = 666.67 -> 667; tax 667 * 0.0825 = 55.0275 -> 55
++        self.assertEqual(entry.kind, "plan_upgrade")
++        self.assertEqual(entry.reference_id, self.sub.subscription_id)
++        self.assertEqual(entry.account_id, "acct_1")
++        self.assertEqual((entry.subtotal_cents, entry.tax_cents, entry.total_cents), (667, 55, 722))
++        self.assertEqual(entry.metadata["old_plan_id"], "starter")
++        self.assertEqual(entry.metadata["new_plan_id"], "pro")
++        self.assertEqual(self.svc.ledger.get_subscription(self.sub.subscription_id).plan_id, "pro")
++        self.assertEqual(self._entries(), [entry])
++        self.assertEqual(self.svc.get_statement("acct_1")["balance_cents"], 722)
++
++    def test_half_up_rounding_through_service(self) -> None:
++        self.svc.register_plan(Plan(plan_id="starter_plus", name="S+", monthly_cents=1001, tax_bps=0))
++        entry = self._upgrade(new_plan_id="starter_plus", days_remaining=15)
++        # 1 * 15 / 30 = 0.5 -> 1
++        self.assertEqual((entry.subtotal_cents, entry.tax_cents, entry.total_cents), (1, 0, 1))
++
++    def test_tax_uses_new_plan_rate(self) -> None:
++        entry = self._upgrade(new_plan_id="team", days_remaining=30)
++        self.assertEqual((entry.subtotal_cents, entry.tax_cents, entry.total_cents), (4000, 400, 4400))
++
++    def test_zero_days_remaining_records_zero_charge(self) -> None:
++        entry = self._upgrade(days_remaining=0)
++        self.assertEqual(entry.total_cents, 0)
++        self.assertEqual(self.svc.ledger.get_subscription(self.sub.subscription_id).plan_id, "pro")
++
++    def test_chained_upgrades_use_current_plan_as_old(self) -> None:
++        self._upgrade()
++        second = self._upgrade(new_plan_id="team", idempotency_key="key-2")
++        # (5000 - 3000) * 10 / 30 = 666.67 -> 667; tax 10% = 66.7 -> 67
++        self.assertEqual((second.subtotal_cents, second.tax_cents), (667, 67))
++        self.assertEqual(second.metadata["old_plan_id"], "pro")
++        self.assertEqual(len(self._entries()), 2)
++
++    def test_rejects_invalid_arguments_without_side_effects(self) -> None:
++        cases = {
++            "unknown subscription": dict(subscription_id="sub_missing"),
++            "unknown plan": dict(new_plan_id="enterprise"),
++            "same plan": dict(new_plan_id="starter"),
++            "cycle_days zero": dict(cycle_days=0),
++            "cycle_days negative": dict(cycle_days=-1),
++            "days_remaining negative": dict(days_remaining=-1),
++            "days_remaining over cycle": dict(days_remaining=31),
++            "days_remaining bool": dict(days_remaining=True),
++            "cycle_days bool": dict(cycle_days=True),
++            "days_remaining float": dict(days_remaining=10.0),
++            "empty key": dict(idempotency_key=""),
++            "blank key": dict(idempotency_key="   "),
++            "non-str key": dict(idempotency_key=123),
++            "None subscription": dict(subscription_id=None),
++            "None plan": dict(new_plan_id=None),
++        }
++        for label, overrides in cases.items():
++            with self.subTest(label), self.assertRaises(ValidationError):
++                self._upgrade(**overrides)
++        self.assertEqual(self._entries(), [])
++        self.assertEqual(self.svc.ledger.get_subscription(self.sub.subscription_id).plan_id, "starter")
++
++    def test_rejects_downgrade(self) -> None:
++        self._upgrade(new_plan_id="team")
++        with self.assertRaises(ValidationError):
++            self._upgrade(new_plan_id="pro", idempotency_key="key-2")
++        self.assertEqual(self.svc.ledger.get_subscription(self.sub.subscription_id).plan_id, "team")
++        self.assertEqual(len(self._entries()), 1)
++
++    def test_failed_attempt_does_not_consume_key(self) -> None:
++        with self.assertRaises(ValidationError):
++            self._upgrade(days_remaining=99)
++        entry = self._upgrade()
++        self.assertEqual(entry.subtotal_cents, 667)
++
++    def test_replay_returns_original_entry_without_duplicate(self) -> None:
++        first = self._upgrade()
++        replay = self._upgrade()
++        self.assertIs(replay, first)
++        self.assertEqual(len(self._entries()), 1)
++        self.assertEqual(self.svc.get_statement("acct_1")["balance_cents"], 722)
++        self.assertEqual(self.svc.ledger.get_subscription(self.sub.subscription_id).plan_id, "pro")
++
++    def test_key_reuse_with_different_arguments_conflicts(self) -> None:
++        self._upgrade()
++        conflicts = {
++            "plan": dict(new_plan_id="team"),
++            "days_remaining": dict(days_remaining=11),
++            "cycle_days": dict(cycle_days=31),
++            "subscription": dict(subscription_id=self.svc.start_subscription("acct_1", "starter").subscription_id),
++        }
++        for label, overrides in conflicts.items():
++            with self.subTest(label), self.assertRaises(ValidationError):
++                self._upgrade(**overrides)
++        self.assertEqual(len(self._entries()), 1)
++        self.assertEqual(self.svc.ledger.get_subscription(self.sub.subscription_id).plan_id, "pro")
++
++    def test_bool_cannot_masquerade_as_int_on_replay(self) -> None:
++        self._upgrade(days_remaining=1)
++        with self.assertRaises(ValidationError):
++            self._upgrade(days_remaining=True)
++        self.assertEqual(len(self._entries()), 1)
++
++    def test_distinct_keys_are_independent(self) -> None:
++        self._upgrade(idempotency_key="key-1")
++        other = self.svc.start_subscription("acct_2", "starter")
++        entry = self._upgrade(subscription_id=other.subscription_id, idempotency_key="key-2")
++        self.assertEqual(entry.account_id, "acct_2")
++        self.assertEqual(len(self.svc.ledger.entries_for_account("acct_2")), 1)
++
++
++if __name__ == "__main__":
++    unittest.main()
