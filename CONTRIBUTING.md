@@ -14,7 +14,7 @@ Editing or clarifying a candidate rule does not require pretending it is already
 
 ## Versioning and stable IDs
 
-- `VERSION` tracks the repository, tooling, runtime gates and benchmark-suite release (currently `0.8.0`). `standard/core.md` keeps its own pinned standard version (currently `0.2.0`) so standing-rule stability stays decoupled from tooling and benchmark releases. Update the `standard/core.md` header only on a standing-rule release, and always update `CHANGELOG.md`.
+- `VERSION` tracks the repository, tooling, runtime gates and benchmark-suite release (currently `0.9.0`). `standard/core.md` keeps its own pinned standard version (currently `0.2.0`) so standing-rule stability stays decoupled from tooling and benchmark releases. Update the `standard/core.md` header only on a standing-rule release, and always update `CHANGELOG.md`.
 - Rule IDs (`R1`–`R7` in `standard/core.md` and `D-*` in `gates/model_deltas.json`) are stable. Retiring a rule leaves a numeric gap; never renumber or reuse an ID.
 - Case `version` changes whenever prompts, inputs, stages or scoring criteria materially change. Preserve earlier case definitions needed by historical results, using separate versioned filenames. Keep `W1`–`C2` unchanged for `v0.1.0` vs. `v0.2.0` comparisons.
 - Never edit frozen condition, output or check evidence for an already published run. Add a new run or a clearly documented correction with the original record retained in history.

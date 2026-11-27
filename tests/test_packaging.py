@@ -56,11 +56,12 @@ class PackagingMetadataTests(unittest.TestCase):
             "anti-slop-mutate": "gates.mutate:main",
             "anti-slop-verify": "gates.verify:main",
         }
+        expected_version = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
         if tomllib is not None:
             data = tomllib.loads(raw_text)
             project = data["project"]
             self.assertEqual(project["name"], "anti-slop")
-            self.assertEqual(project["version"], "0.8.0")
+            self.assertEqual(project["version"], expected_version)
             self.assertEqual(project["requires-python"], ">=3.11")
             self.assertEqual(project["dependencies"], [])
 
@@ -86,7 +87,7 @@ class PackagingMetadataTests(unittest.TestCase):
         else:
             # Python < 3.11 fallback (stdlib-only verification without skipping)
             self.assertRegex(raw_text, r'(?m)^name\s*=\s*"anti-slop"\s*$')
-            self.assertRegex(raw_text, r'(?m)^version\s*=\s*"0\.8\.0"\s*$')
+            self.assertRegex(raw_text, rf'(?m)^version\s*=\s*"{re.escape(expected_version)}"\s*$')
             self.assertRegex(raw_text, r'(?m)^requires-python\s*=\s*">=3\.11"\s*$')
             self.assertRegex(raw_text, r"(?m)^dependencies\s*=\s*\[\s*\]\s*$")
             self.assertRegex(raw_text, r'(?m)^license\s*=\s*(?:\{\s*text\s*=\s*"MIT"\s*\}|"MIT")\s*$')
@@ -327,6 +328,23 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertIn("src/real_bug.py", non_excluded_fail.stderr)
             self.assertNotIn("DIFF-BROKEN-DOC-PATH", non_excluded_fail.stderr)
 
+            # 3d. Optional `protect-paths` & `allow-protected-edit` inputs enforce protected paths cleanly.
+            (repo / "docs/decisions").mkdir(parents=True)
+            (repo / "docs/decisions/adr-001.md").write_text("# ADR 1\n\nKeep all fields.\n", encoding="utf-8")
+            subprocess.run(["git", "add", "docs/decisions/adr-001.md"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "Add ADR"], cwd=repo, check=True)
+
+            protect_fail = _run_action(repo, INPUT_PROTECT_PATHS="docs/decisions/**\n")
+            self.assertEqual(protect_fail.returncode, 1, msg=protect_fail.stdout)
+            self.assertIn("DIFF-PROTECTED-PATH", protect_fail.stderr)
+
+            protect_ok = _run_action(
+                repo,
+                INPUT_PROTECT_PATHS="docs/decisions/**\n",
+                INPUT_ALLOW_PROTECTED_EDIT="true",
+            )
+            self.assertEqual(protect_ok.returncode, 0, msg=protect_ok.stderr + protect_ok.stdout)
+
             # 4. Validate workflow tests Python 3.11-3.13 matrix, Node 24, and dogfoods `uses: ./`.
             wf_text = (REPO_ROOT / ".github/workflows/validate.yml").read_text(encoding="utf-8")
             for py_ver in ("'3.11'", "'3.12'", "'3.13'"):
@@ -433,6 +451,17 @@ class PackagingMetadataTests(unittest.TestCase):
         self.assertIn(f"uses: jremick/anti-slop@v{repo_version}", ci_text)
         self.assertIn("uvx", ci_text)
         self.assertIn("gates/diff_check.py", ci_text)
+
+        # Version-parity ratchet across VERSION, gates/cli.py, README.md, gates/README.md, and CHANGELOG.md.
+        cli_mod = importlib.import_module("gates.cli")
+        self.assertEqual(cli_mod.DEFAULT_VERSION, repo_version)
+        readme_text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"uses: jremick/anti-slop@v{repo_version}", readme_text)
+        self.assertIn(f"rev: v{repo_version}", readme_text)
+        gates_readme_text = (REPO_ROOT / "gates/README.md").read_text(encoding="utf-8")
+        self.assertIn(f"uses: jremick/anti-slop@v{repo_version}", gates_readme_text)
+        changelog_text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(f"## {repo_version} ", changelog_text)
 
 
 class DiffCheckNoBudgetCliTests(unittest.TestCase):

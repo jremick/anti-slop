@@ -63,11 +63,12 @@ class UnifiedCliAndSkillTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 0, msg=proc.stderr)
                 self.assertEqual(proc.stdout.strip(), f"anti-slop {expected_ver}")
 
-        # Direct version-file lookup and fallback to "0.7.0".
+        # Direct version-file lookup and fallback to DEFAULT_VERSION (which stays synced with VERSION).
+        self.assertEqual(cli_mod.DEFAULT_VERSION, expected_ver)
         custom_ver = self.tmp / "VERSION"
         custom_ver.write_text("0.7.0\n", encoding="utf-8")
         self.assertEqual(cli_mod.get_version(version_file=custom_ver), "0.7.0")
-        self.assertEqual(cli_mod.get_version(version_file=self.tmp / "MISSING_VERSION"), "0.7.0")
+        self.assertEqual(cli_mod.get_version(version_file=self.tmp / "MISSING_VERSION"), cli_mod.DEFAULT_VERSION)
 
         proc_help = self._run_cli("--help")
         self.assertEqual(proc_help.returncode, 0, msg=proc_help.stderr)

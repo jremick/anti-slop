@@ -28,7 +28,7 @@ jobs:
           persist-credentials: false
 
       - name: Run Anti-Slop Diff Gate (reusable action)
-        uses: jremick/anti-slop@v0.8.0
+        uses: jremick/anti-slop@v0.9.0
         with:
           allow-test-edit: ${{ contains(github.event.pull_request.labels.*.name, 'allow-test-edit') }}
           allow-test-skip: 'false'
@@ -43,13 +43,18 @@ jobs:
           # structural: 'true'
           # explain: 'true'
           # learned-rules: '.anti-slop/learned/rules.json'
+          # protect-paths: |
+          #   docs/decisions/**
+          #   tests/invariants/**
+          #   .anti-slop/verify.json
+          # allow-protected-edit: ${{ contains(github.event.pull_request.labels.*.name, 'allow-protected-edit') }}
           # exclude: |
           #   results/*/artifacts/**
           #   benchmarks/sources/**
 
       # Alternative A (zero-clone uvx CLI, e.g., outside GitHub Actions):
       #   git diff --unified=3 "origin/${GITHUB_BASE_REF}...HEAD" \
-      #     | uvx --from git+https://github.com/jremick/anti-slop@v0.8.0 anti-slop diff --diff - --repo-root . --no-budget
+      #     | uvx --from git+https://github.com/jremick/anti-slop@v0.9.0 anti-slop diff --diff - --repo-root . --no-budget
       #
       # Alternative B (if you vendor `gates/diff_check.py` directly inside this repo):
       #   git diff --unified=3 "origin/${GITHUB_BASE_REF}...HEAD" \
@@ -82,9 +87,9 @@ jobs:
           if [ -f gates/api_checks.py ]; then
             python3 -B gates/api_checks.py "${CONFIGS[@]}"
           elif command -v uvx >/dev/null 2>&1; then
-            uvx --from git+https://github.com/jremick/anti-slop@v0.8.0 anti-slop api "${CONFIGS[@]}"
+            uvx --from git+https://github.com/jremick/anti-slop@v0.9.0 anti-slop api "${CONFIGS[@]}"
           else
-            python3 -m pip install --quiet "git+https://github.com/jremick/anti-slop@v0.8.0"
+            python3 -m pip install --quiet "git+https://github.com/jremick/anti-slop@v0.9.0"
             anti-slop api "${CONFIGS[@]}"
           fi
 

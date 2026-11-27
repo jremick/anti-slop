@@ -19,24 +19,27 @@ Every Python gate uses stdlib Python only (no third-party packages), exits `0` s
 - [hooks/](hooks/README.md): Portable 3-CLI lifecycle hooks (`anti-slop hook` / `anti-slop-hook`, including `--install claude|antigravity|codex --dry-run` and strictly opt-in zero-code/zero-secret local telemetry to `<repo>/.anti-slop/telemetry.jsonl`) wrapping `gates/diff_check.py` outside the model context window.
 - [model_deltas.json](model_deltas.json): Strictly delta-only per-model harness overlays (`D-AST`, `D-SOL`, `D-OPU`, `D-FAB`, `D-NEO`) with stable IDs, falsification checks, valid neighbouring cases, and effort routing. Keep outside `standard/core.md`.
 - [vale/.vale.ini](vale/.vale.ini): Warning-first Vale configuration implementing the deterministic subset of Cursor `unslop` across [Openers.yml](vale/styles/AntiSlop/Openers.yml), [Closers.yml](vale/styles/AntiSlop/Closers.yml), [ADRStructure.yml](vale/styles/AntiSlop/ADRStructure.yml), [Vocab.yml](vale/styles/AntiSlop/Vocab.yml), and [Phrasing.yml](vale/styles/AntiSlop/Phrasing.yml).
-- [ci-ratchet.yml](ci-ratchet.yml): Opt-in GitHub Actions workflow template showcasing the reusable composite action (`action.yml` / `uses: jremick/anti-slop@v0.8.0`), `uvx`, and vendored script execution across four independent modular jobs (`diff-gate`, `api-config-gate`, `code-hygiene-ratchet`, `prose-vale-ratchet`).
+- [ci-ratchet.yml](ci-ratchet.yml): Opt-in GitHub Actions workflow template showcasing the reusable composite action (`action.yml` / `uses: jremick/anti-slop@v0.9.0`), `uvx`, and vendored script execution across four independent modular jobs (`diff-gate`, `api-config-gate`, `code-hygiene-ratchet`, `prose-vale-ratchet`).
 
 ## Quick Usage
 
 ### 1. Run in Any External Repository (Unified CLI, Zero-Clone `uvx`, Action, or `pre-commit`)
 
-`pyproject.toml` exposes the unified `anti-slop` CLI (`review`, `diff`, `learn`, `mutate`, `verify`, `hook`, `api`, `skill`) alongside the seven legacy console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-learn`, `anti-slop-mutate`, `anti-slop-verify`, `anti-slop-hook`, `anti-slop-api`), while root `action.yml` and `.pre-commit-hooks.yaml` enable drop-in CI and local hooks without copying `gates/`:
+`pyproject.toml` exposes the unified `anti-slop` CLI (`review`, `audit`, `diff`, `learn`, `mutate`, `verify`, `hook`, `api`, `skill`) alongside the eight direct console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-audit`, `anti-slop-learn`, `anti-slop-mutate`, `anti-slop-verify`, `anti-slop-hook`, `anti-slop-api`), while root `action.yml` and `.pre-commit-hooks.yaml` enable drop-in CI and local hooks without copying `gates/`:
 
 ```bash
 # Plain-English review of current git changes (shortcuts + structural/architectural slop + learned rules)
 uvx --from git+https://github.com/jremick/anti-slop anti-slop review
 
+# Clean-room cross-family spec-fidelity diff audit (enforces auditor_provider != author_provider)
+uvx --from git+https://github.com/jremick/anti-slop anti-slop audit --spec-file spec.md --summary-file pr.md --markdown
+
 # Tier-1 live E2E verification with SHA-256 tamper-evident receipt (recipe or ad-hoc)
 uvx --from git+https://github.com/jremick/anti-slop anti-slop verify --cmd "python3 -m myapp --version" --expect-exit 0 --markdown
 uvx --from git+https://github.com/jremick/anti-slop anti-slop verify --check-receipt
 
-# Run fast diff gate on your current git diff (skipping immutable artifacts via repeatable --exclude)
-git diff HEAD | uvx --from git+https://github.com/jremick/anti-slop anti-slop diff --diff - --no-budget --exclude "results/*/artifacts/**"
+# Run fast diff gate on your current git diff (with protected-path locks and repeatable --exclude)
+git diff HEAD | uvx --from git+https://github.com/jremick/anti-slop anti-slop diff --diff - --no-budget --protect-path "docs/decisions/**" --exclude "results/*/artifacts/**"
 
 # Run diff-scoped mutation testing on your changed Python or JS/TS lines (isolated temp copy)
 uvx --from git+https://github.com/jremick/anti-slop anti-slop mutate --test-cmd "pytest -q"
@@ -59,13 +62,16 @@ uvx --from git+https://github.com/jremick/anti-slop anti-slop skill install clau
 GitHub Actions (drop-in via `action.yml`; optional opt-in inputs `structural`, `strict-structural`, `explain`, `learned-rules`, and `exclude` default off for backward compatibility):
 
 ```yaml
-- uses: jremick/anti-slop@v0.8.0
+- uses: jremick/anti-slop@v0.9.0
   with:
     no-budget: 'true'
     # Optional opt-ins:
     # structural: 'true'
     # explain: 'true'
     # learned-rules: '.anti-slop/learned/rules.json'
+    # protect-paths: |
+    #   docs/decisions/**
+    #   tests/invariants/**
     # exclude: |
     #   results/*/artifacts/**
     #   benchmarks/sources/**
@@ -76,7 +82,7 @@ Local `pre-commit` (via `.pre-commit-hooks.yaml`; also exposes opt-in `anti-slop
 ```yaml
 repos:
   - repo: https://github.com/jremick/anti-slop
-    rev: v0.8.0
+    rev: v0.9.0
     hooks:
       - id: anti-slop-diff
       # Or opt in to plain-English review (shortcuts + structural/architectural warnings + learned rules):
@@ -106,6 +112,7 @@ Starting budgets (`--max-net-loc 400`, `--max-files 10`, PR comment cap `<= 10`,
 
 Engineering-credibility checks in `gates/diff_check.py`:
 
+- `DIFF-PROTECTED-PATH` (`error`): Blocks unauthorized edits, creations, or renames matching `<repo>/.anti-slop/protected-paths.json` or repeatable `--protect-path <glob>` (and automatically self-protects `<repo>/.anti-slop/protected-paths.json` itself), even when `--allow-test-edit` is active; override only with explicit `--allow-protected-edit` (or `ANTI_SLOP_ALLOW_PROTECTED_EDIT=1` in hooks).
 - `DIFF-TEST-SKIP` (`error`): Blocks newly added test-skip/waiver annotations (`@unittest.skip`, `@unittest.skipIf`, `@unittest.skipUnless`, `@pytest.mark.skip`, `@pytest.mark.skipif`, `@pytest.mark.xfail`, `self.skipTest(`, `pytest.skip(`, `it.skip(`, `test.skip(`, `describe.skip(`, `xit(`, `xtest(`) even when `--allow-test-edit` is set; override only with explicit `--allow-test-skip`.
 - `DIFF-SUPPRESSION` (`error`): Flags newly added unjustified lint/type suppressions (bare `# type: ignore` without `[code]` + reason, bare `# noqa` without specific rule code, `@ts-ignore`, bare `@ts-expect-error` without explanation, bare `eslint-disable`/`eslint-disable-next-line` without specific rule + `-- reason`, bare `// nolint` without linter name + reason). Valid scoped suppressions (e.g., `# noqa: E402`, `# type: ignore[arg-type]  # upstream stub`, `// @ts-expect-error -- legacy CJS interop`, `// eslint-disable-next-line no-console -- CLI output`) pass cleanly.
 - `DIFF-SILENT-CATCH` (`error`): Flags newly added Python bare `except:` or broad `except Exception:` / `except BaseException:` handlers whose body only executes `pass`, `...`, or returns `None`/`[]`/`{}`/`False` with no logging or re-raise, plus empty JS/TS `catch (...) {}` blocks. Narrowed exceptions (e.g., `except ProcessLookupError: pass`) and handlers that log or re-raise pass cleanly.
@@ -156,7 +163,7 @@ Load `standard/core.md` alone for the `core-rules` condition. For `model-control
 
 Adopt gates one job at a time rather than enabling a full linter stack on Day 1:
 
-1. **Start with zero-dependency gates:** Enable `diff-gate` (via `uses: jremick/anti-slop@v0.8.0` with `no-budget: 'true'`) and `api-config-gate` from `gates/ci-ratchet.yml`. These require only Python stdlib and catch objective failures (HTTP 400 API traps, silent Fable downgrades, stub placeholders, unauthorized test edits, test-skip waivers, unjustified suppressions, silent broad catches, debug leftovers, hardcoded host paths, chatbot openers/closers, broken local doc paths).
+1. **Start with zero-dependency gates:** Enable `diff-gate` (via `uses: jremick/anti-slop@v0.9.0` with `no-budget: 'true'`) and `api-config-gate` from `gates/ci-ratchet.yml`. These require only Python stdlib and catch objective failures (HTTP 400 API traps, silent Fable downgrades, stub placeholders, unauthorized test edits, test-skip waivers, unjustified suppressions, silent broad catches, debug leftovers, hardcoded host paths, chatbot openers/closers, broken local doc paths).
 2. **Add warning-first prose checks:** Enable `prose-vale-ratchet` on changed Markdown files. Only `AntiSlop.Openers` and `AntiSlop.Closers` block by default (`level: error`). `AntiSlop.Vocab`, `AntiSlop.Phrasing`, `AntiSlop.ADRStructure`, and `DIFF-DECORATIVE-EMOJI` default to `warning`.
 3. **Layer stack-specific code ratchets:** Enable only the `code-hygiene-ratchet` tools matching your stack (`ruff`/`vulture` for Python, `knip` for JS/TS, `jscpd` for duplicate blocks) scoped strictly to changed files so legacy debt does not block active PRs.
 

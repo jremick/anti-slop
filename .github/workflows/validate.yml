@@ -58,7 +58,16 @@ jobs:
             SECURITY.md
             THIRD_PARTY_LICENSES.md
             standard/core.md
+            skills/anti-slop/SKILL.md
             gates/README.md
             gates/api_checks.py
+            gates/architecture.py
+            gates/audit.py
+            gates/cli.py
             gates/diff_check.py
+            gates/learn.py
+            gates/mutate.py
+            gates/review.py
+            gates/structural.py
+            gates/verify.py
             gates/hooks/run_diff_gate_hook.py

@@ -29,7 +29,7 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 
-DEFAULT_VERSION = "0.7.0"
+DEFAULT_VERSION = "0.9.0"
 SKILL_INSTALL_CHOICES: Tuple[str, ...] = ("claude", "antigravity", "codex")
 
 SUBCOMMAND_TARGETS: Dict[str, Tuple[str, str]] = {

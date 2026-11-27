@@ -13,14 +13,14 @@ AI coding agents write plausible code that passes a quick check while quietly le
 
 **You do not need to memorize CLI commands.** Install `anti-slop` once and your AI agent runs automated checks, fixes shortcuts mid-turn, verifies the live app, and brings back plain-English reviews while you stay in charge of engineering judgment and approvals.
 
-> **Pre-v1 (`0.8.0`):** Ready for daily use on Python and TypeScript/JS repos · Works with **Claude Code**, **Codex**, **Antigravity**, `pre-commit`, and **GitHub Actions** · Runs on Python 3.11+ standard library only (`0` third-party dependencies, `0` standing prompt tokens for mechanical checks).
+> **Pre-v1 (`0.9.0`):** Ready for daily use on Python and TypeScript/JS repos · Works with **Claude Code**, **Codex**, **Antigravity**, `pre-commit`, and **GitHub Actions** · Runs on Python 3.11+ standard library only (`0` third-party dependencies, `0` standing prompt tokens for mechanical checks).
 
 ---
 
 ## How It Works
 
-1. **Catch and fix shortcuts mid-turn:** Automated hooks stop skipped tests, unauthorized test edits, swallowed errors, bare suppressions, and unfinished stubs before the agent finishes its turn.
-2. **Explain risks in plain English and verify live:** Surface compounding structural and architectural risks (assertion-free test theater, copy-paste clones, dead shims, circular imports) in plain English, prove running apps/CLIs work end-to-end with SHA-256 tamper-evident receipts (`anti-slop verify`), and test whether tests catch bugs on changed Python and JS/TS lines (`anti-slop mutate`).
+1. **Catch and fix shortcuts mid-turn:** Automated hooks stop skipped tests, unauthorized test edits, edits to human-locked specs/decisions/invariant contracts (`DIFF-PROTECTED-PATH`), swallowed errors, bare suppressions, and unfinished stubs before the agent finishes its turn, with an automatic loop circuit breaker if a turn stalls repeatedly.
+2. **Explain risks in plain English, verify live, and audit cross-family:** Surface compounding structural and architectural risks in plain English (`anti-slop review`), prove running apps/CLIs meet real output and metric contracts with SHA-256 receipts (`anti-slop verify`), test whether tests catch bugs on changed Python and JS/TS lines (`anti-slop mutate`), and run clean-room cross-family spec-fidelity audits (`anti-slop audit`) to catch dropped requirements, invented policies, or unrequested capacity caps.
 3. **Learn new guards with your approval:** When a recurring mistake slips past default checks, your agent captures a bad example plus a valid look-alike, checks curated [Optional Rule Library](library/README.md) packs first, verifies zero regressions against your repository, and stops for your explicit approval before activating the guard.
 
 <picture>
@@ -114,7 +114,8 @@ Prefer zero global install? Swap `anti-slop` for `uvx --from git+https://github.
 | What you ask your agent | What your agent runs and brings back |
 |---|---|
 | *"Review my changes for AI slop"* | Runs `anti-slop review`, fixes blocking shortcuts automatically, and explains structural and architectural risks in plain English. |
-| *"Verify the running app/CLI end-to-end and save a receipt"* | Runs `anti-slop verify` ([docs/verify-recipes.md](docs/verify-recipes.md)), boots any required local service, checks real HTTP/CLI/file behavior, tears down cleanly, and writes a SHA-256 receipt (`.anti-slop/last-verify.json`). |
+| *"Audit this diff against the spec using another model family"* | Runs `anti-slop audit`, enforcing `auditor_provider != author_provider` in a neutral clean-room prompt to flag dropped requirements, unrequested caps/filters, invented policies, or PR summary mismatches. |
+| *"Verify the running app/CLI end-to-end and save a receipt"* | Runs `anti-slop verify` ([docs/verify-recipes.md](docs/verify-recipes.md)), boots any required local service, checks real HTTP/CLI/file outputs and JSON metric bounds, tears down cleanly, and writes a SHA-256 receipt (`.anti-slop/last-verify.json`). |
 | *"Check whether our tests actually catch bugs in this diff"* | Runs `anti-slop mutate`, injects bugs strictly on changed Python or JS/TS lines inside an isolated temp copy, and lists any surviving mutants. |
 | *"Capture this slop pattern and propose a guard"* | Checks curated optional packs first, drafts a bad example + valid look-alike + narrowest check, runs 3-way verification (`anti-slop learn`), and **stops for your explicit approval**. |
 | *"Mine recent commits and hook logs for recurring slop"* | Runs read-only `anti-slop learn mine`, checks opt-in hook logs (`.anti-slop/telemetry.jsonl`, zero code snippets) and recent git history, and brings a verified shortlist or retirement candidates to you. |
@@ -125,7 +126,7 @@ Prefer zero global install? Swap `anti-slop` for `uvx --from git+https://github.
 **GitHub Actions** ([action.yml](action.yml)):
 
 ```yaml
-- uses: jremick/anti-slop@v0.8.0
+- uses: jremick/anti-slop@v0.9.0
   with:
     allow-test-edit: "true"
     no-budget: "true"
@@ -134,6 +135,10 @@ Prefer zero global install? Swap `anti-slop` for `uvx --from git+https://github.
     # structural: "true"
     # explain: "true"
     # learned-rules: ".anti-slop/learned/rules.json"
+    # protect-paths: |
+    #   docs/decisions/**
+    #   tests/invariants/**
+    #   .anti-slop/verify.json
     # exclude: |
     #   results/*/artifacts/**
     #   benchmarks/sources/**
@@ -144,7 +149,7 @@ Prefer zero global install? Swap `anti-slop` for `uvx --from git+https://github.
 ```yaml
 repos:
   - repo: https://github.com/jremick/anti-slop
-    rev: v0.8.0
+    rev: v0.9.0
     hooks:
       - id: anti-slop-diff
       # Or opt in to plain-English review (shortcuts + structural/architectural + learned rules):
@@ -178,10 +183,10 @@ All 8 direct `anti-slop-*` console scripts remain installed in `pyproject.toml` 
 
 Checks sit beside your existing linters (`ruff`, `eslint`, `mypy`, `tsc`) and SAST tools (`Semgrep`, `CodeQL`) rather than replacing them:
 
-- **Blocked automatically (objective shortcuts):** skipped or waived tests, unauthorized edits to test files, broad silent error catches, bare lint/type suppressions without a reason, leftover debuggers, unfinished `TODO`/`NotImplementedError` stubs, hardcoded local workstation paths, and AI chatbot filler or broken repo paths in Markdown docs.
+- **Blocked automatically (objective shortcuts & contract locks):** skipped or waived tests, unauthorized edits to test files, unauthorized edits to human-locked specs/decisions/invariant paths (`DIFF-PROTECTED-PATH`), broad silent error catches, bare lint/type suppressions without a reason, leftover debuggers, unfinished `TODO`/`NotImplementedError` stubs, hardcoded local workstation paths, and AI chatbot filler or broken repo paths in Markdown docs.
 - **Flagged in plain English (compounding structural & architectural risks):** assertion-free or over-mocked test theater, silent fallback defaults hiding failures or missing secrets, variable-renamed copy-paste blocks, dead compatibility shims, newly added commented-out code traps (while keeping short 1-2 line `# INVARIANT:` notes), growing monolithic functions/files, unrequested cross-module sprawl, runtime circular imports, single-implementation wrappers, and scattered raw env-var reads.
-- **Real verification over mock theater:** Ranks proof in three tiers: **1. Live end-to-end app/CLI checks with receipts** (`anti-slop verify`) > **2. Behavioral tests backed by diff-scoped Python & JS/TS mutation** (`anti-slop mutate`) > **3. Same-turn heavily mocked unit tests**.
-- **Small default core + curated opt-in packs:** Keeps the default core lean (`15` blocking diff checks, `11` structural/architectural checks, and a `298`-word core standard) while documenting `6` opt-in rule packs and `6` deliberately excluded anti-patterns (such as blanket "delete all comments" and statistical AI-text detectors) in the [Optional Rule Library](library/README.md).
+- **Clean-room cross-family spec auditing & real verification:** Enforce `auditor_provider != author_provider` (`anti-slop audit`) to catch unrequested policy rules, dropped requirements, or hardcoded capacity caps, and rank proof in three tiers: **1. Live end-to-end app/CLI/metric checks with receipts** (`anti-slop verify`) > **2. Behavioral tests backed by diff-scoped Python & JS/TS mutation** (`anti-slop mutate`) > **3. Same-turn heavily mocked unit tests**.
+- **Small default core + curated opt-in packs:** Keeps the default core lean (`16` blocking diff checks, `11` structural/architectural checks, and a `298`-word core standard) while documenting `6` opt-in rule packs and `6` deliberately excluded anti-patterns (such as blanket "delete all comments" and statistical AI-text detectors) in the [Optional Rule Library](library/README.md).
 
 Full rule IDs, valid neighbouring cases, and linter comparisons live in [gates/README.md](gates/README.md) and [docs/ai-era-rules.md](docs/ai-era-rules.md).
 
@@ -194,11 +199,11 @@ Full rule IDs, valid neighbouring cases, and linter comparisons live in [gates/R
 - **Re-checkable public benchmarks (`288` runs):** Five isolated `n = 3` public datasets across 4 frontier models, with mechanical graders, raw transcripts, and verification scripts committed under [results/README.md](results/README.md) and [benchmarks/README.md](benchmarks/README.md).
 - **Live-verified research citations (`42` papers and studies):** Every external claim in [docs/evidence.md](docs/evidence.md) and [docs/ai-era-rules.md](docs/ai-era-rules.md) is date-stamped and verified directly against arXiv metadata, publisher records, and upstream pages.
 - **Real OSS precision audits (`150` commits across `urllib3`, `tomlkit`, and `hono`):** `0` false positives on architectural detectors (`ARCH-*`) and commented-out code (`7/7` real runtime circular imports caught in `hono` HEAD), `96.7%` clean pass rate on non-size structural rules, and `0` parser false positives on blocking diff checks ([gates/README.md](gates/README.md#real-world-oss-precision-audit)).
-- **Auditable zero-dependency verification:** Run `python3 -B scripts/check.py` locally (Python 3.11+, plus Node 24+ for JS/TS mutation tests, zero network calls) to validate all `28` cases, `9` pilot manifests, `288` run records, the rule library catalog, and all `216` tests.
+- **Auditable zero-dependency verification:** Run `python3 -B scripts/check.py` locally (Python 3.11+, plus Node 24+ for JS/TS mutation tests, zero network calls) to validate all `29` cases, `9` pilot manifests, `288` run records, the rule library catalog, and all `225` tests.
 
 ### What still needs stronger proof (roadmap toward `v1.0`)
 
-`0.8.0` is an active pre-v1 release. Here is what is not proven yet and what we are planning next:
+`0.9.0` is an active pre-v1 release. Here is what is not proven yet and what we are planning next:
 
 1. **Larger, messier multi-service repositories:** Current multi-turn and comment suites (`90–450` lines, single-app, `n = 3`) confirm consistency on focused Python and TypeScript apps, not yet on multi-thousand-line bundled monorepos or cross-repo context rot where invariants cannot be inferred from local code alone.
 2. **Untriggered candidate detectors:** Architectural checks (`ARCH-*`) and `STRUCT-SILENT-FALLBACK` passed the 150-commit OSS precision audit with `0` false positives, but did not trigger yet during live AI evolution runs; they stay labeled as candidates for causal lift until proven on larger multi-module builds.
