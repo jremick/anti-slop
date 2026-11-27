@@ -4,28 +4,29 @@ Zero-dependency CLI hook templates wrapping `gates/diff_check.py` outside the mo
 
 ## One-Command Portable Install
 
-Install the zero-dependency console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-learn`, `anti-slop-hook`, `anti-slop-api`) once, then wire user-level hooks for Claude Code (`~/.claude/settings.json`), Antigravity (`~/.gemini/config/hooks.json`), or Codex CLI (`~/.codex/hooks.json`):
+Install the unified zero-dependency CLI (`anti-slop <review|diff|learn|mutate|hook|api|skill>`, which keeps the 6 legacy `anti-slop-*` console scripts installed for backward compatibility) once, then wire user-level hooks for Claude Code (`~/.claude/settings.json`), Antigravity (`~/.gemini/config/hooks.json`), or Codex CLI (`~/.codex/hooks.json`), plus the optional conversational workflow skill ([skills/anti-slop/SKILL.md](../../skills/anti-slop/SKILL.md)):
 
 ```bash
 # Option A: Install console scripts globally with uv or pip
 uv tool install git+https://github.com/jremick/anti-slop
 
-# Preview exact config changes without writing
-anti-slop-hook --install claude --dry-run
-anti-slop-hook --install antigravity --dry-run
-anti-slop-hook --install codex --dry-run
+# Preview exact hook + skill config changes without writing
+anti-slop hook --install claude --dry-run
+anti-slop hook --install antigravity --dry-run
+anti-slop hook --install codex --dry-run
+anti-slop skill install claude --dry-run
 
 # Apply (backs up existing configs to *.bak-antislop; never duplicates entries)
-anti-slop-hook --install claude
-anti-slop-hook --install antigravity
-anti-slop-hook --install codex
+anti-slop hook --install claude && anti-slop skill install claude
+anti-slop hook --install antigravity && anti-slop skill install antigravity
+anti-slop hook --install codex && anti-slop skill install codex
 ```
 
 If `anti-slop-hook` is on `PATH`, `--install` wires portable `anti-slop-hook` commands so hooks work in every external repository without vendoring `gates/`. When run directly from a local checkout (`python3 -B gates/hooks/run_diff_gate_hook.py --install claude`), it wires the resolved `python3 -B <script>` path instead. Re-running `--install` is idempotent and updates existing anti-slop entries in place.
 
 ## Harness Blocking Contracts
 
-`gates/hooks/run_diff_gate_hook.py` (console script `anti-slop-hook`) supports both per-repository and global user-level hooks via `--harness {auto,claude,codex,antigravity}` (default `auto`):
+`gates/hooks/run_diff_gate_hook.py` (invoked via `anti-slop hook` or `anti-slop-hook`) supports both per-repository and global user-level hooks via `--harness {auto,claude,codex,antigravity}` (default `auto`):
 
 - **Claude Code & Codex CLI (exit-2 contract):**
   - **Exit `0`:** Clean pass; tool invocation or agent turn completes normally.
@@ -36,14 +37,15 @@ If `anti-slop-hook` is on `PATH`, `--install` wires portable `anti-slop-hook` co
   - `PreToolUse`: `{"decision": "allow"}` on pass, or `{"decision": "deny", "reason": "..."}` on unauthorized `tests/` edits (inspecting `toolCall.name` and `toolCall.args`).
   - `Stop`: `{"decision": "allow"}` on pass, or `{"decision": "continue", "reason": "..."}` on diff-gate violations.
 
-## Global-Safe Guards
+## Global-Safe Guards & Opt-In Local Telemetry
 
-When installed globally across repositories, `anti-slop-hook` applies five safety defaults:
+When installed globally across repositories, `anti-slop hook` applies six safety defaults:
 
 - **Workspace resolution:** When `--repo-root` is `.` or omitted, reads `cwd` or `workspacePaths[0]` from stdin JSON and resolves `git rev-parse --show-toplevel` (essential because Antigravity runs hook commands from the directory containing hooks.json).
 - **Non-git graceful no-op:** In diff-gate (`Stop` / `PostToolUse`) mode, non-git directories cleanly pass (`exit 0`, or `{"decision": "allow"}` for Antigravity).
 - **Anti-loop `Stop` guard:** Immediately allows stop when Claude/Codex sets `"stop_hook_active": true`, or Antigravity sets `"continuationActive": true` or a `"terminationReason"` other than `"NO_TOOL_CALL"`.
-- **Automatic learned-rule enforcement (fail-safe):** When a target repository contains an approved `<repo>/.anti-slop/learned/rules.json` store (created via `anti-slop-learn`), `Stop` mode automatically enforces approved, SHA-256-intact deterministic rules alongside built-in diff checks. Repos without a learned-rule store no-op cleanly, unapproved/retired/tampered entries are ignored, and a malformed or unreadable store reports exit `1` (non-blocking hook error) rather than trapping the agent in a policy-denial loop.
+- **Automatic learned-rule enforcement (fail-safe):** When a target repository contains an approved `<repo>/.anti-slop/learned/rules.json` store (created via `anti-slop learn`), `Stop` mode automatically enforces approved, SHA-256-intact deterministic rules alongside built-in diff checks. Repos without a learned-rule store no-op cleanly, unapproved/retired/tampered entries are ignored, and a malformed or unreadable store reports exit `1` (non-blocking hook error) rather than trapping the agent in a policy-denial loop.
+- **Opt-in privacy-safe local telemetry (`<repo>/.anti-slop/telemetry.jsonl`):** Activated **only** when `<repo>/.anti-slop/` already exists or `ANTI_SLOP_TELEMETRY=1` is set (never creates `<repo>/.anti-slop/` unasked in arbitrary repos, never blocks a hook if writing fails, and stays suppressed under `ANTI_SLOP_BENCHMARK_SUBJECT=1`). Records strictly zero code snippets, zero secrets, and zero absolute host paths (`{"ts": "<UTC ISO Z>", "event": "stop_hook"|"pretool_hook", "harness": "...", "blocked": true|false, "codes": [...], "file_exts": [...]}`). Keep it gitignored and mine it read-only via `anti-slop learn mine` to spot recurring slop and stale rules ready for retirement.
 - **Benchmark isolation & `--no-budget`:** Immediately no-ops when `ANTI_SLOP_BENCHMARK_SUBJECT=1` or the target path lies inside an `antislop_*` temp workspace. Pass `--no-budget` (default in `--install` Stop/PostToolUse hooks) to disable heuristic `--max-net-loc` / `--max-files` caps and block only objective defects (`DIFF-TEST-SKIP`, `DIFF-STUB-*`, `DIFF-SUPPRESSION`, `DIFF-SILENT-CATCH`, `DIFF-DEBUG-LEFTOVER`, `DIFF-HOST-PATH`, `DIFF-CHATBOT-OPENER`, `DIFF-CHATBOT-CLOSER`, `DIFF-BROKEN-DOC-PATH`).
 
 ## Contents
