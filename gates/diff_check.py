@@ -2620,6 +2620,8 @@ def _format_human(result: Dict[str, Any], *, explain: bool = False) -> str:
                 exp = explain_fn(item)
                 lines.append(f"  why it matters: {exp['why_veterans_flag_it']}")
                 lines.append(f"  how it compounds: {exp['how_it_compounds']}")
+                if exp.get("evidence"):
+                    lines.append(f"  evidence: {exp['evidence']}")
     return "\n".join(lines)
 
 
@@ -2659,7 +2661,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--structural",
         action="store_true",
-        help="Enable AI-era structural compounding-slop checks (test theater, silent fallbacks, duplicate blocks, dead compat paths, god growth, scope sprawl) as warnings.",
+        help="Enable AI-era structural compounding-slop checks (test theater, silent fallbacks, duplicate blocks, dead compat paths, commented-out code, god growth, scope sprawl) as warnings.",
     )
     parser.add_argument(
         "--strict-structural",

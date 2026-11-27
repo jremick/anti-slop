@@ -15,6 +15,9 @@ compound across future AI coding sessions:
      and growing monolithic files.
   6. STRUCT-SCOPE-SPRAWL: single-diff scatter across too many unrelated
      production module directories.
+  7. STRUCT-COMMENTED-CODE: newly added multi-line commented-out code blocks
+     (>= 3 consecutive executable-looking commented lines) that poison future
+     AI generation context.
 
 Zero third-party dependencies (Python 3.11+ stdlib only).
 """
@@ -27,6 +30,7 @@ import io
 from pathlib import Path
 import re
 import sys
+import textwrap
 import tokenize
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -45,6 +49,7 @@ DEFAULT_MAX_MODULE_SPREAD = 3
 DEFAULT_DUPLICATE_MIN_STMTS = 6
 DEFAULT_DUPLICATE_MIN_TOKENS = 35
 DEFAULT_DUPLICATE_MIN_C_LINES = 6
+DEFAULT_MIN_COMMENTED_CODE_LINES = 3
 
 EXCLUDED_SCAN_DIRS = frozenset({
     ".git",
@@ -175,6 +180,74 @@ JS_DECL_START_RE = re.compile(
 )
 GO_FUNC_START_RE = re.compile(
     r"^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)\s*\("
+)
+
+PY_CODING_RE = re.compile(r"coding[:=]\s*[-\w.]+")
+LICENSE_COMMENT_RE = re.compile(
+    r"\b(?:"
+    r"copyright\s*(?:\(c\)|\u00a9|\d{4})|"
+    r"spdx-license-identifier|"
+    r"licensed\s+under\s+the|"
+    r"permission\s+is\s+hereby\s+granted|"
+    r"redistribution\s+and\s+use|"
+    r"all\s+rights\s+reserved|"
+    r"without\s+warranty\s+of\s+any\s+kind|"
+    r"apache\s+license|mit\s+license|bsd\s+license|mozilla\s+public\s+license|"
+    r"gnu\s+general\s+public\s+license|this\s+source\s+code\s+is\s+licensed"
+    r")\b",
+    re.IGNORECASE,
+)
+COMMENT_DIVIDER_RE = re.compile(r"^[\s\-=*~#_+/\\.:|<>!@$^&]{3,}$")
+COMMENT_DIRECTIVE_RE = re.compile(
+    r"^(?:"
+    r"type\s*:|noqa\b|pylint\s*:|pragma\s*:|fmt\s*:|isort\s*:|ruff\s*:|"
+    r"mypy\s*:|pyright\s*:|nosec\b|pycharm\b|region\b|endregion\b|"
+    r"@ts-|eslint-|prettier-ignore|istanbul\s+ignore|v8\s+ignore|c8\s+ignore|"
+    r"go:(?:build|generate|embed|noinline|linkname)|\+build\b|nolint\b|"
+    r"(?:TODO|FIXME|NOTE|XXX|HACK|WARNING|INVARIANT|SAFETY|SEE|NB|Example|Usage)\b"
+    r")",
+    re.IGNORECASE,
+)
+COMMENT_BULLET_RE = re.compile(r"^(?:[-*+]\s+\S|\d+[.)]\s+\S|\[[ xX]\]\s+)")
+COMMENT_URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+COMMENT_LABEL_RE = re.compile(r"^[A-Z][A-Za-z0-9_-]{1,30}:\s+\S")
+JSDOC_TAG_RE = re.compile(
+    r"^@(?:param|returns?|example|see|type|typedef|deprecated|template|throws|async|override|internal|public|private|protected|remarks|link|default)\b"
+)
+SPACE_BEFORE_PAREN_RE = re.compile(r"\b[A-Za-z_]\w*\s+\(")
+PY_BLOCK_HEADER_RE = re.compile(r"^(?:async\s+)?(?:def|class|if|for|while|with)\b")
+PY_DECORATOR_COMMENT_RE = re.compile(r"^@[A-Za-z_][\w.]*(?:\([^)]*\))?$")
+PY_OPEN_STMT_RE = re.compile(
+    r"^(?:(?:return\s+)?[A-Za-z_][\w.]*\s*=\s*.*[\(\[\{]|(?:return\s+)?[A-Za-z_][\w.]*\([^)]*)$"
+)
+PY_KWARG_LINE_RE = re.compile(r"^[A-Za-z_]\w*\s*=\s*[^=]+,\s*$")
+
+JS_COMMENT_STRONG_RES: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:const|let|var)\s+[A-Za-z_${\[][\w$,\s\[\]{}:?<>|]*="),
+    re.compile(r"^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s*(?:[A-Za-z_$]\w*)?\s*(?:<[^>]+>)?\s*\("),
+    re.compile(r"^(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:class|interface)\s+[A-Za-z_$]\w*(?:<[^>]+>)?\s*(?:extends\b|implements\b|\{)"),
+    re.compile(r"^(?:export\s+)?type\s+[A-Za-z_$]\w*(?:<[^>]+>)?\s*="),
+    re.compile(r"^import\s+(?:type\s+)?(?:[\w*{}\s,]+\s+from\s+['\"]|['\"])"),
+    re.compile(r"^export\s+(?:(?:\*|\{[^}]*\})\s+from\s+['\"]|default\s+(?:function\b|class\b|async\b|\{|\[|\(|[A-Za-z_$][\w$]*;?$))"),
+    re.compile(r"^(?:\}?\s*else\s+)?if\s*\(.+\)\s*(?:\{.*|return\b.*|throw\b.*)?$"),
+    re.compile(r"^(?:for(?:\s+await)?|while|switch)\s*\(.+\)\s*\{?$"),
+    re.compile(r"^(?:\}?\s*(?:else|finally)\s*\{|try\s*\{|\}?\s*catch\s*(?:\([^)]*\))?\s*\{)$"),
+    re.compile(r"^throw\s+(?:new\s+[A-Z]\w*\s*\(|[A-Za-z_$][\w$.]*;?\s*$)"),
+    re.compile(r"^(?:await\s+)?[A-Za-z_$][\w$.?]*\([^)]*\)(?:\.[A-Za-z_$][\w$]*\([^)]*\))*\s*;?$"),
+    re.compile(r"^(?:[A-Za-z_$][\w$.\[\]'\"?]*\s*(?:[+\-*/%&|^]?=(?!=|>))\s*\S)"),
+    re.compile(r"(?:\([^)]*\)|[A-Za-z_$]\w*)\s*=>\s*(?:\{|\S.*;$)"),
+)
+GO_COMMENT_STRONG_RES: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"^func\s+(?:\([^)]+\)\s*)?[A-Za-z_]\w*\s*\("),
+    re.compile(r"^package\s+[a-z_]\w*$"),
+    re.compile(r"^type\s+[A-Za-z_]\w*\s+(?:struct|interface)\s*\{"),
+    re.compile(r"^(?:var|const)\s+[A-Za-z_]\w*\b.*(?:=|\b(?:string|int\d*|uint\d*|bool|error|byte|float\d+|any)\b)"),
+    re.compile(r"^[A-Za-z_][\w.,\s]*:=\s*\S"),
+    re.compile(r"^(?:\}\s*else\s+)?if\s+\S.+\{\s*$"),
+    re.compile(r"^(?:for|switch|select)\s+.*\{\s*$"),
+    re.compile(r"^(?:defer|go)\s+[A-Za-z_][\w.]*\("),
+    re.compile(r"^[A-Za-z_][\w.]*\([^)]*\)$"),
+    re.compile(r"^[A-Za-z_][\w.\[\]]*\s*(?:[+\-*/]=|=(?!=))\s*\S"),
 )
 
 
@@ -1927,6 +2000,478 @@ def check_scope_sprawl(
     return []
 
 
+def _extract_py_pure_comment_groups(source: str) -> List[List[Tuple[int, str]]]:
+    """Return contiguous groups of pure Python comment lines [(1-based lineno, body), ...]."""
+    code_lines: Set[int] = set()
+    comment_map: Dict[int, str] = {}
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            ln = tok.start[0]
+            if tok.type == tokenize.COMMENT:
+                comment_map[ln] = tok.string
+            elif tok.type not in (
+                tokenize.NL,
+                tokenize.NEWLINE,
+                tokenize.INDENT,
+                tokenize.DEDENT,
+                tokenize.ENDMARKER,
+                tokenize.ENCODING,
+            ):
+                code_lines.add(ln)
+    except (tokenize.TokenError, IndentationError):
+        code_only, comments = _dc._scan_py_lines_fallback(source.splitlines())
+        for idx, code_ln in enumerate(code_only, start=1):
+            if code_ln.strip():
+                code_lines.add(idx)
+        for ln, raw in comments:
+            comment_map.setdefault(ln, raw)
+
+    pure_lines: List[Tuple[int, str]] = []
+    for ln in sorted(comment_map):
+        if ln in code_lines:
+            continue
+        raw = comment_map[ln]
+        if ln == 1 and raw.startswith("#!"):
+            continue
+        if ln <= 2 and PY_CODING_RE.search(raw):
+            continue
+        # Preserve relative indentation after `# ` so dedent+ast.parse works on indented blocks.
+        if raw.startswith("###"):
+            body = raw
+        else:
+            body = re.sub(r"^#{1,2}[ \t]?", "", raw)
+        pure_lines.append((ln, body))
+
+    groups: List[List[Tuple[int, str]]] = []
+    for ln, body in pure_lines:
+        if groups and ln == groups[-1][-1][0] + 1:
+            groups[-1].append((ln, body))
+        else:
+            groups.append([(ln, body)])
+    return groups
+
+
+def _extract_c_like_pure_comment_groups(source: str) -> List[List[Tuple[int, str]]]:
+    """Return contiguous groups of pure // or non-JSDoc /* */ comment lines."""
+    lines = source.splitlines()
+    groups: List[List[Tuple[int, str]]] = []
+    slash_group: List[Tuple[int, str]] = []
+
+    def _flush_slash() -> None:
+        if slash_group:
+            groups.append(list(slash_group))
+            slash_group.clear()
+
+    in_block = False
+    block_is_jsdoc = False
+    block_has_code = False
+    block_lines: List[Tuple[int, str]] = []
+    in_backtick = False
+
+    for idx, line in enumerate(lines):
+        lineno = idx + 1
+        in_single = False
+        in_double = False
+        code_before = False
+        i = 0
+        n = len(line)
+        block_buf: List[str] = []
+        started_block_here = False
+        closed_block_here = False
+
+        while i < n:
+            if in_block:
+                if line[i : i + 2] == "*/":
+                    in_block = False
+                    closed_block_here = True
+                    trailing = line[i + 2 :].strip()
+                    if not block_is_jsdoc and not block_has_code and not trailing:
+                        part = re.sub(r"^\s*\*(?:\s|$)", "", "".join(block_buf))
+                        if part.strip() or not started_block_here:
+                            block_lines.append((lineno, part))
+                    if not block_is_jsdoc and not block_has_code and block_lines:
+                        if not any(JSDOC_TAG_RE.match(b.strip()) for _, b in block_lines):
+                            groups.append(list(block_lines))
+                    block_lines.clear()
+                    block_buf.clear()
+                    i += 2
+                    continue
+                block_buf.append(line[i])
+                i += 1
+                continue
+
+            if in_backtick:
+                if line[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if line[i] == "`":
+                    in_backtick = False
+                code_before = True
+                i += 1
+                continue
+
+            if in_single or in_double:
+                q = "'" if in_single else '"'
+                if line[i] == "\\" and i + 1 < n:
+                    i += 2
+                    continue
+                if line[i] == q:
+                    in_single = in_double = False
+                code_before = True
+                i += 1
+                continue
+
+            if line[i : i + 2] == "//":
+                if not code_before and not closed_block_here:
+                    if line[i : i + 3] != "///":
+                        body = line[i + 2 :]
+                        if slash_group and lineno == slash_group[-1][0] + 1:
+                            slash_group.append((lineno, body))
+                        else:
+                            _flush_slash()
+                            slash_group.append((lineno, body))
+                else:
+                    _flush_slash()
+                break
+
+            if line[i : i + 2] == "/*":
+                _flush_slash()
+                in_block = True
+                started_block_here = True
+                block_has_code = code_before
+                block_is_jsdoc = line[i : i + 3] == "/**" and line[i : i + 4] != "/***"
+                block_lines = []
+                block_buf = []
+                i += 2
+                continue
+
+            ch = line[i]
+            if ch == '"':
+                in_double = True
+                code_before = True
+            elif ch == "'":
+                in_single = True
+                code_before = True
+            elif ch == "`":
+                in_backtick = True
+                code_before = True
+            elif not ch.isspace():
+                code_before = True
+                _flush_slash()
+            i += 1
+
+        if in_block and not block_is_jsdoc and not block_has_code:
+            part = re.sub(r"^\s*\*(?:\s|$)", "", "".join(block_buf))
+            if part.strip() or not started_block_here:
+                block_lines.append((lineno, part))
+        elif not in_block and not closed_block_here and not line.strip():
+            _flush_slash()
+
+    _flush_slash()
+    return groups
+
+
+def _is_non_code_comment_line(stripped: str) -> bool:
+    if not stripped:
+        return True
+    if stripped.startswith(("###", ">>>", "... ", "$ ", "% ")):
+        return True
+    if COMMENT_DIVIDER_RE.match(stripped):
+        return True
+    if COMMENT_DIRECTIVE_RE.match(stripped):
+        return True
+    if COMMENT_BULLET_RE.match(stripped):
+        return True
+    if COMMENT_LABEL_RE.match(stripped):
+        return True
+    if LICENSE_COMMENT_RE.search(stripped):
+        return True
+    if COMMENT_URL_RE.search(stripped) and not re.match(
+        r"^(?:import|from|const|let|var|return|def|func|export)\b", stripped
+    ):
+        return True
+    return False
+
+
+def _looks_like_return_prose(stripped: str) -> bool:
+    """Reject natural-language comments like 'return the cached value to the caller'."""
+    if not re.match(r"^return\b", stripped):
+        return False
+    rest = stripped[len("return") :].strip()
+    if not rest or rest == ";":
+        return False
+    # Code return expressions contain operators, parens, quotes, brackets, dots, digits, or snake_case.
+    if re.search(r"[()\[\]{}.;'\"`=+\-*/%<>!&|?,0-9_:]", rest):
+        return False
+    words = rest.split()
+    return len(words) >= 3
+
+
+def _looks_like_english_sentence(stripped: str) -> bool:
+    if not stripped.endswith("."):
+        return False
+    if re.search(r"[;{}()\[\]=<>]", stripped):
+        return False
+    words = stripped[:-1].split()
+    return len(words) >= 4 and all(re.match(r"^[A-Za-z][A-Za-z'-]*$", w) for w in words[:4])
+
+
+def _py_parse_single_stmt(code: str) -> Optional[ast.stmt]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return None
+    if len(tree.body) != 1:
+        return None
+    return tree.body[0]
+
+
+def _classify_py_comment_line(stripped: str) -> str:
+    if _is_non_code_comment_line(stripped) or _looks_like_english_sentence(stripped):
+        return "prose"
+    if _looks_like_return_prose(stripped):
+        return "prose"
+    if stripped in (")", "]", "}", "),", "],", "},", "pass", "break", "continue", "else:", "try:", "finally:"):
+        return "soft"
+    if PY_DECORATOR_COMMENT_RE.match(stripped):
+        return "strong"
+    if PY_KWARG_LINE_RE.match(stripped):
+        return "soft"
+
+    if stripped.endswith(":"):
+        if PY_BLOCK_HEADER_RE.match(stripped):
+            if _py_parse_single_stmt(stripped + "\n    pass") is not None:
+                return "strong"
+            return "prose"
+        if stripped.startswith("elif ") or stripped.startswith("elif("):
+            if _py_parse_single_stmt("if True:\n    pass\n" + stripped + "\n    pass") is not None:
+                return "strong"
+            return "prose"
+        if stripped.startswith("except"):
+            if _py_parse_single_stmt("try:\n    pass\n" + stripped + "\n    pass") is not None:
+                return "strong"
+            return "prose"
+        return "prose"
+
+    stmt = _py_parse_single_stmt(stripped)
+    if stmt is not None:
+        if isinstance(
+            stmt,
+            (
+                ast.Assign,
+                ast.AugAssign,
+                ast.Import,
+                ast.ImportFrom,
+                ast.Raise,
+                ast.Assert,
+                ast.Delete,
+                ast.Global,
+                ast.Nonlocal,
+            ),
+        ):
+            return "strong"
+        if isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+            return "strong"
+        if isinstance(stmt, ast.Return):
+            return "strong" if stmt.value is not None else "soft"
+        if isinstance(stmt, ast.Expr):
+            if isinstance(stmt.value, (ast.Await, ast.Yield, ast.YieldFrom)):
+                return "strong"
+            if isinstance(stmt.value, ast.Call):
+                # Reject parenthetical prose like `retries (optional)` which Python parses as a call.
+                if SPACE_BEFORE_PAREN_RE.search(stripped):
+                    return "prose"
+                return "strong"
+        return "prose"
+
+    if PY_OPEN_STMT_RE.match(stripped) and not SPACE_BEFORE_PAREN_RE.search(stripped):
+        return "strong"
+    return "prose"
+
+
+def _classify_js_ts_comment_line(stripped: str) -> str:
+    if _is_non_code_comment_line(stripped) or JSDOC_TAG_RE.match(stripped):
+        return "prose"
+    if _looks_like_english_sentence(stripped) or _looks_like_return_prose(stripped):
+        return "prose"
+    if re.fullmatch(r"[\}\]\)]+[,;]?", stripped):
+        return "soft"
+    if re.match(r"^\}\s*(?:else(?:\s+if\s*\(.+\))?|catch\s*(?:\([^)]*\))?|finally)\s*\{?$", stripped):
+        return "strong"
+    if re.match(r"^return(?:\s*;|\s+\S)", stripped):
+        return "strong"
+    for pat in JS_COMMENT_STRONG_RES:
+        if pat.match(stripped) or (pat is JS_COMMENT_STRONG_RES[-1] and pat.search(stripped)):
+            if pat is JS_COMMENT_STRONG_RES[10] and SPACE_BEFORE_PAREN_RE.search(stripped):
+                continue
+            return "strong"
+    if stripped.endswith(";") and not re.search(r"\b[A-Za-z]+\s+[a-z]+\s+[a-z]+\s+[a-z]+\b", stripped):
+        if re.search(r"[=()\[\].]", stripped):
+            return "strong"
+    if stripped.endswith("{") and re.search(r"[()=]|=>", stripped):
+        return "strong"
+    return "prose"
+
+
+def _classify_go_comment_line(stripped: str) -> str:
+    if _is_non_code_comment_line(stripped) or _looks_like_english_sentence(stripped):
+        return "prose"
+    if _looks_like_return_prose(stripped):
+        return "prose"
+    if stripped in ("}", "})", "},") or re.match(r"^(?:case\s+\S.*:|default:)$", stripped):
+        return "soft"
+    if re.match(r"^return(?:\s+\S|$)", stripped):
+        return "strong"
+    for pat in GO_COMMENT_STRONG_RES:
+        if pat.match(stripped):
+            if pat is GO_COMMENT_STRONG_RES[8] and SPACE_BEFORE_PAREN_RE.search(stripped):
+                continue
+            return "strong"
+    return "prose"
+
+
+def _py_block_has_executable_ast(raw_lines: Sequence[str]) -> bool:
+    """Return True if a dedented Python comment snippet parses into executable statements."""
+    snippet = textwrap.dedent("\n".join(raw_lines)).strip("\n")
+    if not snippet.strip():
+        return False
+    for candidate in (snippet, snippet + "\n    pass"):
+        try:
+            tree = ast.parse(candidate)
+        except SyntaxError:
+            continue
+        for stmt in tree.body:
+            if isinstance(
+                stmt,
+                (
+                    ast.FunctionDef,
+                    ast.AsyncFunctionDef,
+                    ast.ClassDef,
+                    ast.If,
+                    ast.For,
+                    ast.AsyncFor,
+                    ast.While,
+                    ast.With,
+                    ast.AsyncWith,
+                    ast.Try,
+                    ast.Assign,
+                    ast.AugAssign,
+                    ast.Return,
+                    ast.Raise,
+                    ast.Import,
+                    ast.ImportFrom,
+                    ast.Assert,
+                    ast.Delete,
+                ),
+            ):
+                return True
+            if isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                return True
+            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, (ast.Call, ast.Await)):
+                return True
+    return False
+
+
+def check_commented_code_in_source(
+    rel_path: str,
+    source: str,
+    *,
+    added_lines: Optional[Set[int]] = None,
+    min_lines: int = DEFAULT_MIN_COMMENTED_CODE_LINES,
+    severity: str = "warning",
+) -> List[Dict[str, Any]]:
+    """Detect newly added multi-line commented-out code blocks (>= 3 consecutive code-like lines)."""
+    if min_lines <= 0 or not _dc._is_code_path(rel_path):
+        return []
+
+    suffix = Path(rel_path).suffix.lower()
+    is_py = suffix == ".py"
+    is_js = _dc._is_js_ts_path(rel_path)
+    is_go = _dc._is_go_path(rel_path)
+    if not (is_py or is_js or is_go):
+        return []
+
+    if is_py:
+        groups = _extract_py_pure_comment_groups(source)
+        classifier = _classify_py_comment_line
+    else:
+        groups = _extract_c_like_pure_comment_groups(source)
+        classifier = _classify_js_ts_comment_line if is_js else _classify_go_comment_line
+
+    findings: List[Dict[str, Any]] = []
+
+    for group in groups:
+        if len(group) < min_lines:
+            continue
+        if any(LICENSE_COMMENT_RE.search(body) for _, body in group):
+            continue
+
+        in_fence = False
+        run: List[Tuple[int, str, str]] = []  # (lineno, raw_body, kind)
+
+        def _flush_run() -> None:
+            if len(run) < min_lines:
+                run.clear()
+                return
+            strong_count = sum(1 for _, _, k in run if k == "strong")
+            if strong_count < 2:
+                run.clear()
+                return
+            if added_lines is not None:
+                added_in_run = sum(1 for ln, _, _ in run if ln in added_lines)
+                if added_in_run < min_lines:
+                    run.clear()
+                    return
+            start_ln = run[0][0]
+            end_ln = run[-1][0]
+            findings.append(
+                _finding(
+                    code="STRUCT-COMMENTED-CODE",
+                    severity=severity,
+                    file=rel_path,
+                    line=start_ln,
+                    message=(
+                        f"{rel_path}:{start_ln}-{end_ln} contains a {len(run)}-line "
+                        f"commented-out code block."
+                    ),
+                    remediation=(
+                        "Delete commented-out code cleanly (git history preserves old code) "
+                        "and keep only short 1-2 line 'why' invariant comments."
+                    ),
+                    meta={
+                        "end_line": end_ln,
+                        "line_count": len(run),
+                        "strong_lines": strong_count,
+                    },
+                )
+            )
+            run.clear()
+
+        for ln, raw_body in group:
+            stripped = raw_body.strip()
+            if stripped.startswith(("```", "~~~")):
+                _flush_run()
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            kind = classifier(stripped)
+            if kind in ("strong", "soft"):
+                run.append((ln, raw_body, kind))
+            else:
+                # For Python multi-line expressions split across commented lines (e.g., list/dict/call args),
+                # check whether appending this line to an already-started strong run forms valid Python AST.
+                if is_py and run and stripped and not _is_non_code_comment_line(stripped):
+                    cand_lines = [b for _, b, _ in run] + [raw_body]
+                    if _py_block_has_executable_ast(cand_lines):
+                        run.append((ln, raw_body, "soft"))
+                        continue
+                _flush_run()
+        _flush_run()
+
+    return findings
+
+
 def check_structural_diff(
     diff_text: str,
     *,
@@ -1984,6 +2529,11 @@ def check_structural_diff(
                 )
             )
             findings.extend(
+                check_commented_code_in_source(
+                    path, source, added_lines=added_lines, severity=severity
+                )
+            )
+            findings.extend(
                 check_god_growth_in_source(
                     path,
                     source,
@@ -2018,6 +2568,11 @@ def check_structural_diff(
                 )
                 raw.extend(
                     check_silent_fallbacks_in_source(
+                        path, hunk_text, added_lines=added_1based, severity=severity
+                    )
+                )
+                raw.extend(
+                    check_commented_code_in_source(
                         path, hunk_text, added_lines=added_1based, severity=severity
                     )
                 )
@@ -2105,6 +2660,7 @@ def check_structural_files(
             check_test_theater_in_source(rel, text, repo_root=root, severity=severity)
         )
         findings.extend(check_silent_fallbacks_in_source(rel, text, severity=severity))
+        findings.extend(check_commented_code_in_source(rel, text, severity=severity))
         findings.extend(
             check_god_growth_in_source(
                 rel,

@@ -297,6 +297,137 @@ class StructuralDetectorsTests(unittest.TestCase):
         ])
         self.assertEqual(focused, [])
 
+    def test_commented_code_catches_bad_and_allows_valid_neighbours(self) -> None:
+        # 1. Python commented-out code blocks (control flow, imports/assigns, multi-line call).
+        bad_py = (
+            "def active(x):\n"
+            "    # def old_price(items, rate):\n"
+            "    #     if rate < 0:\n"
+            "    #         return 0\n"
+            "    #     return sum(items) * rate\n"
+            "    return x * 2\n\n"
+            "# import legacy_sdk\n"
+            "# client = legacy_sdk.connect()\n"
+            "# client.flush_all()\n"
+        )
+        py_hits = structural.check_commented_code_in_source("src/billing.py", bad_py)
+        self.assertEqual(len(py_hits), 2, msg=py_hits)
+        self.assertEqual(_codes(py_hits), {"STRUCT-COMMENTED-CODE"})
+        self.assertEqual(py_hits[0]["line"], 2)
+        self.assertEqual(py_hits[0]["meta"]["end_line"], 5)
+
+        # 2. JS/TS // and non-JSDoc /* */ commented-out code blocks.
+        bad_ts = (
+            "export function charge(x: number) {\n"
+            "  // const fee = computeLegacyFee(x);\n"
+            "  // if (fee > 0) {\n"
+            "  //   return x + fee;\n"
+            "  // }\n"
+            "  /*\n"
+            "   * const backup = x * 2;\n"
+            "   * const fn = (v) => { return v + 1; };\n"
+            "   * return fn(backup);\n"
+            "   */\n"
+            "  return x;\n"
+            "}\n"
+        )
+        ts_hits = structural.check_commented_code_in_source("src/billing.ts", bad_ts)
+        self.assertEqual(len(ts_hits), 2, msg=ts_hits)
+
+        # 3. Go commented-out code block.
+        bad_go = (
+            "package billing\n"
+            "// func oldCharge(x int) int {\n"
+            "//     fee := x * 2\n"
+            "//     if fee > 10 {\n"
+            "//         return fee\n"
+            "//     }\n"
+            "//     return x\n"
+            "// }\n"
+            "func Charge(x int) int { return x }\n"
+        )
+        go_hits = structural.check_commented_code_in_source("billing.go", bad_go)
+        self.assertEqual(len(go_hits), 1, msg=go_hits)
+
+        # 4. Valid neighbouring cases: prose, 1-2 line invariant notes, license headers,
+        # docstrings, JSDoc @example, fenced code inside comments, URLs, bullets, dividers, HTTP headers.
+        good_py = (
+            "# Copyright (c) 2026 Example Corp.\n"
+            "# Licensed under the MIT License.\n"
+            "# Permission is hereby granted, free of charge.\n"
+            "# Without warranty of any kind.\n\n"
+            '"""Module docstring example:\n'
+            "def demo(x):\n"
+            "    if x > 0:\n"
+            "        return x + 1\n"
+            '"""\n\n'
+            "# ==========================================\n"
+            "# Payment webhook processing invariants\n"
+            "# ==========================================\n"
+            "# INVARIANT: Stripe webhooks can arrive out of order.\n"
+            "# Only update status when event.created_at >= sub.last_event_at.\n"
+            "# See https://example.com/docs/webhooks for retries (optional)\n"
+            "# if the server returns an error:\n"
+            "# for example, retry with exponential backoff\n"
+            "# return the cached response to the caller\n"
+            "# - [x] validate signature header\n"
+            "# - [ ] emit metrics counter\n"
+            "# Content-Type: application/json\n"
+            "# ```python\n"
+            "# def fenced_example(x):\n"
+            "#     y = x + 1\n"
+            "#     return y\n"
+            "# ```\n"
+            "# Short 2-line code hint allowed (< 3 lines):\n"
+            "# total = a + b\n"
+            "# return total\n"
+            "def live(x):\n"
+            "    return x + 1  # old: return x\n"
+        )
+        self.assertEqual(
+            structural.check_commented_code_in_source("src/webhooks.py", good_py),
+            [],
+        )
+
+        good_ts = (
+            "/**\n"
+            " * Example usage:\n"
+            " * @example\n"
+            " * const app = new Hono();\n"
+            " * app.get('/', (c) => c.text('ok'));\n"
+            " * export default app;\n"
+            " */\n"
+            "// -----------------------------------------\n"
+            "// If the response stream closes early, keep the last cursor.\n"
+            "// See https://example.com/stream for details.\n"
+            "// - step 1: check header\n"
+            "// - step 2: return status\n"
+            "// ```ts\n"
+            "// const x = 1;\n"
+            "// const y = 2;\n"
+            "// return x + y;\n"
+            "// ```\n"
+            "export const ok = true;\n"
+        )
+        self.assertEqual(
+            structural.check_commented_code_in_source("src/stream.ts", good_ts),
+            [],
+        )
+
+        # 5. Diff-scoping: touching only 1 line of an existing commented block does not fire;
+        # adding >= 3 new commented code lines fires as warning by default and error with --strict-structural.
+        self.assertEqual(
+            structural.check_commented_code_in_source("src/billing.py", bad_py, added_lines={2}),
+            [],
+        )
+        diff_txt = _new_file_diff("src/billing.py", bad_py)
+        warn_res = structural.check_structural_diff(diff_txt, repo_root=None, strict_structural=False)
+        self.assertIn("STRUCT-COMMENTED-CODE", _codes(warn_res["warnings"]))
+        self.assertEqual(warn_res["errors"], [])
+
+        strict_res = structural.check_structural_diff(diff_txt, repo_root=None, strict_structural=True)
+        self.assertIn("STRUCT-COMMENTED-CODE", _codes(strict_res["errors"]))
+
 
 class PlainEnglishReviewAndCliTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -325,6 +456,7 @@ class PlainEnglishReviewAndCliTests(unittest.TestCase):
             "STRUCT-SILENT-FALLBACK",
             "STRUCT-DUPLICATE-BLOCK",
             "STRUCT-DEAD-COMPAT",
+            "STRUCT-COMMENTED-CODE",
             "STRUCT-GOD-FUNCTION",
             "STRUCT-GOD-FILE",
             "STRUCT-SCOPE-SPRAWL",
@@ -332,8 +464,30 @@ class PlainEnglishReviewAndCliTests(unittest.TestCase):
         self.assertTrue(expected_codes.issubset(set(review.PLAIN_ENGLISH_CATALOG.keys())))
         for code in expected_codes:
             entry = review.PLAIN_ENGLISH_CATALOG[code]
-            for field in ("title", "why_veterans_flag_it", "how_it_compounds", "fix_prompt"):
+            for field in ("title", "why_veterans_flag_it", "how_it_compounds", "fix_prompt", "evidence"):
                 self.assertTrue(entry[field].strip(), msg=(code, field))
+
+        # Verification Hierarchy guidance in STRUCT-TEST-THEATER and comment poisoning in STRUCT-COMMENTED-CODE.
+        theater_exp = review.PLAIN_ENGLISH_CATALOG["STRUCT-TEST-THEATER"]
+        self.assertIn("Verification Hierarchy", theater_exp["why_veterans_flag_it"])
+        self.assertIn("Verification Hierarchy", theater_exp["fix_prompt"])
+        self.assertIn("anti-slop-mutate", theater_exp["fix_prompt"])
+
+        comment_exp = review.PLAIN_ENGLISH_CATALOG["STRUCT-COMMENTED-CODE"]
+        self.assertIn("docs/evidence.md#ext-14", comment_exp["evidence"])
+        self.assertIn("invariant", comment_exp["fix_prompt"].lower())
+
+        # Plain-English and Markdown outputs render evidence Reference cleanly.
+        sample_diff = _new_file_diff(
+            "src/old.py",
+            "# def old_fn(x):\n#     if x > 0:\n#         return x\n#     return 0\n\ndef live():\n    return 1\n",
+        )
+        rep = review.review_diff(sample_diff, repo_root=None)
+        self.assertIn("STRUCT-COMMENTED-CODE", _codes(rep["warnings"]))
+        plain_out = review.format_plain_english(rep, markdown=False)
+        md_out = review.format_plain_english(rep, markdown=True)
+        self.assertIn("Reference: docs/evidence.md#ext-14", plain_out)
+        self.assertIn("- **Reference:** docs/evidence.md#ext-14", md_out)
 
     def test_review_cli_plain_english_markdown_json_and_diff_check_flags(self) -> None:
         (self.root / "src").mkdir()

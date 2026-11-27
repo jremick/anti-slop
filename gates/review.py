@@ -42,6 +42,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "instead of fixing root causes."
         ),
         "fix_prompt": "Remove the test skip annotation, fix the underlying code defect, and re-run the test suite.",
+        "evidence": "docs/evidence.md#local-05, docs/evidence.md#ext-13, docs/ai-era-rules.md",
     },
     "DIFF-UNAUTHORIZED-TEST-EDIT": {
         "title": "Existing tests were edited while changing production code",
@@ -53,6 +54,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Weakened tests quietly erode your safety net so later AI edits can break core features undetected."
         ),
         "fix_prompt": "Restore the existing test file untouched and fix the production code to satisfy it (or explain why the test contract itself must change).",
+        "evidence": "docs/evidence.md#local-05, docs/evidence.md#ext-13, docs/ai-era-rules.md",
     },
     "DIFF-SUPPRESSION": {
         "title": "A linter or type-checker warning was silenced without explanation",
@@ -64,6 +66,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Once blanket suppressions appear, future AI turns mimic them to silence new warnings rather than fixing interfaces."
         ),
         "fix_prompt": "Fix the underlying lint or type error. If an external library truly requires a suppression, scope it to one specific rule code with a short reason.",
+        "evidence": "docs/evidence.md#ext-12, docs/evidence.md#oai-03",
     },
     "DIFF-SILENT-CATCH": {
         "title": "Errors are being caught and silently ignored",
@@ -75,6 +78,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Future AI debugging turns cannot see the real error trace, so they add speculative workarounds on top of a hidden failure."
         ),
         "fix_prompt": "Catch only the specific expected exception type, or log and re-raise unexpected errors instead of swallowing them.",
+        "evidence": "docs/ai-era-rules.md, docs/evidence.md#ext-12",
     },
     "DIFF-DEBUG-LEFTOVER": {
         "title": "An interactive debugger statement was left in the code",
@@ -85,6 +89,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Leftover debugging artifacts stall automated test runners and waste later sessions diagnosing hangs."
         ),
         "fix_prompt": "Delete the leftover debugger statement and re-run tests.",
+        "evidence": "docs/evidence.md#ref-01, docs/evidence.md#oai-03",
     },
     "DIFF-HOST-PATH": {
         "title": "A personal computer file path was hardcoded",
@@ -95,6 +100,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Later AI turns copy the hardcoded path into tests, scripts, or docs, spreading environment-specific breakage."
         ),
         "fix_prompt": "Replace the hardcoded machine path with a repo-relative path, Path.home(), or an environment variable.",
+        "evidence": "docs/evidence.md#local-05, docs/evidence.md#oai-03",
     },
     "DIFF-STUB-TODO": {
         "title": "Unfinished TODO/FIXME placeholder left in new code",
@@ -105,6 +111,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Later sessions build on top of half-finished functions assuming they work completely."
         ),
         "fix_prompt": "Implement the missing logic now instead of leaving a TODO stub, or explicitly report why it is blocked.",
+        "evidence": "docs/evidence.md#oai-01, docs/evidence.md#ext-10",
     },
     "DIFF-STUB-NOT-IMPLEMENTED": {
         "title": "Function raises NotImplementedError instead of working",
@@ -115,6 +122,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Future AI sessions treat the function signature as an existing working API and wire callers into a broken stub."
         ),
         "fix_prompt": "Implement the concrete behavior (or mark an intentional interface method with @abstractmethod).",
+        "evidence": "docs/evidence.md#oai-01, docs/evidence.md#ext-12",
     },
     "DIFF-STUB-PASS": {
         "title": "Concrete function body is an empty 'pass' placeholder",
@@ -125,6 +133,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Later turns call the no-op function assuming side effects or validation actually happened."
         ),
         "fix_prompt": "Implement the function body or remove the unused placeholder.",
+        "evidence": "docs/evidence.md#oai-01, docs/evidence.md#ext-12",
     },
     "DIFF-CHATBOT-OPENER": {
         "title": "Conversational AI opener leaked into docs or PR description",
@@ -135,6 +144,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Bloat in docs reduces readability and teaches later sessions to treat project docs as chat transcripts."
         ),
         "fix_prompt": "Delete the conversational opener and start directly with the technical fact or decision.",
+        "evidence": "docs/evidence.md#ref-02, docs/evidence.md#local-05",
     },
     "DIFF-CHATBOT-CLOSER": {
         "title": "Conversational AI sign-off leaked into docs or PR description",
@@ -145,6 +155,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Repeated filler degrades PR review signal so reviewers skim past real caveats."
         ),
         "fix_prompt": "Remove the sign-off filler and end with concrete status or verification commands.",
+        "evidence": "docs/evidence.md#ref-02, docs/evidence.md#local-05",
     },
     "DIFF-BROKEN-DOC-PATH": {
         "title": "Documentation references a file path that does not exist",
@@ -155,6 +166,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Future AI agents read your docs first; broken paths send them hunting for nonexistent files or recreating files that already exist elsewhere."
         ),
         "fix_prompt": "Update the path to the real repository file or remove the stale reference.",
+        "evidence": "docs/evidence.md#ext-11, docs/evidence.md#oai-03",
     },
     "DIFF-DECORATIVE-EMOJI": {
         "title": "Decorative AI emojis in technical headings or PR text",
@@ -165,6 +177,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Later AI turns mirror the style of existing docs and inject more decorative noise."
         ),
         "fix_prompt": "Remove decorative emojis from technical headings and prose.",
+        "evidence": "docs/evidence.md#ref-02",
     },
     "DIFF-MAX-NET-LOC": {
         "title": "Change is larger than the reviewable line budget",
@@ -175,6 +188,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Oversized AI turns mix unrelated edits and make rollback or root-cause bisecting painful."
         ),
         "fix_prompt": "Split this change into smaller, independently tested steps.",
+        "evidence": "docs/evidence.md#ext-07, docs/ai-era-rules.md",
     },
     "DIFF-MAX-FILES": {
         "title": "Change touches more files than the reviewable budget",
@@ -185,20 +199,26 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Wide edits blur module boundaries and encourage later AI turns to edit everywhere at once."
         ),
         "fix_prompt": "Narrow the diff to only the files required for this task.",
+        "evidence": "docs/evidence.md#ext-07, docs/ai-era-rules.md",
     },
     "STRUCT-TEST-THEATER": {
         "title": "Tests that look green without actually proving the code works",
         "why_veterans_flag_it": (
             "Tests with zero assertions, tautologies like 'assert True', or heavy mocking without checking real outputs "
-            "stay green even when you introduce an obvious bug."
+            "stay green even when you introduce an obvious bug. Follow the Verification Hierarchy: prefer real end-to-end "
+            "or live functional verification first, then real-input behavioral tests validated with diff-scoped mutation "
+            "testing (anti-slop-mutate), over heavily-mocked unit tests."
         ),
         "how_it_compounds": (
-            "Future AI turns trust the green test run and ship regressions believing the suite checked behavior that was never tested."
+            "Future AI turns trust the green test run and ship regressions believing the suite checked behavior that was never tested, "
+            "while copying the same mock-heavy test patterns into new modules."
         ),
         "fix_prompt": (
-            "Rewrite this test to call the real code with concrete inputs and assert specific outputs, state changes, "
-            "or error conditions; verify it fails if you break the logic."
+            "Follow the Verification Hierarchy: prefer real end-to-end/live functional verification or real-input behavioral tests "
+            "that assert concrete outputs, state changes, or error conditions instead of heavy mocks, then verify mutant kill strength "
+            "with anti-slop-mutate."
         ),
+        "evidence": "docs/evidence.md#ext-13, docs/ai-era-rules.md",
     },
     "STRUCT-SILENT-FALLBACK": {
         "title": "Silent fallback default hiding a real error or missing secret",
@@ -214,6 +234,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Fail closed with a clear error when required inputs/secrets are invalid, or catch only the exact expected exception "
             "and log the failure explicitly."
         ),
+        "evidence": "docs/ai-era-rules.md, docs/evidence.md#ext-12",
     },
     "STRUCT-DUPLICATE-BLOCK": {
         "title": "Copy-pasted logic block that will drift out of sync",
@@ -226,6 +247,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "and fix bugs in only whichever file happened to be open."
         ),
         "fix_prompt": "Extract or reuse one shared canonical helper function for this logic and call it from both places.",
+        "evidence": "docs/evidence.md#ext-12, docs/ai-era-rules.md",
     },
     "STRUCT-DEAD-COMPAT": {
         "title": "Dead code, unreachable branch, or leftover legacy compatibility path",
@@ -238,6 +260,23 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "legacy helper instead of the real code path."
         ),
         "fix_prompt": "Delete the unreachable branch, unused helper, or obsolete legacy shim cleanly and re-run tests.",
+        "evidence": "docs/evidence.md#ext-12, docs/ai-era-rules.md",
+    },
+    "STRUCT-COMMENTED-CODE": {
+        "title": "Commented-out code block left behind in source",
+        "why_veterans_flag_it": (
+            "Commented-out code rots immediately and poisons AI generation: coding models complete, imitate, or resurrect "
+            "defective commented-out logic as if it were an active pattern. Git history already preserves deleted code."
+        ),
+        "how_it_compounds": (
+            "Every future AI session reads the commented-out block in its context window, wasting tokens and increasing "
+            "the chance the model copies outdated or buggy patterns instead of the live implementation."
+        ),
+        "fix_prompt": (
+            "Delete the commented-out code block cleanly (rely on git history if you ever need old code) and keep only "
+            "short 1-2 line 'why' comments documenting non-obvious invariants."
+        ),
+        "evidence": "docs/evidence.md#ext-14, docs/evidence.md#ext-12, docs/ai-era-rules.md",
     },
     "STRUCT-GOD-FUNCTION": {
         "title": "Function is growing too long or tangled to reason about safely",
@@ -250,6 +289,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "instead of clarifying the structure."
         ),
         "fix_prompt": "Split this function into smaller single-purpose helpers with clear names and focused tests.",
+        "evidence": "docs/evidence.md#ext-07, docs/ai-era-rules.md",
     },
     "STRUCT-GOD-FILE": {
         "title": "File is growing into a monolith mixing multiple responsibilities",
@@ -260,6 +300,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Large files burn context window tokens on every AI turn and increase the chance of unintended side edits."
         ),
         "fix_prompt": "Extract cohesive pieces into a dedicated module before adding more code to this file.",
+        "evidence": "docs/evidence.md#ext-07, docs/ai-era-rules.md",
     },
     "STRUCT-SCOPE-SPRAWL": {
         "title": "Single change is sprawling across too many unrelated areas",
@@ -271,6 +312,7 @@ PLAIN_ENGLISH_CATALOG: Dict[str, Dict[str, str]] = {
             "Sprawling edits make reviews superficial and leave half-refactored conventions scattered across the repo."
         ),
         "fix_prompt": "Revert unrelated edits outside the target module and keep this change focused on one clear goal.",
+        "evidence": "docs/evidence.md#ext-07, docs/ai-era-rules.md",
     },
 }
 
@@ -285,6 +327,7 @@ def explain_finding(finding: Dict[str, Any]) -> Dict[str, str]:
         title = str(meta.get("title") or f"Project learned rule ({code})")
         why = str(meta.get("why_it_matters") or "This pattern previously slipped through and was approved as a project rule.")
         desired = str(meta.get("desired_outcome") or finding.get("remediation") or "Follow the approved project pattern.")
+        evidence = str(meta.get("evidence") or "gates/learn.py (project-approved learned rule)")
         return {
             "title": f"Learned rule: {title}",
             "why_veterans_flag_it": why,
@@ -293,12 +336,14 @@ def explain_finding(finding: Dict[str, Any]) -> Dict[str, str]:
                 "to repeat the same defect."
             ),
             "fix_prompt": f"{finding.get('remediation', desired)}",
+            "evidence": evidence,
         }
     return {
         "title": code or "Code quality finding",
         "why_veterans_flag_it": str(finding.get("message") or "This pattern violates an enabled quality check."),
         "how_it_compounds": "Unresolved shortcuts accumulate and get imitated by future AI coding turns.",
         "fix_prompt": str(finding.get("remediation") or "Resolve the flagged defect and re-run checks."),
+        "evidence": "docs/ai-era-rules.md",
     }
 
 
@@ -500,6 +545,8 @@ def format_plain_english(report: Dict[str, Any], *, markdown: bool = False) -> s
                 lines.append(f"   - **What was found:** {item['message']}")
                 lines.append(f"   - **Why experienced engineers flag this:** {exp['why_veterans_flag_it']}")
                 lines.append(f"   - **How it compounds in future AI turns:** {exp['how_it_compounds']}")
+                if exp.get("evidence"):
+                    lines.append(f"   - **Reference:** {exp['evidence']}")
                 lines.append(f"   - **How to fix:** {exp['fix_prompt']}")
                 lines.append("")
             else:
@@ -507,6 +554,8 @@ def format_plain_english(report: Dict[str, Any], *, markdown: bool = False) -> s
                 lines.append(f"   What was found: {item['message']}")
                 lines.append(f"   Why engineers flag this: {exp['why_veterans_flag_it']}")
                 lines.append(f"   How it compounds across AI turns: {exp['how_it_compounds']}")
+                if exp.get("evidence"):
+                    lines.append(f"   Reference: {exp['evidence']}")
                 lines.append(f"   Fix / prompt to give your AI: {exp['fix_prompt']}")
                 lines.append("")
 
