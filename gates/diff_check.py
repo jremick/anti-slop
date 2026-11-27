@@ -315,6 +315,217 @@ def _is_markdown_path(path: str) -> bool:
     return Path(path).suffix.lower() in MARKDOWN_EXTENSIONS
 
 
+def _glob_segment_to_regex(segment: str) -> str:
+    out: List[str] = []
+    i = 0
+    n = len(segment)
+    while i < n:
+        ch = segment[i]
+        if ch == "*":
+            out.append("[^/]*")
+            i += 1
+        elif ch == "?":
+            out.append("[^/]")
+            i += 1
+        elif ch == "[":
+            j = i + 1
+            if j < n and segment[j] in ("!", "^"):
+                j += 1
+            if j < n and segment[j] == "]":
+                j += 1
+            while j < n and segment[j] != "]":
+                j += 1
+            if j >= n:
+                out.append(re.escape(ch))
+                i += 1
+            else:
+                body = segment[i + 1 : j].replace("\\", "\\\\")
+                if body.startswith(("!", "^")):
+                    out.append(f"(?!/)[^{body[1:]}]")
+                else:
+                    out.append(f"[{body}]")
+                i = j + 1
+        else:
+            out.append(re.escape(ch))
+            i += 1
+    return "".join(out)
+
+
+def _compile_exclude_glob(pattern: str) -> Optional[re.Pattern[str]]:
+    """Compile a '**'-aware POSIX path glob into an anchored regex."""
+    raw = pattern.strip().replace("\\", "/")
+    while raw.startswith("./"):
+        raw = raw[2:]
+    raw = raw.lstrip("/")
+    if not raw:
+        return None
+    if raw.endswith("/"):
+        raw += "**"
+
+    if "/" not in raw:
+        if raw == "**":
+            return re.compile(r"^.*$")
+        seg_re = _glob_segment_to_regex(raw)
+        return re.compile(rf"^(?:.*/)?{seg_re}$")
+
+    parts: List[str] = []
+    for part in (p for p in raw.split("/") if p):
+        if part == "**" and parts and parts[-1] == "**":
+            continue
+        parts.append(part)
+
+    regex_parts: List[str] = ["^"]
+    for idx, part in enumerate(parts):
+        is_first = idx == 0
+        is_last = idx == len(parts) - 1
+        if part == "**":
+            if is_first and is_last:
+                regex_parts.append(".*")
+            elif is_first:
+                regex_parts.append("(?:.*/)?")
+            elif is_last:
+                regex_parts.append("/.*")
+            else:
+                regex_parts.append("/(?:.*/)?")
+        else:
+            seg_re = _glob_segment_to_regex(part)
+            if not is_first and parts[idx - 1] != "**":
+                regex_parts.append("/")
+            regex_parts.append(seg_re)
+    regex_parts.append("$")
+    return re.compile("".join(regex_parts))
+
+
+def _compile_exclude_patterns(exclude: Optional[Sequence[str]]) -> List[re.Pattern[str]]:
+    if not exclude:
+        return []
+    compiled: List[re.Pattern[str]] = []
+    for raw in exclude:
+        pat = _compile_exclude_glob(str(raw))
+        if pat is not None:
+            compiled.append(pat)
+    return compiled
+
+
+def _is_excluded_path(path: str, patterns: Sequence[re.Pattern[str]]) -> bool:
+    if not patterns:
+        return False
+    norm = _normalize_relpath(path).lstrip("/")
+    if not norm:
+        return False
+    return any(pat.match(norm) is not None for pat in patterns)
+
+
+def _filter_unified_diff(diff_text: str, patterns: Sequence[re.Pattern[str]]) -> str:
+    """Drop per-file sections from a unified diff whose path matches any exclude pattern."""
+    if not patterns or not diff_text:
+        return diff_text
+
+    blocks: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    old_rem = 0
+    new_rem = 0
+
+    def _start_block(path_hint: str = "", old_hint: str = "") -> Dict[str, Any]:
+        block: Dict[str, Any] = {
+            "lines": [],
+            "path": path_hint,
+            "old_path": old_hint,
+            "seen_minus": False,
+            "has_plus_or_hunk": False,
+        }
+        blocks.append(block)
+        return block
+
+    for raw_line in diff_text.splitlines(keepends=True):
+        stripped = raw_line.rstrip("\r\n")
+        in_hunk = old_rem > 0 or new_rem > 0
+
+        if stripped.startswith("diff --git "):
+            parts = stripped.split()
+            old_hint = _normalize_relpath(parts[2]) if len(parts) >= 3 else ""
+            path_hint = _normalize_relpath(parts[3]) if len(parts) >= 4 else ""
+            current = _start_block(path_hint=path_hint, old_hint=old_hint)
+            old_rem = 0
+            new_rem = 0
+            current["lines"].append(raw_line)
+            continue
+
+        if in_hunk:
+            if stripped.startswith(" "):
+                old_rem = max(0, old_rem - 1)
+                new_rem = max(0, new_rem - 1)
+                if current is not None:
+                    current["lines"].append(raw_line)
+                continue
+            if stripped.startswith("-"):
+                old_rem = max(0, old_rem - 1)
+                if current is not None:
+                    current["lines"].append(raw_line)
+                continue
+            if stripped.startswith("+"):
+                new_rem = max(0, new_rem - 1)
+                if current is not None:
+                    current["lines"].append(raw_line)
+                continue
+            if stripped.startswith("\\ No newline at end of file"):
+                if current is not None:
+                    current["lines"].append(raw_line)
+                continue
+            # Malformed/truncated hunk: fall through to header inspection.
+            old_rem = 0
+            new_rem = 0
+
+        if stripped.startswith("--- "):
+            src = stripped[4:].split("\t", 1)[0].strip()
+            if current is None or current["has_plus_or_hunk"] or current["seen_minus"]:
+                current = _start_block()
+            current["seen_minus"] = True
+            if src != "/dev/null":
+                current["old_path"] = _normalize_relpath(src)
+            current["lines"].append(raw_line)
+            continue
+
+        if stripped.startswith("+++ "):
+            dst = stripped[4:].split("\t", 1)[0].strip()
+            if current is None:
+                current = _start_block()
+            current["has_plus_or_hunk"] = True
+            if dst == "/dev/null":
+                if not current["path"] and current["old_path"]:
+                    current["path"] = current["old_path"]
+            else:
+                current["path"] = _normalize_relpath(dst)
+            current["lines"].append(raw_line)
+            continue
+
+        if stripped.startswith("rename to ") and current is not None:
+            current["path"] = _normalize_relpath(stripped[len("rename to ") :])
+            current["lines"].append(raw_line)
+            continue
+
+        hunk_match = HUNK_HEADER_RE.match(stripped)
+        if hunk_match:
+            if current is None:
+                current = _start_block()
+            current["has_plus_or_hunk"] = True
+            old_rem = int(hunk_match.group(2)) if hunk_match.group(2) is not None else 1
+            new_rem = int(hunk_match.group(4)) if hunk_match.group(4) is not None else 1
+            current["lines"].append(raw_line)
+            continue
+
+        if current is not None:
+            current["lines"].append(raw_line)
+
+    kept_parts: List[str] = []
+    for block in blocks:
+        effective = block["path"] or block["old_path"]
+        if effective and _is_excluded_path(effective, patterns):
+            continue
+        kept_parts.extend(block["lines"])
+    return "".join(kept_parts)
+
+
 def parse_unified_diff(diff_text: str) -> Dict[str, Any]:
     """Parse a unified diff string into per-file hunks and line statistics."""
     files: List[Dict[str, Any]] = []
@@ -2285,6 +2496,7 @@ def check_diff(
     structural: bool = False,
     strict_structural: bool = False,
     learned_rules: Optional[Path | str] = None,
+    exclude: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Validate a unified diff against Layer-1 deterministic diff and prose gates."""
     if strict_structural:
@@ -2292,6 +2504,9 @@ def check_diff(
     if no_budget:
         max_net_loc = 0
         max_files = 0
+    exclude_patterns = _compile_exclude_patterns(exclude)
+    if exclude_patterns:
+        diff_text = _filter_unified_diff(diff_text, exclude_patterns)
     parsed = parse_unified_diff(diff_text)
     files = parsed["files"]
     stats = parsed["stats"]
@@ -2450,6 +2665,7 @@ def check_diff_and_text(
     max_net_loc: int = DEFAULT_MAX_NET_LOC,
     max_files: int = DEFAULT_MAX_FILES,
     strict_prose: bool = False,
+    exclude: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Validate a unified diff together with an accompanying PR/review Markdown text."""
     return check_diff(
@@ -2463,6 +2679,7 @@ def check_diff_and_text(
         pr_body=text,
         pr_body_source=text_source,
         strict_prose=strict_prose,
+        exclude=exclude,
     )
 
 
@@ -2479,6 +2696,7 @@ def check_files(
     structural: bool = False,
     strict_structural: bool = False,
     learned_rules: Optional[Path | str] = None,
+    exclude: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """Validate an explicit list of modified files against Layer-1 diff and prose gates."""
     if strict_structural:
@@ -2502,6 +2720,10 @@ def check_files(
         else:
             rel = _normalize_relpath(str(raw))
         norm_files.append(rel)
+
+    exclude_patterns = _compile_exclude_patterns(exclude)
+    if exclude_patterns:
+        norm_files = [rel for rel in norm_files if not _is_excluded_path(rel, exclude_patterns)]
 
     stats = {
         "files_changed": len(norm_files),
@@ -2679,6 +2901,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Path to an approved anti-slop-learn rules JSON store to enforce alongside built-in checks.",
     )
     parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        help="Repeatable '**'-aware glob pattern for paths to skip (e.g., 'results/*/artifacts/**').",
+    )
+    parser.add_argument(
         "--no-budget",
         action="store_true",
         help="Disable heuristic --max-net-loc and --max-files diff budgets (enforce objective defects only).",
@@ -2746,6 +2975,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 structural=args.structural,
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
+                exclude=args.exclude,
             )
         elif target_files:
             result = check_files(
@@ -2760,6 +2990,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 structural=args.structural,
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
+                exclude=args.exclude,
             )
         elif pr_body is not None:
             result = check_files(
@@ -2774,6 +3005,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 structural=args.structural,
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
+                exclude=args.exclude,
             )
         elif not sys.stdin.isatty():
             diff_text = sys.stdin.read()
@@ -2790,6 +3022,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 structural=args.structural,
                 strict_structural=args.strict_structural,
                 learned_rules=args.learned_rules,
+                exclude=args.exclude,
             )
         else:
             parser.error("Provide --diff, --files / PATH, --pr-body/--pr-body-file, or pipe a unified diff on stdin.")

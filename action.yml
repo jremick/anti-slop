@@ -53,6 +53,10 @@ inputs:
     description: 'Optional path to an approved anti-slop-learn rules JSON store (passes --learned-rules).'
     required: false
     default: ''
+  exclude:
+    description: 'Optional whitespace- or newline-separated glob patterns of paths to skip (passes repeatable --exclude; e.g., results/*/artifacts/**).'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -78,6 +82,7 @@ runs:
         INPUT_STRICT_STRUCTURAL: ${{ inputs.strict-structural }}
         INPUT_EXPLAIN: ${{ inputs.explain }}
         INPUT_LEARNED_RULES: ${{ inputs.learned-rules }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
         BASE_REF: ${{ github.base_ref }}
         BASE_SHA: ${{ github.event.pull_request.base.sha }}
         BEFORE_SHA: ${{ github.event.before }}
@@ -106,6 +111,16 @@ runs:
         TRIMMED_LEARNED_RULES="$(printf '%s' "${INPUT_LEARNED_RULES:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
         if [ -n "${TRIMMED_LEARNED_RULES}" ]; then
           ARGS+=(--learned-rules "${TRIMMED_LEARNED_RULES}")
+        fi
+        if [ -n "${INPUT_EXCLUDE:-}" ]; then
+          NORMALIZED_EXCLUDES="$(printf '%s' "${INPUT_EXCLUDE}" | tr '\r\n' '  ')"
+          EXCLUDE_PATTERNS=()
+          read -r -a EXCLUDE_PATTERNS <<< "${NORMALIZED_EXCLUDES}" || true
+          for pat in "${EXCLUDE_PATTERNS[@]}"; do
+            if [ -n "${pat}" ]; then
+              ARGS+=(--exclude "${pat}")
+            fi
+          done
         fi
         if [ "${INPUT_NO_BUDGET}" = "true" ]; then
           ARGS+=(--no-budget)

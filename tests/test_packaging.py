@@ -122,6 +122,7 @@ class PackagingMetadataTests(unittest.TestCase):
             "strict-structural",
             "explain",
             "learned-rules",
+            "exclude",
         )
         for inp in required_inputs:
             with self.subTest(input=inp):
@@ -262,6 +263,45 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertEqual(learned_res.returncode, 1, msg=learned_res.stdout)
             self.assertIn("LEARNED-L-001", learned_res.stderr)
 
+            # 3c. Optional `exclude` input skips matched immutable artifacts/fixtures
+            # without glob-expanding in bash, while non-excluded files still fail cleanly.
+            (repo / "results/pilot-v0.7.0/artifacts/run1").mkdir(parents=True)
+            (repo / "results/pilot-v0.7.0/artifacts/run1/stage-1.md").write_text(
+                "Subject workspace modified `tests/test_promos.py`.\n",
+                encoding="utf-8",
+            )
+            (repo / "benchmarks/sources/sample").mkdir(parents=True)
+            (repo / "benchmarks/sources/sample/fixture.py").write_text(
+                "def run():\n    breakpoint()\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "results", "benchmarks"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "Add benchmark artifacts and fixture"], cwd=repo, check=True)
+
+            without_exclude = _run_action(repo)
+            self.assertEqual(without_exclude.returncode, 1, msg=without_exclude.stdout)
+            self.assertIn("DIFF-BROKEN-DOC-PATH", without_exclude.stderr)
+            self.assertIn("DIFF-DEBUG-LEFTOVER", without_exclude.stderr)
+
+            exclude_spec = "results/*/artifacts/**\nbenchmarks/sources/**\n"
+            with_exclude = _run_action(repo, INPUT_EXCLUDE=exclude_spec)
+            self.assertEqual(with_exclude.returncode, 0, msg=with_exclude.stderr + with_exclude.stdout)
+
+            # Non-excluded file defect in the same commit still fails when exclude is active.
+            (repo / "results/pilot-v0.7.0/artifacts/run1/stage-2.md").write_text(
+                "Isolated transcript mentions `tests/test_refunds.py`.\n",
+                encoding="utf-8",
+            )
+            (repo / "src/real_bug.py").write_text("def fail():\n    breakpoint()\n", encoding="utf-8")
+            subprocess.run(["git", "add", "results", "src/real_bug.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "Add artifact plus non-excluded defect"], cwd=repo, check=True)
+
+            non_excluded_fail = _run_action(repo, INPUT_EXCLUDE=exclude_spec)
+            self.assertEqual(non_excluded_fail.returncode, 1, msg=non_excluded_fail.stdout)
+            self.assertIn("DIFF-DEBUG-LEFTOVER", non_excluded_fail.stderr)
+            self.assertIn("src/real_bug.py", non_excluded_fail.stderr)
+            self.assertNotIn("DIFF-BROKEN-DOC-PATH", non_excluded_fail.stderr)
+
             # 4. Validate workflow tests Python 3.11-3.13 matrix and dogfoods `uses: ./`.
             wf_text = (REPO_ROOT / ".github/workflows/validate.yml").read_text(encoding="utf-8")
             for py_ver in ("'3.11'", "'3.12'", "'3.13'"):
@@ -269,6 +309,8 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertIn("dogfood-action:", wf_text)
             self.assertIn("uses: ./", wf_text)
             self.assertIn("persist-credentials: false", wf_text)
+            self.assertIn("results/*/artifacts/**", wf_text)
+            self.assertIn("benchmarks/sources/**", wf_text)
 
     def test_pre_commit_hooks_yaml_definition(self) -> None:
         hook_cfg = REPO_ROOT / ".pre-commit-hooks.yaml"

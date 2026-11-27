@@ -41,6 +41,9 @@ jobs:
           allow-test-edit: 'true'
           no-budget: 'true'
           check-pr-body: 'true'
+          exclude: |
+            results/*/artifacts/**
+            benchmarks/sources/**
       - name: Run Anti-Slop Diff Gate (files mode)
         uses: ./
         with:

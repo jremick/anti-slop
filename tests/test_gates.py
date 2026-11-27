@@ -1412,6 +1412,124 @@ class GateAssetsIntegrityTests(unittest.TestCase):
         all_md_res = diff_check.check_files(all_md, repo_root=REPO_ROOT, max_files=0)
         self.assertTrue(all_md_res["ok"], msg=all_md_res["errors"])
 
+    def test_diff_check_exclude_globs_in_diff_and_files_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "results/pilot-v0.7.0/artifacts/run1").mkdir(parents=True)
+            (root / "results/a/b/artifacts").mkdir(parents=True)
+            (root / "benchmarks/sources/pkg").mkdir(parents=True)
+            (root / "src/nested/sub").mkdir(parents=True)
+
+            # Excluded files containing broken repo paths and debug leftovers.
+            artifact_md = root / "results/pilot-v0.7.0/artifacts/run1/stage-1.md"
+            artifact_md.write_text("Isolated workspace edited `tests/test_promos.py`.\n", encoding="utf-8")
+            source_py = root / "benchmarks/sources/pkg/fixture.py"
+            source_py.write_text("def run():\n    breakpoint()\n", encoding="utf-8")
+
+            # Non-excluded files:
+            # 1) results/pilot-v0.7.0/README.md (not under artifacts/)
+            # 2) results/a/b/artifacts/note.md (single '*' must not cross '/')
+            # 3) src/app.py (real production code)
+            readme_md = root / "results/pilot-v0.7.0/README.md"
+            readme_md.write_text("Broken doc link `src/does_not_exist.py`.\n", encoding="utf-8")
+            deep_md = root / "results/a/b/artifacts/note.md"
+            deep_md.write_text("Broken doc link `src/also_missing.py`.\n", encoding="utf-8")
+            app_py = root / "src/app.py"
+            app_py.write_text("def run():\n    breakpoint()\n", encoding="utf-8")
+            nested_py = root / "src/nested/sub/gen.py"
+            nested_py.write_text("def run():\n    breakpoint()\n", encoding="utf-8")
+
+            excludes = ["results/*/artifacts/**", "benchmarks/sources/**", "src/**/gen.py"]
+
+            # 1. check_files skips matched paths (including '**' matching nested dirs).
+            excluded_only_res = diff_check.check_files(
+                [
+                    "results/pilot-v0.7.0/artifacts/run1/stage-1.md",
+                    "benchmarks/sources/pkg/fixture.py",
+                    "src/nested/sub/gen.py",
+                ],
+                repo_root=root,
+                exclude=excludes,
+            )
+            self.assertTrue(excluded_only_res["ok"], msg=excluded_only_res["errors"])
+            self.assertEqual(excluded_only_res["stats"]["files_changed"], 0)
+
+            # Non-excluded paths still fail cleanly in check_files.
+            mixed_files_res = diff_check.check_files(
+                [
+                    "results/pilot-v0.7.0/artifacts/run1/stage-1.md",
+                    "benchmarks/sources/pkg/fixture.py",
+                    "results/pilot-v0.7.0/README.md",
+                    "results/a/b/artifacts/note.md",
+                    "src/app.py",
+                ],
+                repo_root=root,
+                exclude=excludes,
+            )
+            self.assertFalse(mixed_files_res["ok"])
+            flagged_files = {e.get("file") for e in mixed_files_res["errors"]}
+            self.assertNotIn("results/pilot-v0.7.0/artifacts/run1/stage-1.md", flagged_files)
+            self.assertNotIn("benchmarks/sources/pkg/fixture.py", flagged_files)
+            self.assertEqual(
+                flagged_files,
+                {"results/pilot-v0.7.0/README.md", "results/a/b/artifacts/note.md", "src/app.py"},
+            )
+
+            # 2. check_diff skips excluded sections (and excludes them from stats/budgets),
+            # while still flagging non-excluded files and preserving structural checks on them.
+            excluded_diff = (
+                "diff --git a/results/pilot-v0.7.0/artifacts/run1/stage-1.md b/results/pilot-v0.7.0/artifacts/run1/stage-1.md\n"
+                "new file mode 100644\n"
+                "--- /dev/null\n"
+                "+++ b/results/pilot-v0.7.0/artifacts/run1/stage-1.md\n"
+                "@@ -0,0 +1,1 @@\n"
+                "+Isolated workspace edited `tests/test_promos.py`.\n"
+                "diff --git a/benchmarks/sources/pkg/fixture.py b/benchmarks/sources/pkg/fixture.py\n"
+                "new file mode 100644\n"
+                "--- /dev/null\n"
+                "+++ b/benchmarks/sources/pkg/fixture.py\n"
+                "@@ -0,0 +1,2 @@\n"
+                "+def run():\n"
+                "+    breakpoint()\n"
+            )
+            self.assertFalse(diff_check.check_diff(excluded_diff, repo_root=root)["ok"])
+            diff_ok = diff_check.check_diff(excluded_diff, repo_root=root, exclude=excludes)
+            self.assertTrue(diff_ok["ok"], msg=diff_ok["errors"])
+            self.assertEqual(diff_ok["stats"]["files_changed"], 0)
+
+            mixed_diff = (
+                excluded_diff
+                + "diff --git a/src/app.py b/src/app.py\n"
+                "new file mode 100644\n"
+                "--- /dev/null\n"
+                "+++ b/src/app.py\n"
+                "@@ -0,0 +1,2 @@\n"
+                "+def run():\n"
+                "+    breakpoint()\n"
+            )
+            diff_mixed = diff_check.check_diff(mixed_diff, repo_root=root, exclude=excludes)
+            self.assertFalse(diff_mixed["ok"])
+            self.assertEqual({e.get("file") for e in diff_mixed["errors"]}, {"src/app.py"})
+            self.assertEqual({e["code"] for e in diff_mixed["errors"]}, {"DIFF-DEBUG-LEFTOVER"})
+            self.assertEqual(diff_mixed["stats"]["files_changed"], 1)
+
+            # 3. Repeatable CLI --exclude works end-to-end.
+            diff_file = root / "mixed.diff"
+            diff_file.write_text(excluded_diff, encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    sys.executable, "-B", str(REPO_ROOT / "gates/diff_check.py"),
+                    "--diff", str(diff_file),
+                    "--repo-root", str(root),
+                    "--exclude", "results/*/artifacts/**",
+                    "--exclude", "benchmarks/sources/**",
+                    "--json",
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+            self.assertTrue(json.loads(proc.stdout)["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
