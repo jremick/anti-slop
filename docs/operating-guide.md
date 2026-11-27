@@ -20,6 +20,14 @@ Material means that an error, omission or ambiguity could change the user's deci
 
 For code, derive expected behaviour from the requirement and existing contract. Tests that merely assert the generated implementation's current output are weak evidence; never edit or weaken tests to fit broken code. Use a targeted negative case, automated grader (`benchmarks/graders/`), or pre-fix failure when practical and valuable. Do not create test suites for cosmetic changes.
 
+### 3-tier verification hierarchy
+
+When verifying AI-generated code, weight evidence by how hard it is to fake (see [Rule 2 in docs/ai-era-rules.md](ai-era-rules.md#2-tests-and-verification-follow-the-3-tier-ai-era-verification-hierarchy) and [docs/evidence.md](evidence.md#ext-13)):
+
+1. **Tier 1 (Strongest for apps, services, and UIs): live end-to-end / real-artifact functional proof.** Run the real application, CLI, API server, or browser against real inputs and record observable output, exit status, HTTP response, state change, or screenshot. Compositional bugs frequently slip past isolated visible unit tests ([docs/evidence.md#ext-12](evidence.md#ext-12)).
+2. **Tier 2 (Strong for logic and libraries): real-code behavioral or property tests + diff-scoped mutation testing.** Exercise real code paths without mocking the system under test, and run diff-scoped AST mutation testing (`anti-slop-mutate` via [gates/mutate.py](../gates/mutate.py)) on changed lines to expose weak assertions without whole-repo noise ([docs/evidence.md#ext-13](evidence.md#ext-13)).
+3. **Tier 3 (Weakest; watch for test theater): same-turn isolated, heavily-mocked unit tests.** Coding agents over-mock tests at higher rates than humans ([docs/evidence.md#ext-13](evidence.md#ext-13)); treat passing same-turn mocked unit tests as insufficient on their own for non-trivial changes unless backed by Tier 1 or Tier 2 proof.
+
 For prose, check preservation of facts, uncertainty and the intended action before checking tone. For visual work, inspect the rendered result against the brief and supplied design references.
 
 ## Prevent errors from becoming authoritative context
