@@ -97,6 +97,19 @@ def main() -> int:
             "validate",
         ],
         [
+            sys.executable, "-B", "scripts/benchmark.py",
+            "--pilot", "benchmarks/pilot-comments-v0.7.0.json",
+            "validate",
+        ],
+        [
+            sys.executable, "-B", "benchmarks/graders/grade_cm1.py",
+            "--check-ablation-fixtures",
+        ],
+        [
+            sys.executable, "-B", "-c",
+            "import json; from gates.learn import validate_library_catalog; print(json.dumps(validate_library_catalog()))",
+        ],
+        [
             sys.executable, "-B", "-m", "unittest", "discover",
             "-s", "tests", "-p", "test_*.py", "-v",
         ],

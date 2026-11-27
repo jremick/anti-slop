@@ -26,11 +26,13 @@ import argparse
 from datetime import datetime, timezone
 import fnmatch
 import hashlib
+import importlib.resources
 import io
 import json
 from pathlib import Path
 import re
 import sys
+import tempfile
 import tokenize
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -42,8 +44,15 @@ from gates import diff_check as _dc  # noqa: E402
 
 
 SCHEMA_VERSION = 1
+LIBRARY_SCHEMA_VERSION = 1
 DEFAULT_STORE_REL = ".anti-slop/learned/rules.json"
 VALID_LAYERS = ("deterministic_check", "codebase_example", "prompt_rule")
+VALID_LIBRARY_LAYERS = ("deterministic_check", "prompt_rule")
+VALID_EVIDENCE_STATUSES = (
+    "External empirical study",
+    "Local measured",
+    "Practitioner hypothesis",
+)
 VALID_SEVERITIES = ("warning", "error")
 VALID_MATCH_MODES = ("line", "multiline")
 MAX_PROMPT_RULE_WORDS = 45
@@ -1134,6 +1143,571 @@ def export_approved_prompt_rules(store_path: Path | str) -> str:
     return header + "\n".join(lines) + "\n"
 
 
+def _default_library_catalog_path() -> Optional[Path]:
+    candidate = Path(__file__).resolve().parents[1] / "library" / "catalog.json"
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def load_library_catalog(catalog_path: Optional[Path | str] = None) -> Dict[str, Any]:
+    """Load the curated optional rule library catalog (repo checkout or packaged wheel)."""
+    raw_text: Optional[str] = None
+    source_label = "library/catalog.json"
+    if catalog_path is not None:
+        p = Path(catalog_path)
+        source_label = str(p)
+        try:
+            raw_text = p.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise LearnError(f"Failed to read library catalog {p}: {exc}") from exc
+    else:
+        local = _default_library_catalog_path()
+        if local is not None:
+            source_label = str(local)
+            try:
+                raw_text = local.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise LearnError(f"Failed to read library catalog {local}: {exc}") from exc
+        else:
+            try:
+                resource = importlib.resources.files("library").joinpath("catalog.json")
+                raw_text = resource.read_text(encoding="utf-8")
+            except (ModuleNotFoundError, FileNotFoundError, OSError, AttributeError) as exc:
+                raise LearnError(f"Unable to locate packaged library/catalog.json: {exc}") from exc
+
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        raise LearnError(f"Invalid JSON in library catalog {source_label}: {exc}") from exc
+    if not isinstance(data, dict) or data.get("schema_version") != LIBRARY_SCHEMA_VERSION:
+        raise LearnError(
+            f"Unsupported library catalog schema_version in {source_label} "
+            f"(expected {LIBRARY_SCHEMA_VERSION})."
+        )
+    if not isinstance(data.get("optional_packs"), list):
+        raise LearnError(f"Library catalog {source_label} is missing optional_packs list.")
+    return data
+
+
+def validate_library_catalog(
+    catalog: Optional[Dict[str, Any]] = None,
+    *,
+    catalog_path: Optional[Path | str] = None,
+) -> Dict[str, Any]:
+    """Validate library/catalog.json schema, unique IDs, prompt limits, and self-tests."""
+    data = catalog if catalog is not None else load_library_catalog(catalog_path)
+    errors: List[str] = []
+
+    if data.get("schema_version") != LIBRARY_SCHEMA_VERSION:
+        errors.append(f"schema_version must be {LIBRARY_SCHEMA_VERSION}.")
+
+    default_core = data.get("default_core")
+    if not isinstance(default_core, dict):
+        errors.append("default_core must be an object.")
+    else:
+        for req_key in (
+            "summary",
+            "selection_criteria",
+            "layer_a_diff_checks",
+            "layer_b_structural_checks",
+            "standing_core_rules",
+        ):
+            if not default_core.get(req_key):
+                errors.append(f"default_core.{req_key} must be non-empty.")
+
+    packs = data.get("optional_packs")
+    if not isinstance(packs, list) or not packs:
+        errors.append("optional_packs must be a non-empty list.")
+        packs = []
+
+    seen_pack_ids: Set[str] = set()
+    seen_rule_ids: Set[str] = set()
+    det_count = 0
+    prompt_count = 0
+
+    for p_idx, pack in enumerate(packs):
+        if not isinstance(pack, dict):
+            errors.append(f"optional_packs[{p_idx}] must be an object.")
+            continue
+        pack_id = str(pack.get("id") or "").strip()
+        if not pack_id:
+            errors.append(f"optional_packs[{p_idx}].id must be non-empty.")
+            continue
+        norm_pack = pack_id.lower()
+        if norm_pack in seen_pack_ids:
+            errors.append(f"Duplicate optional pack id '{pack_id}'.")
+        seen_pack_ids.add(norm_pack)
+        for p_field in ("name", "description", "when_to_enable"):
+            if not str(pack.get(p_field) or "").strip():
+                errors.append(f"Pack '{pack_id}' missing non-empty '{p_field}'.")
+        rules = pack.get("rules")
+        if not isinstance(rules, list) or not rules:
+            errors.append(f"Pack '{pack_id}' must contain at least one rule.")
+            continue
+
+        for r_idx, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                errors.append(f"Pack '{pack_id}' rules[{r_idx}] must be an object.")
+                continue
+            rid = str(rule.get("id") or "").strip()
+            if not rid or not rid.startswith("OPT-"):
+                errors.append(f"Pack '{pack_id}' rules[{r_idx}] id '{rid}' must start with 'OPT-'.")
+            norm_rid = rid.upper()
+            if norm_rid in seen_rule_ids:
+                errors.append(f"Duplicate optional rule id '{rid}'.")
+            seen_rule_ids.add(norm_rid)
+            if str(rule.get("pack") or "").strip() != pack_id:
+                errors.append(f"Rule '{rid}' pack '{rule.get('pack')}' does not match '{pack_id}'.")
+
+            for req_str in (
+                "title",
+                "file_glob",
+                "remediation",
+                "bad_example",
+                "valid_neighbouring_case",
+                "why_optional",
+                "evidence_ref",
+                "retirement_trigger",
+            ):
+                if not str(rule.get(req_str) or "").strip():
+                    errors.append(f"Rule '{rid}' missing non-empty '{req_str}'.")
+
+            bad_ex = str(rule.get("bad_example") or "")
+            valid_ex = str(rule.get("valid_neighbouring_case") or "")
+            if bad_ex.strip() and bad_ex.strip() == valid_ex.strip():
+                errors.append(f"Rule '{rid}' bad_example and valid_neighbouring_case must differ.")
+
+            severity = str(rule.get("severity") or "")
+            if severity not in VALID_SEVERITIES:
+                errors.append(f"Rule '{rid}' invalid severity '{severity}'.")
+
+            ev_status = str(rule.get("evidence_status") or "")
+            if ev_status not in VALID_EVIDENCE_STATUSES:
+                errors.append(
+                    f"Rule '{rid}' invalid evidence_status '{ev_status}' "
+                    f"(expected one of {', '.join(VALID_EVIDENCE_STATUSES)})."
+                )
+
+            layer = str(rule.get("layer") or "")
+            if layer not in VALID_LIBRARY_LAYERS:
+                errors.append(f"Rule '{rid}' invalid layer '{layer}'.")
+                continue
+
+            if layer == "deterministic_check":
+                det_count += 1
+                pattern = str(rule.get("pattern") or "")
+                match_mode = str(rule.get("match_mode") or "line")
+                if match_mode not in VALID_MATCH_MODES:
+                    errors.append(f"Rule '{rid}' invalid match_mode '{match_mode}'.")
+                    continue
+                try:
+                    compiled = _validate_regex_pattern(pattern, match_mode)
+                except LearnError as exc:
+                    errors.append(f"Rule '{rid}' invalid pattern: {exc}")
+                    continue
+                bad_hits = _find_pattern_hits_in_text(bad_ex, compiled, match_mode)
+                valid_hits = _find_pattern_hits_in_text(valid_ex, compiled, match_mode)
+                if not bad_hits:
+                    errors.append(f"Rule '{rid}' pattern failed to catch its own bad_example.")
+                if valid_hits:
+                    errors.append(
+                        f"Rule '{rid}' pattern falsely matched its own valid_neighbouring_case "
+                        f"({len(valid_hits)} hit(s))."
+                    )
+            else:
+                prompt_count += 1
+                rule_text = str(rule.get("rule_text") or "")
+                wc = _word_count(rule_text)
+                if not rule_text.strip():
+                    errors.append(f"Rule '{rid}' prompt_rule requires non-empty rule_text.")
+                elif wc > MAX_PROMPT_RULE_WORDS:
+                    errors.append(
+                        f"Rule '{rid}' prompt_rule is {wc} words (max {MAX_PROMPT_RULE_WORDS})."
+                    )
+                if not str(rule.get("why_not_deterministic") or "").strip():
+                    errors.append(f"Rule '{rid}' prompt_rule requires non-empty why_not_deterministic.")
+
+    excluded = data.get("excluded_considered")
+    if not isinstance(excluded, list) or not excluded:
+        errors.append("excluded_considered must be a non-empty list.")
+        excluded = []
+    seen_excl_ids: Set[str] = set()
+    for e_idx, item in enumerate(excluded):
+        if not isinstance(item, dict):
+            errors.append(f"excluded_considered[{e_idx}] must be an object.")
+            continue
+        eid = str(item.get("id") or "").strip()
+        if not eid or not eid.startswith("EXCL-"):
+            errors.append(f"excluded_considered[{e_idx}] id '{eid}' must start with 'EXCL-'.")
+        if eid.upper() in seen_excl_ids:
+            errors.append(f"Duplicate excluded id '{eid}'.")
+        seen_excl_ids.add(eid.upper())
+        for e_field in ("title", "category", "why_excluded", "evidence_ref", "what_we_do_instead"):
+            if not str(item.get(e_field) or "").strip():
+                errors.append(f"Excluded '{eid}' missing non-empty '{e_field}'.")
+        ev_status = str(item.get("evidence_status") or "")
+        if ev_status not in VALID_EVIDENCE_STATUSES:
+            errors.append(f"Excluded '{eid}' invalid evidence_status '{ev_status}'.")
+
+    if errors:
+        raise LearnError("Library catalog validation failed:\n- " + "\n- ".join(errors))
+
+    return {
+        "ok": True,
+        "packs": len(packs),
+        "rules": len(seen_rule_ids),
+        "deterministic_rules": det_count,
+        "prompt_rules": prompt_count,
+        "excluded": len(seen_excl_ids),
+    }
+
+
+def list_library_catalog(catalog_path: Optional[Path | str] = None) -> Dict[str, Any]:
+    """Return structured summary of default core, optional packs, and excluded items."""
+    data = load_library_catalog(catalog_path)
+    default_core = data.get("default_core") or {}
+    packs_out: List[Dict[str, Any]] = []
+    for pack in data.get("optional_packs") or []:
+        packs_out.append({
+            "id": pack["id"],
+            "name": pack["name"],
+            "description": pack["description"],
+            "when_to_enable": pack["when_to_enable"],
+            "rules": [
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "layer": r["layer"],
+                    "severity": r["severity"],
+                    "evidence_status": r["evidence_status"],
+                    "file_glob": r["file_glob"],
+                }
+                for r in pack.get("rules") or []
+            ],
+        })
+    return {
+        "schema_version": data["schema_version"],
+        "catalog_version": data.get("catalog_version", ""),
+        "default_core": {
+            "layer_a_count": len(default_core.get("layer_a_diff_checks") or []),
+            "layer_b_count": len(default_core.get("layer_b_structural_checks") or []),
+            "standing_rules_count": len(
+                (default_core.get("standing_core_rules") or {}).get("rules") or []
+            ),
+        },
+        "optional_packs": packs_out,
+        "excluded_count": len(data.get("excluded_considered") or []),
+    }
+
+
+def show_library_item(
+    target: str,
+    *,
+    catalog_path: Optional[Path | str] = None,
+) -> Dict[str, Any]:
+    """Resolve a pack ID, OPT-* rule ID, or EXCL-* excluded ID from library/catalog.json."""
+    needle = target.strip()
+    if not needle:
+        raise LearnError("Provide a pack ID (e.g. network-timeouts) or rule ID (e.g. OPT-NET-01).")
+    data = load_library_catalog(catalog_path)
+    lower = needle.lower()
+    upper = needle.upper()
+
+    pack_ids: List[str] = []
+    for pack in data.get("optional_packs") or []:
+        pack_ids.append(pack["id"])
+        if str(pack["id"]).lower() == lower:
+            return {
+                "kind": "pack",
+                "pack": pack,
+                "rules": list(pack.get("rules") or []),
+            }
+        for rule in pack.get("rules") or []:
+            if str(rule["id"]).upper() == upper:
+                return {
+                    "kind": "rule",
+                    "pack": {
+                        "id": pack["id"],
+                        "name": pack["name"],
+                        "description": pack["description"],
+                    },
+                    "rule": rule,
+                    "rules": [rule],
+                }
+
+    for item in data.get("excluded_considered") or []:
+        if str(item["id"]).upper() == upper:
+            return {"kind": "excluded", "item": item}
+
+    raise LearnError(
+        f"Library target '{target}' not found. Available packs: {', '.join(pack_ids)}."
+    )
+
+
+def _active_library_rule_map(data: Dict[str, Any]) -> Dict[str, str]:
+    """Map active approved library rule IDs (OPT-*) to their learned store ID (L-xxx)."""
+    active: Dict[str, str] = {}
+    for entry in data.get("rules") or []:
+        if not _is_valid_approved_entry(entry):
+            continue
+        lib_id = entry.get("library_rule_id")
+        if not lib_id:
+            ctx = str((entry.get("captured") or {}).get("source_context") or "")
+            if ctx.startswith("library:") and "/" in ctx:
+                lib_id = ctx.rsplit("/", 1)[-1]
+        if lib_id:
+            active[str(lib_id).upper()] = str(entry["id"])
+    return active
+
+
+def enable_library_rules(
+    store_path: Path | str,
+    target: str,
+    *,
+    approved_by: str,
+    repo_root: Path | str = ".",
+    max_repo_hits: int = 0,
+    include_tests_in_scan: bool = False,
+    dry_run: bool = False,
+    catalog_path: Optional[Path | str] = None,
+) -> Dict[str, Any]:
+    """Import, 3-way verify, and human-approve an optional pack or OPT-* rule into store_path.
+
+    Never bypasses verification: every imported rule runs through capture_pattern ->
+    propose_prevention -> verify_rule -> approve_rule on a staged store copy, and
+    store_path is updated only if every requested rule passes verification (and dry_run is False).
+    """
+    if not approved_by.strip():
+        raise LearnError("Enabling optional library rules requires a non-empty --by approver.")
+    if isinstance(max_repo_hits, bool) or max_repo_hits < 0:
+        raise LearnError("max_repo_hits must be a non-negative integer.")
+
+    resolved = show_library_item(target, catalog_path=catalog_path)
+    if resolved["kind"] == "excluded":
+        item = resolved["item"]
+        raise LearnError(
+            f"{item['id']} ({item['title']}) is in excluded_considered and cannot be enabled via library enable."
+        )
+
+    store = Path(store_path)
+    current_data = load_store(store)
+    active_map = _active_library_rule_map(current_data)
+    rules_to_process: List[Dict[str, Any]] = list(resolved["rules"])
+
+    results: List[Dict[str, Any]] = []
+    all_passed = True
+    newly_verified_count = 0
+
+    with tempfile.TemporaryDirectory(prefix="antislop_lib_") as tmp_dir:
+        staged_store = Path(tmp_dir) / "rules.json"
+        save_store(staged_store, current_data)
+
+        for rule in rules_to_process:
+            rid = str(rule["id"])
+            existing_lid = active_map.get(rid.upper())
+            if existing_lid is not None:
+                results.append({
+                    "library_rule_id": rid,
+                    "pack": rule["pack"],
+                    "learned_id": existing_lid,
+                    "title": rule["title"],
+                    "layer": rule["layer"],
+                    "status": "skipped_already_active",
+                    "passed": True,
+                    "verification": None,
+                })
+                continue
+
+            cap_entry = capture_pattern(
+                staged_store,
+                title=f"[{rid}] {rule['title']}",
+                bad_example=str(rule["bad_example"]),
+                desired_outcome=str(rule["remediation"]),
+                valid_neighbouring_case=str(rule["valid_neighbouring_case"]),
+                why_it_matters=str(rule["why_optional"]),
+                file_glob=str(rule["file_glob"]),
+                source_context=f"library:{rule['pack']}/{rid}",
+            )
+            staged_data = load_store(staged_store)
+            staged_entry = _find_rule(staged_data, cap_entry["id"])
+            staged_entry["library_rule_id"] = rid
+            staged_entry["library_pack"] = rule["pack"]
+            save_store(staged_store, staged_data)
+
+            propose_prevention(
+                staged_store,
+                cap_entry["id"],
+                layer=str(rule["layer"]),
+                severity=str(rule["severity"]),
+                file_glob=str(rule["file_glob"]),
+                pattern=rule.get("pattern"),
+                match_mode=str(rule.get("match_mode") or "line"),
+                rule_text=rule.get("rule_text"),
+                why_not_deterministic=rule.get("why_not_deterministic"),
+                remediation=str(rule["remediation"]),
+                retirement_trigger=str(rule["retirement_trigger"]),
+            )
+            ver_entry = verify_rule(
+                staged_store,
+                cap_entry["id"],
+                repo_root=repo_root,
+                max_repo_hits=max_repo_hits,
+                include_tests_in_scan=include_tests_in_scan,
+            )
+            verif = ver_entry["verification"]
+            if verif["passed"]:
+                app_entry = approve_rule(
+                    staged_store,
+                    cap_entry["id"],
+                    approved_by=approved_by,
+                    note=f"Enabled from optional library ({rule['pack']}/{rid}).",
+                )
+                newly_verified_count += 1
+                results.append({
+                    "library_rule_id": rid,
+                    "pack": rule["pack"],
+                    "learned_id": app_entry["id"],
+                    "title": rule["title"],
+                    "layer": rule["layer"],
+                    "status": "would_enable" if dry_run else "enabled",
+                    "passed": True,
+                    "verification": app_entry["verification"],
+                })
+            else:
+                all_passed = False
+                results.append({
+                    "library_rule_id": rid,
+                    "pack": rule["pack"],
+                    "learned_id": None,
+                    "title": rule["title"],
+                    "layer": rule["layer"],
+                    "status": "verification_failed",
+                    "passed": False,
+                    "verification": verif,
+                })
+
+        if all_passed and not dry_run and newly_verified_count > 0:
+            save_store(store, load_store(staged_store))
+        elif not all_passed:
+            for item in results:
+                if item["status"] in ("enabled", "would_enable"):
+                    item["status"] = "verified_not_saved"
+                    item["learned_id"] = None
+
+    return {
+        "ok": all_passed,
+        "target": target,
+        "kind": resolved["kind"],
+        "dry_run": dry_run,
+        "store_path": str(store),
+        "enabled_count": sum(1 for r in results if r["status"] in ("enabled", "would_enable")),
+        "skipped_count": sum(1 for r in results if r["status"] == "skipped_already_active"),
+        "failed_count": sum(1 for r in results if not r["passed"]),
+        "results": results,
+    }
+
+
+def _format_library_list(summary: Dict[str, Any]) -> str:
+    dc = summary["default_core"]
+    lines = [
+        f"Optional Rule Library (v{summary.get('catalog_version') or '1'})",
+        (
+            f"Default core: {dc['layer_a_count']} Layer A diff checks, "
+            f"{dc['layer_b_count']} Layer B structural checks, "
+            f"{dc['standing_rules_count']} core rules | "
+            f"Deliberately excluded: {summary['excluded_count']}"
+        ),
+        "",
+        "PACK                     RULE ID     LAYER                SEVERITY  EVIDENCE STATUS           TITLE",
+        "-----------------------  ----------  -------------------  --------  ------------------------  ------------------------------",
+    ]
+    for pack in summary["optional_packs"]:
+        for r in pack["rules"]:
+            lines.append(
+                f"{pack['id']:<23}  {r['id']:<10}  {r['layer']:<19}  "
+                f"{r['severity']:<8}  {r['evidence_status']:<24}  {r['title']}"
+            )
+    lines.append("")
+    lines.append("Inspect a pack or rule: anti-slop-learn library show <pack-or-rule-id>")
+    lines.append("Enable with 3-way check: anti-slop-learn library enable <pack-or-rule-id> --by <your-name>")
+    return "\n".join(lines)
+
+
+def _format_library_show(resolved: Dict[str, Any]) -> str:
+    if resolved["kind"] == "excluded":
+        item = resolved["item"]
+        return "\n".join([
+            f"{item['id']} (DELIBERATELY EXCLUDED): {item['title']}",
+            f"  Category:        {item['category']}",
+            f"  Evidence status: {item['evidence_status']} ({item['evidence_ref']})",
+            f"  Why excluded:    {item['why_excluded']}",
+            f"  Instead:         {item['what_we_do_instead']}",
+        ])
+
+    lines: List[str] = []
+    pack = resolved["pack"]
+    if resolved["kind"] == "pack":
+        lines.append(f"Pack: {pack['id']} ({pack['name']})")
+        lines.append(f"  Description:    {pack['description']}")
+        lines.append(f"  When to enable: {pack['when_to_enable']}")
+        lines.append("")
+
+    for rule in resolved["rules"]:
+        lines.append(f"Rule {rule['id']} ({rule['title']})")
+        lines.append(f"  Pack:            {rule['pack']}")
+        lines.append(f"  Layer / Sev:     {rule['layer']} / {rule['severity']} (glob: {rule['file_glob']})")
+        lines.append(f"  Evidence status: {rule['evidence_status']} ({rule['evidence_ref']})")
+        if rule["layer"] == "deterministic_check":
+            lines.append(f"  Pattern:         {rule['pattern']}")
+        else:
+            wc = _word_count(str(rule.get("rule_text") or ""))
+            lines.append(f"  Rule text ({wc}w): {rule['rule_text']}")
+            lines.append(f"  Why not det.:    {rule['why_not_deterministic']}")
+        lines.append(f"  Why optional:    {rule['why_optional']}")
+        lines.append(f"  Remediation:     {rule['remediation']}")
+        lines.append(f"  Retire trigger:  {rule['retirement_trigger']}")
+        lines.append("  Bad example:")
+        for ln in str(rule["bad_example"]).rstrip("\n").splitlines():
+            lines.append(f"    | {ln}")
+        lines.append("  Valid neighbouring case:")
+        for ln in str(rule["valid_neighbouring_case"]).rstrip("\n").splitlines():
+            lines.append(f"    | {ln}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+def _format_library_enable(result: Dict[str, Any]) -> str:
+    mode = " [dry-run]" if result["dry_run"] else ""
+    header_status = "PASSED" if result["ok"] else "FAILED"
+    lines = [f"Library enable {header_status}{mode} for '{result['target']}':"]
+    for item in result["results"]:
+        lid = f" -> {item['learned_id']}" if item["learned_id"] else ""
+        lines.append(
+            f"  - {item['library_rule_id']}{lid} [{item['status']}]: {item['title']} ({item['layer']})"
+        )
+        verif = item.get("verification")
+        if isinstance(verif, dict) and not item["passed"]:
+            if verif.get("mechanical"):
+                lines.append(
+                    f"      bad_case_caught={verif['bad_case_caught']} "
+                    f"valid_neighbour_clean={verif['valid_neighbour_clean']} "
+                    f"repo_scan_hits={verif['repo_scan_hits']}/{verif['max_repo_hits']} "
+                    f"across {verif['repo_scan_files']} file(s)"
+                )
+                for sample in verif.get("repo_sample_hits") or []:
+                    lines.append(f"      hit: {sample}")
+            for note in verif.get("notes") or []:
+                lines.append(f"      {note}")
+    if not result["ok"]:
+        lines.append(
+            "No rules were saved because verification failed. Fix existing matches, "
+            "enable a single OPT-* rule ID, or re-run with --max-repo-hits N."
+        )
+    return "\n".join(lines)
+
+
 def _read_text_arg(inline: Optional[str], file_path: Optional[str], label: str) -> str:
     if file_path is not None:
         try:
@@ -1240,6 +1814,45 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_chk.add_argument("--files", nargs="+", default=None, help="Files to inspect directly.")
 
     sub.add_parser("export-prompt", parents=[common], help="Export approved prompt_rule / codebase_example entries.")
+
+    p_lib = sub.add_parser(
+        "library",
+        parents=[common],
+        help="Browse, inspect, and selectively enable curated optional rule packs.",
+    )
+    lib_sub = p_lib.add_subparsers(dest="library_command", required=True)
+    lib_sub.add_parser("list", parents=[common], help="List available optional packs and rules.")
+
+    p_lib_show = lib_sub.add_parser(
+        "show",
+        parents=[common],
+        help="Show examples, valid neighbour, why optional, and evidence status for a pack or rule ID.",
+    )
+    p_lib_show.add_argument("target", help="Pack ID (e.g., network-timeouts), OPT-* rule ID, or EXCL-* ID.")
+
+    p_lib_en = lib_sub.add_parser(
+        "enable",
+        parents=[common],
+        help="Import, run full 3-way verification, and approve an optional pack or OPT-* rule.",
+    )
+    p_lib_en.add_argument("target", help="Pack ID (e.g., network-timeouts) or OPT-* rule ID.")
+    p_lib_en.add_argument("--by", required=True, help="Human reviewer approving the enabled rule(s).")
+    p_lib_en.add_argument(
+        "--max-repo-hits",
+        type=int,
+        default=0,
+        help="Max tolerated hits in existing repository files (default: 0).",
+    )
+    p_lib_en.add_argument(
+        "--include-tests",
+        action="store_true",
+        help="Include test files in existing-repository scan.",
+    )
+    p_lib_en.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run full 3-way verification without modifying the learned-rule store.",
+    )
 
     args = parser.parse_args(argv)
     store_path = Path(args.store) if args.store else default_store_path(args.repo_root)
@@ -1417,6 +2030,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else:
                 print("No approved prompt_rule or codebase_example entries.")
             return 0
+
+        if args.command == "library":
+            if args.library_command == "list":
+                summary = list_library_catalog()
+                if args.emit_json:
+                    print(json.dumps(summary, indent=2))
+                else:
+                    print(_format_library_list(summary))
+                return 0
+
+            if args.library_command == "show":
+                resolved = show_library_item(args.target)
+                if args.emit_json:
+                    print(json.dumps(resolved, indent=2))
+                else:
+                    print(_format_library_show(resolved))
+                return 0
+
+            if args.library_command == "enable":
+                res = enable_library_rules(
+                    store_path,
+                    args.target,
+                    approved_by=args.by,
+                    repo_root=args.repo_root,
+                    max_repo_hits=args.max_repo_hits,
+                    include_tests_in_scan=args.include_tests,
+                    dry_run=args.dry_run,
+                )
+                if args.emit_json:
+                    print(json.dumps(res, indent=2))
+                else:
+                    print(_format_library_enable(res))
+                return 0 if res["ok"] else 1
 
     except LearnError as exc:
         if args.emit_json:

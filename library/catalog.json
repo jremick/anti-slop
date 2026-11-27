@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "catalog_version": "0.7.0",
+  "default_core": {
+    "summary": "Default checks cover only high-frequency AI failure modes with low false-positive rates and high multi-turn compounding risk. Objective checks run deterministically outside the model context window; standing prose stays capped at <= 300 words.",
+    "selection_criteria": [
+      "High observed frequency in coding-agent sessions or public empirical studies.",
+      "Low false-positive rate validated against real production OSS commits.",
+      "Compounding multi-turn risk if left unchecked (future turns imitate shortcuts or dead paths).",
+      "Narrowest prevention layer first: deterministic diff/structural gate -> canonical codebase example -> short standing prompt rule last."
+    ],
+    "layer_a_diff_checks": [
+      {"code": "DIFF-TEST-SKIP", "default_severity": "error", "summary": "Blocks newly added test skip/xfail waivers in test diffs."},
+      {"code": "DIFF-UNAUTHORIZED-TEST-EDIT", "default_severity": "error", "summary": "Blocks edits under tests/ unless --allow-test-edit is explicitly granted."},
+      {"code": "DIFF-STUB-TODO", "default_severity": "error", "summary": "Blocks newly added TODO/FIXME placeholder comments in added lines."},
+      {"code": "DIFF-STUB-NOT-IMPLEMENTED", "default_severity": "error", "summary": "Blocks non-abstract NotImplementedError stubs in added lines."},
+      {"code": "DIFF-STUB-PASS", "default_severity": "error", "summary": "Blocks bare pass placeholders in non-abstract functions."},
+      {"code": "DIFF-SUPPRESSION", "default_severity": "error", "summary": "Blocks blanket lint/type suppression comments without specific rule codes and rationale."},
+      {"code": "DIFF-SILENT-CATCH", "default_severity": "error", "summary": "Blocks bare or broad exception catches that silently pass or return empty literals."},
+      {"code": "DIFF-DEBUG-LEFTOVER", "default_severity": "error", "summary": "Blocks breakpoint(), pdb.set_trace(), and JS debugger leftovers."},
+      {"code": "DIFF-HOST-PATH", "default_severity": "error", "summary": "Blocks hardcoded local workstation home paths (/Users/<name>, /home/<name>, C:\\Users\\<name>)."},
+      {"code": "DIFF-BROKEN-DOC-PATH", "default_severity": "error", "summary": "Blocks backticked repo-relative file paths in Markdown that do not exist."},
+      {"code": "DIFF-CHATBOT-OPENER", "default_severity": "error", "summary": "Blocks conversational chatbot praise openers in docs and PR bodies."},
+      {"code": "DIFF-CHATBOT-CLOSER", "default_severity": "error", "summary": "Blocks trailing chatbot filler sign-offs in docs and PR bodies."},
+      {"code": "DIFF-DECORATIVE-EMOJI", "default_severity": "warning", "summary": "Flags decorative AI emojis outside fenced code blocks (error with --strict-prose)."},
+      {"code": "DIFF-MAX-NET-LOC", "default_severity": "error", "summary": "Enforces configurable net-LOC diff budget (heuristic default 400; disable with --no-budget)."},
+      {"code": "DIFF-MAX-FILES", "default_severity": "error", "summary": "Enforces configurable touched-file diff budget (heuristic default 10; disable with --no-budget)."}
+    ],
+    "layer_b_structural_checks": [
+      {"code": "STRUCT-TEST-THEATER", "default_severity": "warning", "summary": "Flags assertion-free, tautological, or heavily mocked tests lacking real value assertions."},
+      {"code": "STRUCT-SILENT-FALLBACK", "default_severity": "warning", "summary": "Flags broad catches returning silent literals without logging/re-raising and hardcoded defaults on sensitive env vars."},
+      {"code": "STRUCT-DUPLICATE-BLOCK", "default_severity": "warning", "summary": "Flags copy-pasted logic blocks duplicated across production functions or files, including renamed-variable clones."},
+      {"code": "STRUCT-DEAD-COMPAT", "default_severity": "warning", "summary": "Flags unreachable constant-False branches, unreferenced *_legacy/*_compat shims, legacy boolean flags, and orphaned helpers."},
+      {"code": "STRUCT-COMMENTED-CODE", "default_severity": "warning", "summary": "Flags newly added multi-line commented-out code blocks while allowing short why/invariant comments."},
+      {"code": "STRUCT-GOD-FUNCTION", "default_severity": "warning", "summary": "Flags oversized (>60 code lines) or high-branch (>12 branches) functions (heuristic starting thresholds)."},
+      {"code": "STRUCT-GOD-FILE", "default_severity": "warning", "summary": "Flags diffs growing monolithic files beyond 400 code lines (heuristic starting threshold)."},
+      {"code": "STRUCT-SCOPE-SPRAWL", "default_severity": "warning", "summary": "Flags single diffs scattered across more than 3 unrelated production module areas."}
+    ],
+    "standing_core_rules": {
+      "path": "standard/core.md",
+      "version": "0.2.0",
+      "max_words": 300,
+      "rules": [
+        {"id": "R1", "name": "Define done", "focus": "Cover every material requirement; never redefine success to fit output."},
+        {"id": "R2", "name": "Ground claims and premises", "focus": "Verify premises against inspected evidence; distinguish facts from assumptions."},
+        {"id": "R3", "name": "Keep scope simple", "focus": "Reuse sound conventions; avoid speculative abstractions and duplicated logic."},
+        {"id": "R4", "name": "Verify and report accurately", "focus": "Run checks tied to the requirement; never edit or weaken tests to fit broken code."},
+        {"id": "R5", "name": "Remove avoidable burden", "focus": "Cut filler and unnecessary complexity while preserving required caveats."},
+        {"id": "R6", "name": "Preserve trustworthy context", "focus": "Keep canonical sources accurate and correct superseded derivatives."},
+        {"id": "R7", "name": "Learn from defects", "focus": "Fix the defect, keep a reproducible pair, prefer tools over prose, and retire obsolete rules."}
+      ]
+    }
+  },
+  "optional_packs": [
+    {
+      "id": "network-timeouts",
+      "name": "Network Timeouts",
+      "description": "Catch outbound HTTP calls written without explicit timeouts in Python and JS/TS code.",
+      "when_to_enable": "Enable in backend services, CLIs, and workers that make outbound HTTP requests where a hung socket can wedge a worker pool.",
+      "rules": [
+        {
+          "id": "OPT-NET-01",
+          "pack": "network-timeouts",
+          "title": "Python HTTP call without explicit timeout",
+          "layer": "deterministic_check",
+          "severity": "warning",
+          "file_glob": "*.py",
+          "match_mode": "line",
+          "pattern": "\\b(?:requests\\.(?:get|post|put|patch|delete|head|options|request)|urllib\\.request\\.urlopen)\\s*\\((?![^\\n]*\\btimeout\\s*=)[^()\\n]*\\)",
+          "why_not_deterministic": null,
+          "remediation": "Pass an explicit timeout=... argument (for example, timeout=10 or timeout=(3, 10)) so outbound requests fail fast instead of hanging indefinitely.",
+          "bad_example": "resp = requests.get(\"https://api.example.com/v1/health\")\n",
+          "valid_neighbouring_case": "resp = requests.get(\"https://api.example.com/v1/health\", timeout=10)\n",
+          "why_optional": "Internal one-off scripts, local fixture servers, or repositories wrapping a custom HTTPAdapter with default timeouts may intentionally omit per-call timeout arguments.",
+          "evidence_status": "Practitioner hypothesis",
+          "evidence_ref": "docs/operating-guide.md",
+          "retirement_trigger": "Retire once Ruff S113 / Bandit B113 or a project-wide HTTP client wrapper enforces timeouts in CI."
+        },
+        {
+          "id": "OPT-NET-02",
+          "pack": "network-timeouts",
+          "title": "JS/TS fetch() without AbortSignal timeout",
+          "layer": "deterministic_check",
+          "severity": "warning",
+          "file_glob": "*.js,*.jsx,*.ts,*.tsx,*.mjs,*.cjs",
+          "match_mode": "line",
+          "pattern": "(?<![.\\w])fetch\\s*\\((?![^\\n]*\\bsignal\\s*:)[^()\\n]*\\)",
+          "why_not_deterministic": null,
+          "remediation": "Pass a signal option (for example, { signal: AbortSignal.timeout(5000) } or an AbortController signal) so stalled responses abort cleanly.",
+          "bad_example": "const res = await fetch(\"https://api.example.com/v1/items\");\n",
+          "valid_neighbouring_case": "const res = await fetch(\"https://api.example.com/v1/items\", { signal: AbortSignal.timeout(5000) });\n",
+          "why_optional": "Browser UI helpers, local mock handlers, or custom fetch wrappers that inject timeouts centrally may not pass signal: at every call site.",
+          "evidence_status": "Practitioner hypothesis",
+          "evidence_ref": "docs/operating-guide.md",
+          "retirement_trigger": "Retire once an ESLint rule or typed API client wrapper guarantees bounded request timeouts."
+        }
+      ]
+    },
+    {
+      "id": "security-boundaries",
+      "name": "Security Boundaries",
+      "description": "Lightweight diff guards for high-confidence Python execution hazards (shell=True, unsafe yaml.load, raw eval/exec). Complementary to full SAST.",
+      "when_to_enable": "Enable in services handling untrusted inputs or multi-tenant data as a fast local diff guard alongside CI SAST.",
+      "rules": [
+        {
+          "id": "OPT-SEC-01",
+          "pack": "security-boundaries",
+          "title": "Python subprocess call with shell=True",
+          "layer": "deterministic_check",
+          "severity": "error",
+          "file_glob": "*.py",
+          "match_mode": "line",
+          "pattern": "\\bsubprocess\\.(?:run|Popen|call|check_call|check_output)\\s*\\([^\\n]*\\bshell\\s*=\\s*True\\b",
+          "why_not_deterministic": null,
+          "remediation": "Pass an argv list with shell=False (the default) so untrusted inputs cannot trigger shell injection.",
+          "bad_example": "subprocess.run(f\"tar -czf {archive} {src}\", shell=True, check=True)\n",
+          "valid_neighbouring_case": "subprocess.run([\"tar\", \"-czf\", archive, src], shell=False, check=True)\n",
+          "why_optional": "Kept opt-in as a focused guard complementary to full SAST; build/ops wrapper repos sometimes invoke shell pipelines intentionally.",
+          "evidence_status": "External empirical study",
+          "evidence_ref": "docs/evidence.md#ext-12; docs/evidence.md#ext-13",
+          "retirement_trigger": "Retire if repo CI already enforces Bandit B602 or Semgrep subprocess-shell rules on every PR."
+        },
+        {
+          "id": "OPT-SEC-02",
+          "pack": "security-boundaries",
+          "title": "Unsafe yaml.load() without SafeLoader",
+          "layer": "deterministic_check",
+          "severity": "error",
+          "file_glob": "*.py",
+          "match_mode": "line",
+          "pattern": "\\byaml\\.load\\s*\\((?![^\\n]*(?:SafeLoader|CSafeLoader|BaseLoader|CBaseLoader))[^()\\n]*\\)",
+          "why_not_deterministic": null,
+          "remediation": "Use yaml.safe_load(...) or pass Loader=yaml.SafeLoader to prevent arbitrary object deserialization.",
+          "bad_example": "config = yaml.load(raw_text)\n",
+          "valid_neighbouring_case": "config = yaml.load(raw_text, Loader=yaml.SafeLoader)\n",
+          "why_optional": "Only relevant to Python repos using PyYAML; kept optional so non-YAML projects and dedicated SAST pipelines avoid redundant rules.",
+          "evidence_status": "External empirical study",
+          "evidence_ref": "docs/evidence.md#ext-12; docs/evidence.md#ext-13",
+          "retirement_trigger": "Retire once Ruff S506 / Bandit B506 or PyYAML removal makes this check redundant."
+        },
+        {
+          "id": "OPT-SEC-03",
+          "pack": "security-boundaries",
+          "title": "Dynamic eval() or exec() in production Python",
+          "layer": "deterministic_check",
+          "severity": "error",
+          "file_glob": "*.py",
+          "match_mode": "line",
+          "pattern": "(?<![.\\w])(?:eval|exec)\\s*\\(",
+          "why_not_deterministic": null,
+          "remediation": "Replace eval()/exec() with ast.literal_eval(), json.loads(), or an explicit dispatch table.",
+          "bad_example": "parsed = eval(user_payload)\n",
+          "valid_neighbouring_case": "parsed = ast.literal_eval(user_payload)\n",
+          "why_optional": "Code generators, REPL harnesses, and plugin loaders may legitimately use exec(); kept opt-in to preserve low default false positives.",
+          "evidence_status": "External empirical study",
+          "evidence_ref": "docs/evidence.md#ext-12; docs/evidence.md#ext-13",
+          "retirement_trigger": "Retire once Bandit B307/B102 or Ruff S307/S102 enforces this rule in CI."
+        }
+      ]
+    },
+    {
+      "id": "comment-hygiene",
+      "name": "Comment Hygiene",
+      "description": "Short prompt rule reinforcing removal of dead commented-out code and stale/narrating comments while preserving brief non-obvious invariant explanations.",
+      "when_to_enable": "Enable alongside deterministic STRUCT-COMMENTED-CODE in repos with legacy commented-out blocks or subtle domain invariants.",
+      "rules": [
+        {
+          "id": "OPT-CMT-01",
+          "pack": "comment-hygiene",
+          "title": "Delete commented-out code and stale comments; keep brief invariant comments",
+          "layer": "prompt_rule",
+          "severity": "warning",
+          "file_glob": "*",
+          "rule_text": "Delete dead commented-out code and line-by-line narrating or stale comments when editing code. Keep only brief 'why' comments that explain non-obvious external invariants, subtle constraints, or edge-case contracts, and verify any comment against the actual code before relying on it.",
+          "why_not_deterministic": "While STRUCT-COMMENTED-CODE catches multi-line commented-out code blocks deterministically, distinguishing stale or narrating prose comments from genuine non-obvious invariant explanations requires semantic judgment.",
+          "remediation": "Remove dead commented-out code and redundant narration, fix or delete stale comments that contradict code, and retain short 1-line why/invariant comments.",
+          "bad_example": "# Provider delivers strictly in order; remove old timestamp guard\n# if event.created_at < sub.last_event_at:\n#     return\n# Increment counter\ncount += 1\n",
+          "valid_neighbouring_case": "# INVARIANT: Webhooks can arrive out of order; ignore events older than last_event_at.\nif event.created_at < sub.last_event_at:\n    return\n",
+          "why_optional": "Kept opt-in because blanket comment deletion hurts automated bug-fixing when invariant notes are stripped, and prompt rules remain outside standard/core.md unless proven net-positive on CM1.",
+          "evidence_status": "External empirical study",
+          "evidence_ref": "docs/evidence.md#ext-14",
+          "retirement_trigger": "Retire if CM1 multi-model ablation shows zero gain over deterministic STRUCT-COMMENTED-CODE alone, or once models ignore defective commented-out blocks natively."
+        }
+      ]
+    },
+    {
+      "id": "verification-proof",
+      "name": "Verification Proof",
+      "description": "Short prompt rule requiring live end-to-end or real-artifact verification output before claiming completion on apps, APIs, or CLIs.",
+      "when_to_enable": "Enable in web apps, HTTP APIs, and CLI tools where agents tend to stop after passing heavily mocked unit tests.",
+      "rules": [
+        {
+          "id": "OPT-VER-01",
+          "pack": "verification-proof",
+          "title": "Require live end-to-end or real-artifact verification before claiming done",
+          "layer": "prompt_rule",
+          "severity": "warning",
+          "file_glob": "*",
+          "rule_text": "Before claiming completion on an app, API, or CLI change, execute a real end-to-end command, live HTTP/CLI check, or real-artifact test and report the observed output. Do not rely solely on heavily mocked unit tests as proof of behavior.",
+          "why_not_deterministic": "Static diff scanners cannot determine whether a given repo has a runnable local server, CLI entrypoint, or sandbox environment capable of live end-to-end execution.",
+          "remediation": "Run a real CLI/HTTP/artifact smoke check after unit tests and cite the exact command and observed output.",
+          "bad_example": "Updated the checkout endpoint and all 4 mocked unit tests passed; feature is verified and ready.\n",
+          "valid_neighbouring_case": "Ran pytest (12 passed) and posted a real fixture webhook to the local server (HTTP 200, verified balance_due_cents=1106).\n",
+          "why_optional": "Pure libraries or air-gapped CI sandboxes may lack runnable live endpoints, whereas app/API/CLI repositories benefit from explicit live-artifact verification.",
+          "evidence_status": "External empirical study",
+          "evidence_ref": "docs/evidence.md#ext-13; docs/ai-era-rules.md",
+          "retirement_trigger": "Retire once CI integration smoke checks and diff-scoped mutation testing automatically verify changed behavior."
+        }
+      ]
+    },
+    {
+      "id": "build-config-hygiene",
+      "name": "Build & Config Hygiene",
+      "description": "Deterministic guards against floating :latest Dockerfile base tags and world-writable chmod 777 / 0o777 permissions.",
+      "when_to_enable": "Enable in containerized services and deployment repos where reproducible builds and least-privilege file modes matter.",
+      "rules": [
+        {
+          "id": "OPT-CFG-01",
+          "pack": "build-config-hygiene",
+          "title": "Floating :latest base image tag in Dockerfile",
+          "layer": "deterministic_check",
+          "severity": "warning",
+          "file_glob": "*Dockerfile*,Dockerfile*,*.dockerfile",
+          "match_mode": "line",
+          "pattern": "(?i)^\\s*FROM\\s+(?:--platform=\\S+\\s+)?[^\\s@]+:latest(?:\\s|$)",
+          "why_not_deterministic": null,
+          "remediation": "Pin an explicit version tag or image digest (for example, FROM python:3.12-slim or @sha256:...) for reproducible builds.",
+          "bad_example": "FROM python:latest\n",
+          "valid_neighbouring_case": "FROM python:3.12-slim\n",
+          "why_optional": "Disposable local dev containers occasionally track :latest intentionally; kept opt-in so non-Docker or scratch dev setups are unaffected.",
+          "evidence_status": "Practitioner hypothesis",
+          "evidence_ref": "docs/operating-guide.md",
+          "retirement_trigger": "Retire once Hadolint DL3007 or container policy checks enforce pinned base images in CI."
+        },
+        {
+          "id": "OPT-CFG-02",
+          "pack": "build-config-hygiene",
+          "title": "World-writable chmod 777 / 0o777 permissions",
+          "layer": "deterministic_check",
+          "severity": "error",
+          "file_glob": "*.sh,*.bash,*.zsh,*.py,*Dockerfile*,Dockerfile*,*.dockerfile,*.yml,*.yaml",
+          "match_mode": "line",
+          "pattern": "\\bchmod\\s+(?:-[A-Za-z]+\\s+)*0?777\\b|\\b0o777\\b",
+          "why_not_deterministic": null,
+          "remediation": "Grant least-privilege permissions (such as 755 for executables or 644/600 for data and secrets) instead of world-writable 777.",
+          "bad_example": "chmod -R 777 /var/app/uploads\n",
+          "valid_neighbouring_case": "chmod 755 scripts/entrypoint.sh\n",
+          "why_optional": "Agents sometimes reach for chmod 777 to bypass container permission errors quickly, but isolated ephemeral build scripts may occasionally have custom mount requirements.",
+          "evidence_status": "Practitioner hypothesis",
+          "evidence_ref": "docs/operating-guide.md",
+          "retirement_trigger": "Retire once infrastructure policy linters (Checkov, Trivy, ShellCheck) enforce least-privilege modes in CI."
+        }
+      ]
+    },
+    {
+      "id": "architecture-simplicity",
+      "name": "Architecture Simplicity",
+      "description": "Short prompt rule discouraging single-implementation factory, interface, and dependency-injection wrapper layers until a second concrete implementation exists.",
+      "when_to_enable": "Enable in small-to-medium services where over-abstracted multi-file indirection slows down both human readers and bounded-context coding agents.",
+      "rules": [
+        {
+          "id": "OPT-ARC-01",
+          "pack": "architecture-simplicity",
+          "title": "Avoid single-implementation factory/interface/DI wrapper layers",
+          "layer": "prompt_rule",
+          "severity": "warning",
+          "file_glob": "*",
+          "rule_text": "Do not introduce abstract interfaces, factory classes, or dependency-injection wrapper layers for a single concrete implementation. Write direct functions or classes first, and extract an abstraction only when a second concrete implementation exists.",
+          "why_not_deterministic": "Distinguishing a genuine public plugin extension point or test boundary from speculative single-implementation indirection depends on repository architecture and roadmap context.",
+          "remediation": "Inline single-use factory/interface wrappers into direct functions or concrete classes until a second concrete implementation is required.",
+          "bad_example": "class TaxStrategy(Protocol):\n    def compute(self, cents: int) -> int: ...\nclass DefaultTaxStrategy:\n    def compute(self, cents: int) -> int: return cents\nclass TaxStrategyFactory:\n    @staticmethod\n    def create(): return DefaultTaxStrategy()\n",
+          "valid_neighbouring_case": "def compute_tax_cents(subtotal_cents: int, tax_bps: int) -> int:\n    return (subtotal_cents * tax_bps + 5000) // 10000\n",
+          "why_optional": "Practitioner hypothesis: plugin SDKs and strict ports-and-adapters enterprise repos intentionally define interfaces upfront; enable only where flat modules fit team norms.",
+          "evidence_status": "Practitioner hypothesis",
+          "evidence_ref": "docs/ai-era-rules.md",
+          "retirement_trigger": "Retire if multi-turn benchmarks (EV1) show no maintainability gain or if the codebase adopts an explicit multi-backend plugin architecture."
+        }
+      ]
+    }
+  ],
+  "excluded_considered": [
+    {
+      "id": "EXCL-01",
+      "title": "Statistical AI-text and 'slop' classifiers as CI blockers",
+      "category": "prose_detection",
+      "why_excluded": "Statistical AI-text detectors misclassify human writing at unacceptable rates, especially non-native English authors (61.22% false-positive rate in Liang et al.), turning CI gates into noisy bias amplifiers.",
+      "evidence_status": "External empirical study",
+      "evidence_ref": "docs/evidence.md#ext-13",
+      "what_we_do_instead": "Use objective deterministic checks (broken doc paths, chatbot openers/closers, decorative emojis) and warning-first style patterns rather than statistical authorship guessing."
+    },
+    {
+      "id": "EXCL-02",
+      "title": "Unfiltered SAST rulesets as blocking post-edit agent hooks",
+      "category": "security_scanning",
+      "why_excluded": "Firouzi & Ghafari measured default Semgrep and CodeQL rules matching human security ground truth on only 65% and 61% of 1,080 LLM code samples. Running noisy full SAST as a blocking mid-turn hook triggers false-positive churn and workaround loops.",
+      "evidence_status": "External empirical study",
+      "evidence_ref": "docs/evidence.md#ext-13",
+      "what_we_do_instead": "Keep full SAST in dedicated CI security workflows and offer narrow, high-confidence opt-in diff guards in the security-boundaries pack."
+    },
+    {
+      "id": "EXCL-03",
+      "title": "Blanket 'delete all comments' policies",
+      "category": "comment_policy",
+      "why_excluded": "The ICPC 2026 automated bug-fixing ablation found that indiscriminately removing all code comments degrades bug-fixing effectiveness when helpful intent and invariant notes disappear alongside noise.",
+      "evidence_status": "External empirical study",
+      "evidence_ref": "docs/evidence.md#ext-14",
+      "what_we_do_instead": "Flag multi-line commented-out code blocks deterministically (STRUCT-COMMENTED-CODE) while preserving short non-obvious 'why / invariant' comments, and measure the tradeoff directly via CM1."
+    },
+    {
+      "id": "EXCL-04",
+      "title": "Blanket 'be concise' or 'keep it short' standing prompts",
+      "category": "prompting",
+      "why_excluded": "OpenAI GPT-6.2 guidance warns that legacy 'be concise' instructions strip important uncertainty caveats (uncertainty admission drops sharply), and Anthropic Fable 5.2 docs note rigid style rules produce choppy prose.",
+      "evidence_status": "External empirical study",
+      "evidence_ref": "docs/evidence.md#oai-02; docs/evidence.md#ant-04; docs/evidence.md#ext-06",
+      "what_we_do_instead": "Keep standard/core.md R5 focused on cutting filler while preserving caveats, and isolate model-specific brevity overlays in gates/model_deltas.json only where locally measured."
+    },
+    {
+      "id": "EXCL-05",
+      "title": "100% line-coverage mandates as an AI coding gate",
+      "category": "testing",
+      "why_excluded": "Coding agents edit tests (23% vs 13% human) and add mocks (36% vs 26% human) more frequently than humans; hard line-coverage targets incentivize assertion-free and heavily mocked test theater that executes lines without catching bugs.",
+      "evidence_status": "External empirical study",
+      "evidence_ref": "docs/evidence.md#ext-13",
+      "what_we_do_instead": "Detect mock-heavy and assertion-free tests with STRUCT-TEST-THEATER and measure real fault detection via diff-scoped AST mutation testing (anti-slop-mutate and EV1)."
+    },
+    {
+      "id": "EXCL-06",
+      "title": "Heavyweight upfront dependency-injection and single-implementation abstraction mandates",
+      "category": "architecture",
+      "why_excluded": "Forcing interfaces, abstract bases, and factories for single implementations scatters trivial logic across many files, wasting bounded agent context and encouraging parallel duplicate helpers under context pressure.",
+      "evidence_status": "Practitioner hypothesis",
+      "evidence_ref": "docs/ai-era-rules.md",
+      "what_we_do_instead": "Prefer direct, cohesive implementations by default under R3, and provide OPT-ARC-01 in the optional architecture-simplicity pack for teams that want an explicit prompt reminder."
+    }
+  ]
+}

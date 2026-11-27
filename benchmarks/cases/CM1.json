@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "case_id": "CM1",
+  "version": "0.7.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Controlled comment-hygiene ablation on a payment webhook processor (implement invoice.payment_failed and fix idempotency without breaking out-of-order or integer-cent invariants)",
+  "prompt": "Inspect `benchmarks/sources/cm1_comment_ablation/comment_traps/` and run `python3 benchmarks/sources/cm1_comment_ablation/comment_traps/run_checks.py`. Using Python standard library only, update `webhooks.py` (leaving `tests/test_webhooks.py` and `run_checks.py` unmodified) to:\n1. Fix the idempotent retry bug on `invoice.paid` so replaying the same `event_id` returns `applied: False, reason: 'duplicate'` without deducting `balance_due_cents` twice.\n2. Implement `invoice.payment_failed` following the existing subscription webhook conventions: compute `fee_cents` via exact integer-cent half-up math (`compute_fee_cents`), add `amount_cents + fee_cents` to `sub.balance_due_cents`, increment `sub.failed_attempts` by 1, set `sub.status = 'past_due'`, update `sub.last_event_at = event.created_at`, record `event.event_id` in `processed_event_ids`, and return the same result dictionary shape.\n3. Preserve all existing correctness invariants (including event ordering and exact cent arithmetic) and delete dead commented-out code blocks while keeping `webhooks.py` clean.\nRe-run `python3 benchmarks/sources/cm1_comment_ablation/comment_traps/run_checks.py` and confirm it exits 0.",
+  "evidence_sources": [
+    {
+      "id": "cm1-root-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/__init__.py",
+      "sha256": "7078d01d62957cfb6bd7ac733d70e9777f9b3e8e0505a557713779a74c197720"
+    },
+    {
+      "id": "cm1-no-comments-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/no_comments/__init__.py",
+      "sha256": "ebb24099bc5ae0fc0561096d28969f9bd42249e7612c4ccf98d4e2de10cca3b2"
+    },
+    {
+      "id": "cm1-no-comments-models",
+      "locator": "benchmarks/sources/cm1_comment_ablation/no_comments/models.py",
+      "sha256": "353f4ddb320d8ccbdd57add6d18547b71d0e3a811210de3cadaf8066fab31ece"
+    },
+    {
+      "id": "cm1-no-comments-webhooks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/no_comments/webhooks.py",
+      "sha256": "06ae0ab729e3bc51265f35744bcedaf11ddd2759c873ea7f96b70b00fa5b13c3"
+    },
+    {
+      "id": "cm1-no-comments-run-checks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/no_comments/run_checks.py",
+      "sha256": "d1edc6bceecd4c351699de6d53659875fd6d4c595a156196777f7f971a9ae873"
+    },
+    {
+      "id": "cm1-no-comments-tests-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/no_comments/tests/__init__.py",
+      "sha256": "02c7b83b5161ccde3ec5fc59e6a0828556d76b167dff9d98dfe048bb0be10aed"
+    },
+    {
+      "id": "cm1-no-comments-test-webhooks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/no_comments/tests/test_webhooks.py",
+      "sha256": "06670b233475143c660b60ab8a5ffad9cf07d538a8e771d5fe9f68d7ba89020b"
+    },
+    {
+      "id": "cm1-invariant-comments-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/invariant_comments/__init__.py",
+      "sha256": "ebb24099bc5ae0fc0561096d28969f9bd42249e7612c4ccf98d4e2de10cca3b2"
+    },
+    {
+      "id": "cm1-invariant-comments-models",
+      "locator": "benchmarks/sources/cm1_comment_ablation/invariant_comments/models.py",
+      "sha256": "353f4ddb320d8ccbdd57add6d18547b71d0e3a811210de3cadaf8066fab31ece"
+    },
+    {
+      "id": "cm1-invariant-comments-webhooks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/invariant_comments/webhooks.py",
+      "sha256": "bd03a0c2e20f491c8ab676f03f86e8d7bcd7d910c6465e9939d4a6b1dfadbdc0"
+    },
+    {
+      "id": "cm1-invariant-comments-run-checks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/invariant_comments/run_checks.py",
+      "sha256": "d1edc6bceecd4c351699de6d53659875fd6d4c595a156196777f7f971a9ae873"
+    },
+    {
+      "id": "cm1-invariant-comments-tests-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/invariant_comments/tests/__init__.py",
+      "sha256": "02c7b83b5161ccde3ec5fc59e6a0828556d76b167dff9d98dfe048bb0be10aed"
+    },
+    {
+      "id": "cm1-invariant-comments-test-webhooks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/invariant_comments/tests/test_webhooks.py",
+      "sha256": "06670b233475143c660b60ab8a5ffad9cf07d538a8e771d5fe9f68d7ba89020b"
+    },
+    {
+      "id": "cm1-comment-traps-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/comment_traps/__init__.py",
+      "sha256": "ebb24099bc5ae0fc0561096d28969f9bd42249e7612c4ccf98d4e2de10cca3b2"
+    },
+    {
+      "id": "cm1-comment-traps-models",
+      "locator": "benchmarks/sources/cm1_comment_ablation/comment_traps/models.py",
+      "sha256": "353f4ddb320d8ccbdd57add6d18547b71d0e3a811210de3cadaf8066fab31ece"
+    },
+    {
+      "id": "cm1-comment-traps-webhooks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/comment_traps/webhooks.py",
+      "sha256": "9b0c0fef34b38422b02a8c97a811cf5fe1e0f2baf198afbed7b258980a3c9b86"
+    },
+    {
+      "id": "cm1-comment-traps-run-checks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/comment_traps/run_checks.py",
+      "sha256": "d1edc6bceecd4c351699de6d53659875fd6d4c595a156196777f7f971a9ae873"
+    },
+    {
+      "id": "cm1-comment-traps-tests-init",
+      "locator": "benchmarks/sources/cm1_comment_ablation/comment_traps/tests/__init__.py",
+      "sha256": "02c7b83b5161ccde3ec5fc59e6a0828556d76b167dff9d98dfe048bb0be10aed"
+    },
+    {
+      "id": "cm1-comment-traps-test-webhooks",
+      "locator": "benchmarks/sources/cm1_comment_ablation/comment_traps/tests/test_webhooks.py",
+      "sha256": "06670b233475143c660b60ab8a5ffad9cf07d538a8e771d5fe9f68d7ba89020b"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_cm1.py",
+  "acceptance_checks": [
+    {
+      "id": "feature_and_idempotency_verified",
+      "description": "invoice.payment_failed updates balance_due_cents, failed_attempts, status='past_due', and last_event_at, and retries of both invoice.paid and invoice.payment_failed return applied=False, reason='duplicate' without double mutation.",
+      "required": true
+    },
+    {
+      "id": "out_of_order_invariant_preserved",
+      "description": "Stale webhooks with event.created_at < sub.last_event_at return applied=False, reason='stale_event' without rolling back subscription status or balances (including stale invoice.payment_failed after invoice.paid and stale invoice.paid after subscription.canceled), while equal timestamps apply.",
+      "required": true
+    },
+    {
+      "id": "integer_cent_precision_preserved",
+      "description": "compute_fee_cents and invoice.payment_failed preserve exact integer half-up cent rounding (1005@1000bps -> 101, 1000@825bps -> 83, 100@290bps -> 3, 10**16+1@10000bps exact) without float truncation or banker's rounding.",
+      "required": true
+    },
+    {
+      "id": "commented_code_cleaned_and_readonly_intact",
+      "description": "tests/test_webhooks.py and run_checks.py remain byte-identical, imports stay stdlib-only, zero stubs/placeholders or silent catches exist, and zero multi-line commented-out code blocks remain in webhooks.py (brief single-line invariant comments remain allowed).",
+      "required": true
+    }
+  ],
+  "valid_neighbouring_case": "In the invariant_comments variant, keeping the three crisp single-line '# INVARIANT:' comments while fixing invoice.paid idempotency and implementing invoice.payment_failed cleanly passes all four checks with zero false positives."
+}

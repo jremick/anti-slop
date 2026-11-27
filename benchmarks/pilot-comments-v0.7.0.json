@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-comments-v0.7.0",
+  "status": "planned",
+  "standard_version": "0.2.0",
+  "suite": "comment-hygiene-ablation",
+  "cases": [
+    {
+      "case_id": "CM1",
+      "case_version": "0.7.0",
+      "stages": 1,
+      "automated_grader": "benchmarks/graders/grade_cm1.py"
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "no-comments",
+    "invariant-comments",
+    "comment-traps"
+  ],
+  "variant_map": {
+    "no-comments": "benchmarks/sources/cm1_comment_ablation/no_comments",
+    "invariant-comments": "benchmarks/sources/cm1_comment_ablation/invariant_comments",
+    "comment-traps": "benchmarks/sources/cm1_comment_ablation/comment_traps"
+  },
+  "replicates": 3,
+  "planned_matched_pairs": 12,
+  "planned_run_records": 36,
+  "planned_generation_stages": 36,
+  "comparison_tracks": [
+    {
+      "track_id": "no-comments-vs-invariant-comments",
+      "baseline": "no-comments",
+      "treatment": "invariant-comments",
+      "description": "Measure whether three concise 1-line '# INVARIANT:' why-comments improve invariant preservation over identical zero-comment Python code.",
+      "case_ids": ["CM1"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 24
+    },
+    {
+      "track_id": "no-comments-vs-comment-traps",
+      "baseline": "no-comments",
+      "treatment": "comment-traps",
+      "description": "Measure whether defective commented-out code blocks and stale contradictory comments poison coding agents relative to identical zero-comment code.",
+      "case_ids": ["CM1"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 24
+    },
+    {
+      "track_id": "invariant-comments-vs-comment-traps",
+      "baseline": "invariant-comments",
+      "treatment": "comment-traps",
+      "description": "Measure the full controlled spread between brief invariant comments and comment-trap pollution across all four focus models.",
+      "case_ids": ["CM1"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 24
+    }
+  ],
+  "limits": [
+    "Status is planned (0 live model runs executed yet); do not report unrun planned tracks as measured results.",
+    "CM1 isolates comment effects on one constructed stdlib Python webhook processor with 100% identical executable AST across all three arms; replicate across additional languages and real-work repositories before generalizing.",
+    "100% mechanically graded by benchmarks/graders/grade_cm1.py with zero word caps or subjective rubric scoring."
+  ]
+}

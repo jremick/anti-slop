@@ -451,6 +451,127 @@ class SelfLearningLoopTests(unittest.TestCase):
         )
         self.assertEqual(bad_cli.returncode, 2)
 
+    def test_library_list_show_enable_dry_run_dedup_and_verification_gate(self) -> None:
+        cli = [
+            sys.executable, "-B", str(REPO_ROOT / "gates/learn.py"),
+            "--store", str(self.store), "--repo-root", str(self.root),
+        ]
+
+        # 1. library list & show (human + JSON)
+        p_list = subprocess.run(cli + ["library", "list", "--json"], capture_output=True, text=True, check=False)
+        self.assertEqual(p_list.returncode, 0, msg=p_list.stderr)
+        list_data = json.loads(p_list.stdout)
+        self.assertEqual(len(list_data["optional_packs"]), 6)
+        self.assertEqual(list_data["excluded_count"], 6)
+
+        p_show_pack = subprocess.run(cli + ["library", "show", "network-timeouts"], capture_output=True, text=True, check=False)
+        self.assertEqual(p_show_pack.returncode, 0, msg=p_show_pack.stderr)
+        self.assertIn("OPT-NET-01", p_show_pack.stdout)
+        self.assertIn("OPT-NET-02", p_show_pack.stdout)
+        self.assertIn("Valid neighbouring case:", p_show_pack.stdout)
+
+        p_show_rule = subprocess.run(cli + ["library", "show", "OPT-SEC-01", "--json"], capture_output=True, text=True, check=False)
+        self.assertEqual(p_show_rule.returncode, 0, msg=p_show_rule.stderr)
+        self.assertEqual(json.loads(p_show_rule.stdout)["rule"]["id"], "OPT-SEC-01")
+
+        # 2. --dry-run runs full 3-way verification without creating or modifying store.
+        p_dry = subprocess.run(
+            cli + ["library", "enable", "network-timeouts", "--by", "alice", "--dry-run", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_dry.returncode, 0, msg=p_dry.stderr + p_dry.stdout)
+        dry_data = json.loads(p_dry.stdout)
+        self.assertTrue(dry_data["ok"])
+        self.assertTrue(dry_data["dry_run"])
+        self.assertEqual(dry_data["enabled_count"], 2)
+        self.assertFalse(self.store.exists())
+
+        # 3. Real enable imports, verifies, approves, and enforces immediately!
+        p_en = subprocess.run(
+            cli + ["library", "enable", "network-timeouts", "--by", "alice", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_en.returncode, 0, msg=p_en.stderr + p_en.stdout)
+        en_data = json.loads(p_en.stdout)
+        self.assertTrue(en_data["ok"])
+        self.assertEqual(en_data["enabled_count"], 2)
+        self.assertTrue(self.store.is_file())
+
+        bad_http_diff = (
+            "diff --git a/src/client.py b/src/client.py\n"
+            "--- /dev/null\n"
+            "+++ b/src/client.py\n"
+            "@@ -0,0 +1,2 @@\n"
+            "+def ping():\n"
+            "+    return requests.get('https://api.example.com/health')\n"
+        )
+        diff_res = diff_check.check_diff(
+            bad_http_diff, repo_root=self.root, no_budget=True, learned_rules=self.store
+        )
+        self.assertIn("LEARNED-L-001", _codes(diff_res["warnings"]))
+
+        # 4. Re-enabling skips already-active duplicates cleanly with 0 new entries!
+        p_dup = subprocess.run(
+            cli + ["library", "enable", "network-timeouts", "--by", "alice", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_dup.returncode, 0, msg=p_dup.stderr)
+        dup_data = json.loads(p_dup.stdout)
+        self.assertEqual(dup_data["enabled_count"], 0)
+        self.assertEqual(dup_data["skipped_count"], 2)
+        self.assertEqual(len(learn.load_store(self.store)["rules"]), 2)
+
+        # 5. Enabling a prompt_rule pack exports cleanly via export-prompt.
+        p_cmt = subprocess.run(
+            cli + ["library", "enable", "comment-hygiene", "--by", "alice", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_cmt.returncode, 0, msg=p_cmt.stderr + p_cmt.stdout)
+        exported = learn.export_approved_prompt_rules(self.store)
+        self.assertIn("OPT-CMT-01", exported)
+
+        # 6. Verification gate is NEVER bypassed: existing repo match blocks enable cleanly
+        #    and reports exact file:line hits without mutating the store!
+        (self.root / "src/deploy.py").write_text(
+            "import subprocess\nsubprocess.run('ls -la', shell=True, check=True)\n",
+            encoding="utf-8",
+        )
+        store_before = self.store.read_text(encoding="utf-8")
+        p_fail = subprocess.run(
+            cli + ["library", "enable", "security-boundaries", "--by", "alice"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_fail.returncode, 1, msg=p_fail.stdout + p_fail.stderr)
+        self.assertIn("src/deploy.py:2", p_fail.stdout)
+        self.assertIn("verification_failed", p_fail.stdout)
+        self.assertEqual(self.store.read_text(encoding="utf-8"), store_before)
+
+        # Explicit --max-repo-hits 1 allows enabling when user acknowledges the existing hit.
+        p_allow = subprocess.run(
+            cli + ["library", "enable", "OPT-SEC-01", "--by", "alice", "--max-repo-hits", "1", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_allow.returncode, 0, msg=p_allow.stdout + p_allow.stderr)
+        self.assertEqual(json.loads(p_allow.stdout)["enabled_count"], 1)
+
+        # 7. Retiring an enabled library rule allows re-enabling under a new ID without reusing old ID.
+        learn.retire_rule(self.store, "L-001", reason="Temporary pause for migration.")
+        p_reen = subprocess.run(
+            cli + ["library", "enable", "OPT-NET-01", "--by", "alice", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_reen.returncode, 0, msg=p_reen.stdout + p_reen.stderr)
+        reen_data = json.loads(p_reen.stdout)
+        self.assertEqual(reen_data["enabled_count"], 1)
+        self.assertNotEqual(reen_data["results"][0]["learned_id"], "L-001")
+
+        # 8. Excluded IDs cannot be enabled (exit 2).
+        p_excl = subprocess.run(
+            cli + ["library", "enable", "EXCL-01", "--by", "alice"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(p_excl.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()
