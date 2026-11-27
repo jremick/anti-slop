@@ -8,5 +8,7 @@ __pycache__/
 workspaces/
 runs-local/
 dist/
+build/
+*.egg-info/
 .anti-slop/telemetry.jsonl
 .anti-slop/last-verify.json
