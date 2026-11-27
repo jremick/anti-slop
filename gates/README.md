@@ -8,9 +8,10 @@ Every Python gate uses stdlib Python only (no third-party packages), exits `0` s
 
 - [api_checks.py](api_checks.py): Validates 2026 model API and harness configurations (`anti-slop-api`) for `gpt-6.2-astra`, `gpt-6.2-sol`, `claude-opus-5-5`, `claude-fable-5-2`, and `gemini-4-neon`.
 - [diff_check.py](diff_check.py): Validates unified diffs, modified file lists, and PR bodies (`anti-slop-diff`) for objective defects (`DIFF-*`), optional net-LOC/file budgets (`--no-budget`), optional AI-era structural checks (`--structural` / `--strict-structural`), plain-English explanations (`--explain`), and approved learned rules (`--learned-rules`).
-- [structural.py](structural.py): Measurable detectors for compounding AI-era slop (`STRUCT-TEST-THEATER`, `STRUCT-SILENT-FALLBACK`, `STRUCT-DUPLICATE-BLOCK`, `STRUCT-DEAD-COMPAT`, `STRUCT-GOD-FUNCTION`, `STRUCT-GOD-FILE`, `STRUCT-SCOPE-SPRAWL`), warning-first by default.
-- [review.py](review.py): Plain-English review CLI (`anti-slop-review`) combining `diff_check.py`, `structural.py`, and approved learned rules to explain why experienced engineers flag each issue, how it compounds across future AI turns, and what fix prompt to give your AI (`--markdown`, `--json`, `--fail-on-warning`).
-- [learn.py](learn.py): Verified human-gated self-learning loop CLI (`anti-slop-learn`) implementing `R7` (`capture -> propose -> verify -> approve -> check -> retire`) with narrowest-layer escalation (`deterministic_check` > `codebase_example` > `prompt_rule`), 3-way automated verification (bad case, valid neighbouring case, existing repo scan), SHA-256-bound human approval, and non-reusable stable IDs (`L-001`, `L-002`, ...).
+- [structural.py](structural.py): Measurable detectors for compounding AI-era slop (`STRUCT-TEST-THEATER`, `STRUCT-SILENT-FALLBACK`, `STRUCT-DUPLICATE-BLOCK`, `STRUCT-DEAD-COMPAT`, `STRUCT-COMMENTED-CODE`, `STRUCT-GOD-FUNCTION`, `STRUCT-GOD-FILE`, `STRUCT-SCOPE-SPRAWL`), warning-first by default.
+- [review.py](review.py): Plain-English review CLI (`anti-slop-review`) combining `diff_check.py`, `structural.py`, and approved learned rules to explain why experienced engineers flag each issue, how it compounds across future AI turns, what fix prompt to give your AI, and inline evidence references (`--markdown`, `--json`, `--fail-on-warning`), including 3-tier Verification Hierarchy guidance on `STRUCT-TEST-THEATER`.
+- [mutate.py](mutate.py): Diff-scoped stdlib AST mutation testing CLI (`anti-slop-mutate`) inspired by Google Critique ([arXiv:2102.11378](https://arxiv.org/abs/2102.11378)). Copies the target repo into an isolated temporary directory (never touching your working tree), suppresses arid nodes, mutates only changed executable Python lines across 7 AST operator families, and reports every surviving mutant with exact `file:line` diffs (`--test-cmd`, `--max-mutants`, `--min-kill-rate`, `--markdown`, `--json`).
+- [learn.py](learn.py): Verified human-gated self-learning loop CLI (`anti-slop-learn`) implementing `R7` (`capture -> propose -> verify -> approve -> check -> retire`) plus curated optional rule library management (`anti-slop-learn library list|show|enable`, backed by [library/catalog.json](../library/catalog.json) and [library/README.md](../library/README.md)) with narrowest-layer escalation (`deterministic_check` > `codebase_example` > `prompt_rule`), 3-way automated verification (bad case, valid neighbouring case, existing repo scan), SHA-256-bound human approval, and non-reusable stable IDs (`L-001`, `L-002`, ...).
 - [hooks/](hooks/README.md): Portable 3-CLI lifecycle hooks (`anti-slop-hook`, including `--install claude|antigravity|codex --dry-run`) wrapping `gates/diff_check.py` outside the model context window.
 - [model_deltas.json](model_deltas.json): Strictly delta-only per-model harness overlays (`D-AST`, `D-SOL`, `D-OPU`, `D-FAB`, `D-NEO`) with stable IDs, falsification checks, valid neighbouring cases, and effort routing. Keep outside `standard/core.md`.
 - [vale/.vale.ini](vale/.vale.ini): Warning-first Vale configuration implementing the deterministic subset of Cursor `unslop` across [Openers.yml](vale/styles/AntiSlop/Openers.yml), [Closers.yml](vale/styles/AntiSlop/Closers.yml), [ADRStructure.yml](vale/styles/AntiSlop/ADRStructure.yml), [Vocab.yml](vale/styles/AntiSlop/Vocab.yml), and [Phrasing.yml](vale/styles/AntiSlop/Phrasing.yml).
@@ -20,7 +21,7 @@ Every Python gate uses stdlib Python only (no third-party packages), exits `0` s
 
 ### 1. Run in Any External Repository (Zero-Clone `uvx`, Action, or `pre-commit`)
 
-`pyproject.toml` exposes five zero-dependency console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-learn`, `anti-slop-hook`, `anti-slop-api`), while root `action.yml` and `.pre-commit-hooks.yaml` enable drop-in CI and local hooks without copying `gates/`:
+`pyproject.toml` exposes six zero-dependency console scripts (`anti-slop-diff`, `anti-slop-review`, `anti-slop-learn`, `anti-slop-mutate`, `anti-slop-hook`, `anti-slop-api`), while root `action.yml` and `.pre-commit-hooks.yaml` enable drop-in CI and local hooks without copying `gates/`:
 
 ```bash
 # Plain-English review of current git changes (shortcuts + compounding slop + approved learned rules)
@@ -29,8 +30,13 @@ uvx --from git+https://github.com/jremick/anti-slop anti-slop-review
 # Run fast diff gate on your current git diff (objective defects only, or add --structural --explain)
 git diff HEAD | uvx --from git+https://github.com/jremick/anti-slop anti-slop-diff --diff - --no-budget
 
-# Capture and verify a recurring slop pattern in the human-gated R7 learning loop
-uvx --from git+https://github.com/jremick/anti-slop anti-slop-learn list
+# Run diff-scoped AST mutation testing on your changed Python lines (isolated temp copy)
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-mutate --test-cmd "pytest -q"
+
+# Browse or enable curated optional packs via 3-way verification (or capture custom learned rules)
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-learn library list
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-learn library show network-timeouts
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-learn library enable network-timeouts --by <your-name> --dry-run
 
 # Validate a model/harness JSON config
 uvx --from git+https://github.com/jremick/anti-slop anti-slop-api path/to/model-config.json
@@ -95,7 +101,22 @@ Engineering-credibility checks in `gates/diff_check.py`:
 
 Reusable Python helpers exported by `gates/diff_check.py` for graders and tooling include `check_credibility_text(...)`, `check_diff_and_text(...)`, `check_markdown_openers(...)`, `check_markdown_closers(...)`, `check_decorative_emojis(...)`, `check_host_paths(...)`, `check_test_skips_in_source(...)`, `check_suppressions_in_source(...)`, `check_silent_catches_in_source(...)`, and `check_debug_leftovers_in_source(...)`.
 
-### 4. Benchmark `core-rules` vs. `model-controls`
+### 4. Diff-Scoped AST Mutation Testing (`gates/mutate.py`)
+
+Verify whether your test suite catches real bugs injected strictly on your changed executable Python lines:
+
+```bash
+# Auto-diff current git changes against HEAD and run pytest in an isolated temp copy
+python3 -B gates/mutate.py --test-cmd "pytest -q"
+
+# Diff against a base branch or target explicit file/line ranges with custom thresholds
+python3 -B gates/mutate.py --base origin/main --test-cmd "pytest -q" --max-mutants 24 --min-kill-rate 0.65
+python3 -B gates/mutate.py --files src/billing.py:10-45 --test-cmd "python3 -m unittest discover" --markdown
+```
+
+`gates/mutate.py` never mutates your working tree in place: it copies the repository into a fresh `tempfile.TemporaryDirectory()` (skipping `.git`, `.venv`, `node_modules`, `__pycache__`, `runs-local`, and `results`), sets `PYTHONDONTWRITEBYTECODE=1`, verifies unmutated baseline tests pass first (exiting `2` on baseline failure or timeout), suppresses arid nodes (`__main__`, `TYPE_CHECKING`, docstrings, annotations, logging/print calls), and samples up to `--max-mutants` (default `24`) across 7 AST operator families (`condition`, `compare`, `validation`, `return_value`, `arithmetic`, `boolean`, `boundary`). Exit codes: `0` when kill rate `>= --min-kill-rate` (default `0.65`, or `0` for report-only) or no mutable Python lines changed; `1` below threshold; `2` baseline test failure or invalid invocation.
+
+### 5. Benchmark `core-rules` vs. `model-controls`
 
 Load `standard/core.md` alone for the `core-rules` condition. For `model-controls`, load `standard/core.md` plus ONLY the single matching model block from `gates/model_deltas.json`. Never paste model deltas into `standard/core.md`; retire obsolete `D-*` rules by leaving a numeric gap.
 
@@ -165,14 +186,15 @@ Every commit was evaluated in both **checkout mode** (`--repo-root` checked out 
 
 Using the exact same 150-commit pinned OSS corpus (`urllib3` `3db5970fcc56`, `tomlkit` `d2aa305673a0`, `hono` `717dc17cb80b`), `gates/structural.py` (`check_structural_diff(..., repo_root=...)`, all rules warning-only by default) was audited in checkout mode and every warning was inspected verbatim.
 
-| Repository | Pinned `HEAD` SHA | Commits | Clean (All 7 `STRUCT-*`) | Clean (Non-Size Defect Rules) | Total Warnings (Post-Fix) | Warnings by Rule ID |
+| Repository | Pinned `HEAD` SHA | Commits | Clean (All 8 `STRUCT-*`) | Clean (Non-Size Defect Rules) | Total Warnings (Post-Fix) | Warnings by Rule ID |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
 | [urllib3/urllib3](https://github.com/urllib3/urllib3) (Python) | `3db5970fcc56` | 50 | 30 / 50 (60.0%) | 48 / 50 (96.0%) | 29 W | `STRUCT-GOD-FILE`: 14, `STRUCT-GOD-FUNCTION`: 12, `STRUCT-TEST-THEATER`: 3 |
 | [sdispater/tomlkit](https://github.com/sdispater/tomlkit) (Python) | `d2aa305673a0` | 50 | 29 / 50 (58.0%) | 50 / 50 (100.0%) | 33 W | `STRUCT-GOD-FILE`: 22, `STRUCT-GOD-FUNCTION`: 11 |
 | [honojs/hono](https://github.com/honojs/hono) (TypeScript) | `717dc17cb80b` | 50 | 43 / 50 (86.0%) | 47 / 50 (94.0%) | 10 W | `STRUCT-GOD-FILE`: 5, `STRUCT-DUPLICATE-BLOCK`: 4, `STRUCT-GOD-FUNCTION`: 1 |
 | **OSS Total** | - | **150** | **102 / 150 (68.0%)** | **145 / 150 (96.7%)** | **72 W** | **`STRUCT-GOD-FILE`: 41, `STRUCT-GOD-FUNCTION`: 24, `STRUCT-DUPLICATE-BLOCK`: 4, `STRUCT-TEST-THEATER`: 3** |
 
-- **Zero-noise structural rules across all 150 commits (0 warnings):** `STRUCT-SILENT-FALLBACK` (`0`), `STRUCT-DEAD-COMPAT` (`0`), and `STRUCT-SCOPE-SPRAWL` (`0`). Hunk-only mode (`repo_root=None`) also reported `0` warnings across the 150 pinned commits (and an additional 150 earlier history commits after fixing truncated hunk-only test blocks and Deno `@std/assert` calls below).
+- **Zero-noise structural rules across all 150 commits (0 warnings):** `STRUCT-SILENT-FALLBACK` (`0`), `STRUCT-DEAD-COMPAT` (`0`), `STRUCT-COMMENTED-CODE` (`0`), and `STRUCT-SCOPE-SPRAWL` (`0`). Hunk-only mode (`repo_root=None`) also reported `0` warnings across the 150 pinned commits (and an additional 150 earlier history commits after fixing truncated hunk-only test blocks and Deno `@std/assert` calls below).
+- **`STRUCT-COMMENTED-CODE` 150-commit + 551-HEAD OSS audit (`0` false positives):** Audited across the same 150 commits (258 code-file edits, 28 newly added `>= 3`-line comment blocks) and full `HEAD` source trees (551 code files, 331 `>= 3`-line comment groups): `urllib3` (83 code edits / 9 added blocks; 86 HEAD files / 175 groups -> `0` hits), `tomlkit` (73 code edits / 18 added blocks; 29 HEAD files / 103 groups -> `0` hits), `hono` (102 code edits / 1 added block; 436 HEAD files / 53 groups -> `0` hits), plus `0` hits across `anti-slop` itself. Normal prose comments, 1-2 line `# INVARIANT:` notes, license headers, docstrings, JSDoc `@example` blocks, fenced comment examples, URLs, and dividers all pass cleanly.
 - **Parser/AST false-positive classes caught during the audit and fixed (`87 W -> 72 W` on the 150 pinned commits, `-15` false warnings, plus `4` additional hunk-only/Deno FPs caught on earlier `urllib3`/`hono` history; regression tests in [tests/test_structural_and_review.py](../tests/test_structural_and_review.py)):**
   1. **Vitest / `expect-type` & Deno `@std/assert` assertions (`hono`, 5/5 pinned + 3/3 `6cbe361b7a` FPs fixed):** `expectTypeOf<...>().toEqualTypeOf<...>()`, `assertType<...>()`, and Deno camelCase assertions (`assertEquals`, `assertThrows`) were not recognized by `JS_ASSERT_RE`. Updated `JS_ASSERT_RE` while keeping tautology and empty-test checks intact.
   2. **AST-verified local, imported, and module-attribute test helpers (`tomlkit`, 9/9 FPs fixed):** `tomlkit`'s `test_items.py` delegated assertions to `from tests.util import elementary_test`. Updated Python test-theater inspection to verify via AST whether same-file, `from tests.* import ...`, `import tests.*` attribute calls, or 1-hop re-exported helpers actually execute real assertions; assertion-free helpers remain flagged.

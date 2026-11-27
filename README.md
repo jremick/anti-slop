@@ -5,35 +5,36 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 ![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)
 
-AI coding tools often produce code that looks convincing and passes a quick run while quietly accumulating hidden defects: skipped or assertion-free tests that stay green even when features break, silent fallback defaults that hide bad data, copy-pasted logic that drifts out of sync across files, leftover "legacy" code paths, or debug calls left behind.
+AI coding tools often produce code that looks convincing and passes a quick run while quietly accumulating hidden defects: skipped or over-mocked tests that stay green when features break ([Hora & Robbes, arXiv:2602.00409](https://arxiv.org/abs/2602.00409), [EXT-13](docs/evidence.md#ext-13)), silent fallback defaults or bare type suppressions, copy-pasted logic that drifts across files ([GitClear 2025](https://www.gitclear.com/ai_assistant_code_quality_2025_research), [EXT-12](docs/evidence.md#ext-12)), commented-out code traps ([Huang et al., arXiv:2512.20334](https://arxiv.org/abs/2512.20334), [EXT-14](docs/evidence.md#ext-14)), and growing monolithic functions ([Liu et al., arXiv:2603.28592](https://arxiv.org/abs/2603.28592); [Zhu et al., arXiv:2605.02741](https://arxiv.org/abs/2605.02741), [EXT-15](docs/evidence.md#ext-15)).
 
-Worse, **slop compounds across future AI sessions**. Coding agents imitate whatever patterns already exist in your repository. Once one shortcut, silent fallback, or copy-pasted helper lands, the next session copies it again or patches only one copy while leaving the other broken.
+Worse, **slop compounds across future AI sessions**. Coding agents imitate whatever patterns already sit in your repository ([Sun et al., ETH Zurich, arXiv:2611.11455](https://arxiv.org/abs/2611.11455), [EXT-12](docs/evidence.md#ext-12)), while piling more prose rules into `AGENTS.md` or `CLAUDE.md` degrades compliance and raises inference cost ([IFScale, arXiv:2507.11538](https://arxiv.org/abs/2507.11538); [Gloaguen et al., arXiv:2602.11988](https://arxiv.org/abs/2602.11988), [EXT-11](docs/evidence.md#ext-11)). In our live 4-turn evolution benchmark below (`EV1`, 36 runs), standing prose rules alone **regressed** overall pass rate (`50.0% -> 41.7%`), whereas mechanical diff and structural gates lifted pass rate to **`91.7%` (`11/12`, `0` slop defects)** and raised AST mutation kill rate **`+7.5pp`** over standing prompts.
 
-`anti-slop` gives builders and engineers a simple, verifiable, zero-dependency Python toolkit built around three pillars:
+`anti-slop` is a zero-dependency Python 3.11+ toolkit built around three pillars:
 
-1. **Catch shortcuts and compounding slop with plain-English review:** block obvious shortcuts mid-turn or in CI, surface structural decay before it spreads, and explain in plain English why experienced engineers flag each pattern, how it compounds in future AI turns, and what fix prompt to give your AI.
-2. **Learn from what slips through (verified and human-approved):** when a bad AI pattern slips past review, capture the bad example and a valid look-alike case, propose the smallest prevention (automated check first, clean code example second, short rule last), verify it automatically against your repo, and activate it only after explicit human approval, with clean retirement when models outgrow the rule.
-3. **Prove which rules actually improve software:** test rules against multi-turn feature evolution (real functional bugs, mutation-tested test strength, duplicate blocks, dead code, sprawl, silent failures) instead of taking coding rules on faith or chasing word caps.
+1. **Catch shortcuts and compounding slop with plain-English review & diff-scoped mutation:** block objective shortcuts mid-turn or in CI, catch structural decay and commented-out code traps before they spread, verify test strength on changed lines with `anti-slop-mutate`, and explain in plain English why engineers flag each pattern and what fix prompt to give your AI.
+2. **Learn from what slips through (verified, human-approved, plus a curated optional rule library):** capture a bad example and a valid look-alike case, choose the smallest prevention (deterministic check first, codebase example second, short rule last), verify it automatically against your repo, activate it only after human approval, or opt into curated rule packs via `anti-slop-learn library`.
+3. **Prove which rules improve real software:** benchmark rules against multi-turn feature evolution (`EV1`: functional bugs, AST mutation kill rate, duplicate blocks, dead shims, god functions, silent shortcuts; zero word caps) and controlled comment ablations (`CM1`), keeping what works and retiring what does not.
 
 ```mermaid
 flowchart LR
-  A["1. Catch shortcuts and compounding slop"] --> B["Plain-English review and fix prompt"]
-  B --> C["2. Capture and verify slipped pattern"]
-  C --> D["Human approves rule"]
+  A["1. Catch shortcuts, slop & weak tests"] --> B["Plain-English review & diff mutation"]
+  B --> C["2. Capture or pick optional library pack"]
+  C --> D["3-way verify & human approve"]
   D --> E["Enforced automatically in hooks, pre-commit, and CI"]
   E --> A
-  F["3. Multi-turn EV1 benchmark"] -. "Prove, keep, or retire rules" .-> D
+  F["3. Multi-turn EV1 & CM1 benchmarks"] -. "Prove, keep, or retire rules" .-> D
 ```
 
 | What you want to do | Start here |
 |---|---|
-| Understand which coding rules actually matter in the AI era (and which pre-AI habits hurt) | [AI-Era Coding Rules Guide](docs/ai-era-rules.md) |
+| Understand which coding rules earned `KEEP` in `EV1` (and which pre-AI habits hurt) | [AI-Era Coding Rules Guide](docs/ai-era-rules.md) |
 | Run a plain-English review of your current git changes | `python3 -B gates/review.py` ([gates/README.md](gates/README.md)) |
+| Check whether your tests catch real bugs on your changed Python lines | `anti-slop-mutate --test-cmd "pytest -q"` ([gates/mutate.py](gates/mutate.py)) |
+| Browse Default Core vs. 6 Opt-In Rule Packs vs. 6 Deliberately Excluded rules | [Optional Rule Library](library/README.md) (`anti-slop-learn library list`) |
 | Run the fast blocking diff gate in CLI, GitHub Actions, or pre-commit | `gates/diff_check.py` ([gates/README.md](gates/README.md)) |
 | Block AI shortcuts and enforce approved learned rules mid-turn | `gates/hooks/run_diff_gate_hook.py` ([gates/hooks/README.md](gates/hooks/README.md)) |
-| Capture, verify, approve, or retire a new project rule | `gates/learn.py` ([docs/operating-guide.md](docs/operating-guide.md)) |
-| Read the 298-word core standard and per-model findings | [standard/core.md](standard/core.md) + [docs/models.md](docs/models.md) |
-| Inspect the public benchmark and the `EV1` evolution suite | [results/pilot-3way-v0.6.0/](results/pilot-3way-v0.6.0/README.md) + [benchmarks/](benchmarks/README.md) |
+| Capture, verify, approve, or retire a custom project rule | `gates/learn.py` ([docs/operating-guide.md](docs/operating-guide.md)) |
+| Inspect live public datasets (`EV1`, `CM1`, `v0.6.0`) and per-model profiles | [results/README.md](results/README.md) + [docs/models.md](docs/models.md) + [standard/core.md](standard/core.md) |
 
 ---
 
@@ -68,6 +69,7 @@ Must-Fix Shortcuts (Blocking)
    Why engineers flag this: Adding a skip marker makes the test suite report green without verifying the broken behavior.
    How it compounds across AI turns: Future AI sessions see skipped tests as normal and keep skipping failing checks.
    Fix / prompt to give your AI: Remove the test skip annotation, fix the underlying code defect, and re-run the test suite.
+   Reference: docs/evidence.md#local-05, docs/evidence.md#ext-13, docs/ai-era-rules.md
 
 Compounding Slop Risks (Review Before Merging)
 ----------------------------------------------
@@ -75,10 +77,47 @@ Compounding Slop Risks (Review Before Merging)
    What was found: tests/test_sync.py:19 test 'test_sync_runs' contains zero assertions (only checks that code does not crash).
    Why engineers flag this: Tests with zero assertions, tautologies like 'assert True', or heavy mocking stay green even when you introduce an obvious bug.
    How it compounds across AI turns: Future AI turns trust the green test run and ship regressions believing the suite checked behavior that was never tested.
-   Fix / prompt to give your AI: Rewrite this test to call the real code with concrete inputs and assert specific outputs, state changes, or error conditions.
+   Fix / prompt to give your AI: Prefer live end-to-end verification, or behavioral tests against real inputs backed by 'anti-slop-mutate', over mock-heavy unit tests.
+   Reference: docs/evidence.md#ext-13, docs/ai-era-rules.md
 ```
 
-### 2. Run the blocking diff gate in CI, pre-commit, or agent hooks
+### 2. Verify test strength on changed lines (`anti-slop-mutate`) & the 3-tier verification hierarchy
+
+Coding agents edit tests almost twice as often as humans (`23%` vs. `13%`) and add mocks more often (`36%` vs. `26%`; [Hora & Robbes, arXiv:2602.00409](https://arxiv.org/abs/2602.00409), [EXT-13](docs/evidence.md#ext-13)). Vanilla LLM unit tests average ~`53%` mutation kill rate, and even `100%`-coverage suites can score `4%` on mutants ([MutGen, arXiv:2506.02954](https://arxiv.org/abs/2506.02954), [EXT-13](docs/evidence.md#ext-13)). Inspired by Google Critique diff-based mutation with arid-node suppression ([Petrović et al., arXiv:2102.11378](https://arxiv.org/abs/2102.11378), [EXT-13](docs/evidence.md#ext-13)), `anti-slop-mutate` injects stdlib AST mutations strictly on your changed executable Python lines inside an isolated temporary copy (never touching your working tree):
+
+```bash
+# Check whether your test suite kills real bugs injected on your changed Python lines
+anti-slop-mutate --test-cmd "pytest -q"
+
+# Or without cloning via uvx (pass --base origin/main or --files path.py:10-45 as needed)
+uvx --from git+https://github.com/jremick/anti-slop anti-slop-mutate --test-cmd "pytest -q"
+```
+
+Treat verification evidence in three tiers (see [docs/ai-era-rules.md](docs/ai-era-rules.md#2-tests-and-verification-follow-the-3-tier-ai-era-verification-hierarchy)):
+
+1. **Tier 1 (Strongest for apps, APIs, CLIs, UIs): Live end-to-end / real-artifact proof** (run the real process against real inputs and verify observable output or state).
+2. **Tier 2 (Strong for logic and libraries): Behavioral integration/property tests + diff-scoped AST mutation (`anti-slop-mutate`)** against real code without mocking the system under test.
+3. **Tier 3 (Weakest): Same-turn isolated, heavily mocked unit tests** (useful for narrow external I/O boundaries only; weak proof on their own).
+
+### 3. Browse & enable opt-in packs from the Optional Rule Library
+
+Default checks stay small on purpose so teams do not inherit noisy rules or prompt bloat. [library/README.md](library/README.md) ([library/catalog.json](library/catalog.json)) lays out all three buckets cleanly:
+
+- **Default Core:** `15` Layer A `DIFF-*` checks, `8` Layer B `STRUCT-*` checks, and `standard/core.md` (`R1`-`R7`, `298` words).
+- **6 Curated Opt-In Packs (`10` `OPT-*` rules):** `network-timeouts`, `security-boundaries`, `comment-hygiene`, `verification-proof`, `build-config-hygiene`, and `architecture-simplicity`.
+- **6 Deliberately Excluded Items (`EXCL-*`):** statistical AI-text detectors (`61.22%` non-native English FP), unfiltered SAST as blocking post-edit hooks (`65%`/`61%` ground-truth match), blanket "delete all comments", blanket "be concise" prompts, 100% line-coverage mandates, and heavyweight upfront DI wrappers.
+
+```bash
+# List packs, inspect bad example + valid neighbour + evidence, and enable via 3-way verification
+anti-slop-learn library list
+anti-slop-learn library show network-timeouts
+anti-slop-learn library enable network-timeouts --by <your-name> --dry-run
+anti-slop-learn library enable network-timeouts --by <your-name>
+```
+
+Every `library enable` call runs the full 3-way `verify_rule()` gate (must catch `bad_example`, `0` hits on `valid_neighbouring_case`, `<= --max-repo-hits` on your existing repo) and leaves `<repo>/.anti-slop/learned/rules.json` untouched if verification fails.
+
+### 4. Run the blocking diff gate in CI, pre-commit, or mid-turn agent hooks
 
 ```bash
 # Fast objective-defect gate on a diff (add --structural --explain for compounding slop + plain-English rationale)
@@ -124,7 +163,7 @@ repos:
 
 When a repository contains an approved `<repo>/.anti-slop/learned/rules.json` store, the `Stop` hook enforces approved deterministic rules automatically (and no-ops cleanly when no store exists). See [gates/hooks/README.md](gates/hooks/README.md) for manual templates and Codex `execpolicy` behavior.
 
-### 3. Turn a slipped mistake into a verified, human-approved guard
+### 5. Turn a slipped project mistake into a verified, human-approved guard
 
 ```bash
 # 1) Capture what slipped through + what should be allowed instead
@@ -157,7 +196,7 @@ Approved deterministic rules are enforced automatically by `gates/review.py`, th
 
 ## What It Catches
 
-Checks are split into two layers so objective shortcuts block immediately while heuristic structural patterns explain risks clearly without noisy false blocks. For concrete "looks convincing vs. actually clean" examples and which pre-AI habits actively hurt AI workflows, read [AI-Era Coding Rules](docs/ai-era-rules.md).
+Checks are split into two layers so objective shortcuts block immediately while heuristic structural patterns explain risks clearly without noisy false blocks. For concrete before/after examples, measured verdicts, and pre-AI habits that hurt AI workflows, read [AI-Era Coding Rules](docs/ai-era-rules.md).
 
 ### Layer A: Objective Shortcuts (Blocked by default in `diff_check.py` and hooks)
 
@@ -185,6 +224,7 @@ Default `warning` (promote to blocking errors with `--strict-structural`):
 | `STRUCT-SILENT-FALLBACK` | Made-up defaults hiding broken logic or missing secrets | Broad `except Exception:` returning a silent literal (`0`, `"unknown"`, `""`) without logging/re-raising; JS/TS `catch (e) { return 0; }`; hardcoded fallback strings on sensitive env vars (`*SECRET*`, `*API_KEY*`, `*TOKEN*`, `*PASSWORD*`) | Narrowed catches (`except KeyError: return 0`), logged broad catches, non-secret env defaults (`LOG_LEVEL`) |
 | `STRUCT-DUPLICATE-BLOCK` | Copy-pasted logic that will drift out of sync | Alpha-normalized Python AST clones (`>= 6` statements with real control flow/ops, catching variable-renamed copy-paste) and normalized JS/TS/Go blocks duplicated across production files or functions | Short helpers, flat constant blocks, test setup fixtures |
 | `STRUCT-DEAD-COMPAT` | Dead branches and abandoned "legacy" shims | Unreachable `if False:` / `if 0:` branches, unreferenced `*_legacy`/`*_compat`/`*_deprecated` symbols, `allow_legacy_*` flags, and orphaned private module helpers never called anywhere | Live private helpers called in-module, decorated handlers, active adapters with callers |
+| `STRUCT-COMMENTED-CODE` | Commented-out code traps poisoning future AI turns (`0` FPs across 150 OSS commits + 551 HEAD files; [Huang et al., arXiv:2512.20334](https://arxiv.org/abs/2512.20334), [EXT-14](docs/evidence.md#ext-14)) | Newly added `>= 3`-line consecutive executable-looking commented-out code blocks in Python (AST-verified), JS/TS, and Go | Short 1-2 line `# INVARIANT:` / "why" notes ([Vitale et al., arXiv:2601.23059](https://arxiv.org/abs/2601.23059)), docstrings, JSDoc `@example`, fenced comment examples, license headers, URLs, and dividers |
 | `STRUCT-GOD-FUNCTION` / `STRUCT-GOD-FILE` | Growing monolithic functions or files | Functions exceeding `60` code lines or `12` branches `[Heuristic]`; production files growing above `400` code lines `[Heuristic]` | Focused helpers, or refactoring diffs that **shrink** an existing large file |
 | `STRUCT-SCOPE-SPRAWL` | Unrequested edits scattered across unrelated modules | Single diff editing `> 3` distinct production module directories `[Heuristic]` | Focused feature touching one production module plus `tests/` and `docs/` |
 
@@ -192,9 +232,9 @@ Default `warning` (promote to blocking errors with `--strict-structural`):
 
 ## Verified Self-Learning Loop (`R7` in Practice)
 
-Standing prompt rules bloat quickly if every one-off mistake becomes another line in `AGENTS.md` or `CLAUDE.md`. `gates/learn.py` (`anti-slop-learn`) implements `R7` as a strict, auditable workflow:
+Standing prompt rules bloat quickly if every one-off mistake becomes another line in `AGENTS.md` or `CLAUDE.md` ([IFScale, arXiv:2507.11538](https://arxiv.org/abs/2507.11538); [Gloaguen et al., arXiv:2602.11988](https://arxiv.org/abs/2602.11988), [EXT-11](docs/evidence.md#ext-11)). `gates/learn.py` (`anti-slop-learn`) implements `R7` as an auditable workflow:
 
-1. **Catch & Capture:** Record the slipped bad code, desired outcome, and a **valid neighbouring case** that an overbroad rule could accidentally break. Assigns a permanent ID (`L-001`, `L-002`, ...).
+1. **Catch & Capture (or Browse Library):** Record the slipped bad code, desired outcome, and a **valid neighbouring case** that an overbroad rule could accidentally break (assigns a permanent ID `L-001`, `L-002`, ...), or select a curated pack from [library/README.md](library/README.md) (`anti-slop-learn library list|show|enable`).
 2. **Smallest Prevention Ladder:** `suggest` and `propose` enforce narrowest-scope-first:
    - `deterministic_check` (first choice: regex/pattern check at zero prompt tokens),
    - `codebase_example` (second choice: point to a canonical repo helper/file),
@@ -205,7 +245,51 @@ Standing prompt rules bloat quickly if every one-off mistake becomes another lin
 
 ---
 
-## Empirical Evidence: What Was Proved, What Fell Short, and What Changed
+## Empirical Evidence: Live Multi-Turn Code Quality, Comment Ablation, and `v0.6.0`
+
+All three public datasets under [results/](results/README.md) (`216` total runs across 4 frontier models, `n = 3` replicates per cell) executed in isolated temp workspaces outside this repository with per-run isolated `CODEX_HOME`/`HOME` and deterministic pre-hash sanitization (`0` workstation paths, `0` usernames, `0` secrets).
+
+### 1. Multi-Turn Compounding Software Quality (`EV1`, 36 runs, 144 stages, 0 word caps)
+
+Full report and raw artifacts: [results/pilot-evolution-v0.7.0/README.md](results/pilot-evolution-v0.7.0/README.md) ([LOCAL-07](docs/evidence.md#local-07)).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pilot-v0.7.0-evolution-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/pilot-v0.7.0-evolution-light.svg">
+  <img alt="Live EV1 multi-turn code quality benchmark across 36 runs and 144 stages: baseline 50.0% (6/12), standing core-rules 41.7% (5/12, DROP on Opus and Sol), gated-structural 91.7% (11/12, 0 slop defects, 74.7% AST mutation kill rate)" src="docs/assets/pilot-v0.7.0-evolution-light.svg">
+</picture>
+
+Across 4 sequential turns on the same evolving Python billing/ledger codebase ([benchmarks/cases/EV1.json](benchmarks/cases/EV1.json); `36/36` completed, `144/144` base stages functional pass, 100% mechanically graded by [benchmarks/graders/grade_ev1.py](benchmarks/graders/grade_ev1.py)):
+
+| Condition Arm (`12` runs/arm) | Overall Pass | Functional (`4` turns) | AST Mutation Kill Mean / Med | Total Slop Defects (`/run`) | God Fns | Silent / Shortcuts | Test Theater | Stage 1-4 Wall Time |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `baseline` | **`6/12` (`50.0%`)** | `12/12` | `70.56%` / `66.67%` | `75` (`6.25`) | `3` | `71` | `1` | `5,415.0s` (`+0.0%`) |
+| `core-rules-v0.2.0` (prompts alone) | **`5/12` (`41.7%`)** | `12/12` | `67.22%` / `63.33%` | `45` (`3.75`) | `3` | `42` | `0` | `5,161.0s` (`-4.7%`) |
+| `gated-structural` (mechanical gates) | **`11/12` (`91.7%`)** | `12/12` | **`74.72%` / `73.33%`** | **`0` (`0.00`)** | **`0`** | **`0`** | **`0`** | `5,506.8s` (`+1.7%`) |
+
+Key measured findings and tradeoffs:
+
+1. **Mechanical gates outperformed standing prompts alone (`91.7%` vs. `41.7%`):** Standing prose instructions (`core-rules-v0.2.0`) **regressed** overall pass rate (`6/12 -> 5/12`, `+1/-2`) and weakened mean mutation kill rate (`70.6% -> 67.2%`), scoring **`DROP`** in `benchmarks/evolution.py compare` on both `claude-opus-5-5` (`1/3 -> 0/3`, `66.7% -> 60.0%` mut) and `gpt-6.2-sol` (`77.8% -> 68.9%` mut). Running mechanical diff + structural checks (`gated-structural`, zero standing prompt bloat) jumped pass rate to **`11/12` (`91.7%`)** (`+6/-1` vs. baseline, `+6/-0` vs. prompts), eliminated **`75 -> 0`** slop findings, and lifted AST mutation kill rate **`+7.5pp`** vs. prompts (`+4.2pp` vs. baseline), earning **`KEEP`** aggregate and on 3 of 4 models (Opus `1/3 -> 3/3`, Astra `3/3` [`+6.7pp` mut], Neon `0/3 -> 3/3`).
+2. **Mid-evolution structural and test-theater catches:** On `gemini-4-neon`, `gated-structural` caught `upgrade_subscription` (`69L-70L`) at Stage 2 across `3/3` replicates (`STRUCT-GOD-FUNCTION`), cutting Neon god functions **`3/3 -> 0/3`** (`maxFnL 75L -> 49L`) and lifting Neon mutation kill rate from `71.1%` / `68.9%` to **`82.2%`**. On `claude-opus-5-5`, `gated-structural` caught an assertion-free smoke test (`STRUCT-TEST-THEATER`, `test_percent_bounds_are_inclusive`) at Stage 2 `r3` (`1 -> 0`). Across all 12 `gated-structural` runs, pre-repair findings comprised `15` `DIFF-SUPPRESSION`, `10` `STRUCT-DEAD-COMPAT` (preventing `legacy_flat_fee` from leaking into Stage-2 helpers before Turn 4 deprecated it), `5` `STRUCT-GOD-FUNCTION`, and `1` `STRUCT-TEST-THEATER`.
+3. **Defect composition, token overhead, and lone miss:** All `113/113` `silent_failures_and_shortcuts` defects in `baseline` (`71`) and `core-rules-v0.2.0` (`42`) were bare `# type: ignore[...]` comments lacking inline reasons (`0` broad silent `except`, `0` test skips, `0` stubs, `0` duplicate blocks, `0` Stage-4 legacy shims). The `15` automated gate-repair turns kept Stage 1-4 wall time nearly flat (`+1.7%`) while adding **`+18.7%` to `+43.8%` total tokens** across models (`+11.3%` Opus USD, `$5.34 -> $5.95`). The sole remaining `gated-structural` failure (`gpt-6.2-sol r1`, `60.0% < 65%` mutation kill, `0` slop) happened because `anti-slop-mutate` was not yet wired into the Stage 1-4 gate loop.
+
+### 2. Controlled Comment-Hygiene Ablation (`CM1`, 36 runs)
+
+Full report and raw artifacts: [results/pilot-comments-v0.7.0/README.md](results/pilot-comments-v0.7.0/README.md) ([LOCAL-06](docs/evidence.md#local-06)).
+
+Testing identical-AST Python webhook files (`webhooks.py`) across 4 models x 3 arms x `n = 3` (`36/36` completed, 100% mechanically graded by [benchmarks/graders/grade_cm1.py](benchmarks/graders/grade_cm1.py); motivated by [Huang et al., arXiv:2512.20334](https://arxiv.org/abs/2512.20334) and [Vitale et al., arXiv:2601.23059](https://arxiv.org/abs/2601.23059), [EXT-14](docs/evidence.md#ext-14)):
+
+| Condition Arm (`12` runs/arm) | Pass (`4` checks) | Aggregate Wall Time (vs. `no-comments`) | Opus USD (vs. `no-comments`) | Comment Diff Churn |
+|---|---:|---:|---:|---|
+| `no-comments` (`0` comments, `90L`) | `12/12` (`100.0%`) | `413.0s` (`+0.0%`) | `$0.4022` (`+0.0%`) | `+0 / -0` on `12/12` |
+| `invariant-comments` (`3` `# INVARIANT:` lines, `93L`) | `12/12` (`100.0%`) | **`394.3s` (`-4.5%`)** | **`$0.3953` (`-1.7%`)** | `+0 / -0` (all `3` preserved verbatim on `12/12`) |
+| `comment-traps` (`28` comment lines incl. dead float blocks + stale claim, `119L`) | `12/12` (`100.0%`) | **`523.5s` (`+26.8%`; `+32.8%` vs. invariant)** | **`$0.5288` (`+31.5%`)** | `-28` comment lines scrubbed on `12/12` |
+
+All 4 frontier models hit a `12/12` accuracy ceiling (`INCONCLUSIVE` on pass rate) because `CM1` is a single 90-line module whose prompt explicitly names the ordering, cent-math, and dead-code invariants. Even at `100%` accuracy, `comment-traps` was the slowest arm on **4/4 models** (`+26.8%` to `+32.8%` wall time, `+31.5%` Opus USD, `-28` forced deletions), while 3 short `# INVARIANT:` notes ran `-4.5%` faster (`-1.7%` Opus USD) with zero accidental removals.
+
+### 3. Frozen-Test Integrity & Per-Model Overlays (`pilot-3way-v0.6.0`, 144 runs)
+
+Full report and per-run verbatim reviews: [results/pilot-3way-v0.6.0/README.md](results/pilot-3way-v0.6.0/README.md) ([LOCAL-05](docs/evidence.md#local-05)).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pilot-v0.6.0-results-dark.svg">
@@ -213,14 +297,11 @@ Standing prompt rules bloat quickly if every one-off mistake becomes another lin
   <img alt="Empirical results from pilot-3way-v0.6.0 across 144 runs showing core rules cutting frozen-test tampering from 72.7% to 0%, core matching model-controls on 3 of 4 models, Opus D-OPU-4 brevity and cost gains, and Opus SE2 unresolved failures" src="docs/assets/pilot-v0.6.0-results-light.svg">
 </picture>
 
-### What our 144-run public benchmark showed
+Across 4 frontier models, 4 real-world OSS and PR-audit tasks, and `n = 3` runs per cell (`144` runs total, `142` completed + `2` `720s` timeouts kept in denominators):
 
-Across 4 frontier models, 4 real-world and PR-audit tasks, and 3 independent runs per condition (`144` runs total, `142` completed + `2` `720s` timeouts kept in denominators; full dataset in [results/pilot-3way-v0.6.0/](results/pilot-3way-v0.6.0/README.md)), here are the main takeaways:
-
-1. **Core rules stopped test-skip cheating (`RW3`, `urllib3`):** Under release pressure, **`8/11` (`72.7%`)** completed baseline runs quietly modified a frozen test file (`@unittest.skip*`, `self.skipTest`) to waive a failing check (`Astra` `3/3`, `Sol` `3/3`, `Opus` `2/3`, `Neon` `0/2`). Standing `core-rules-v0.2.0` alone cut tampering to **`0/12` (`0%`)**, and `model-controls` stayed at **`0/11` (`0%`)**.
-2. **`model-controls` tied `core-rules` on 3 of 4 models:** On `GPT-6.2 Astra` (`12/12` vs `12/12`), `GPT-6.2 Sol` (`11/12` vs `11/12`), and `Gemini 4 Neon` (`12/12` vs `12/12`), per-model overlays did **not** raise pass rate above `core-rules-v0.2.0`, and both ruled arms added matched token overhead (`+15.8%`/`+15.2%` Astra, `+10.8%`/`+4.2%` Sol, `+26.1%`/`+23.6%` Neon). Per-model controls only moved pass rate on **`Claude Opus 5.5`** (`5/12 -> 8/12`; `8/8` completed OSS) via `D-OPU-4`, eliminating Opus's word-cap/wrapper overruns (`0/11`) while cutting matched lexical words **`-31.6%`**, USD **`-6.9%`** (`$3.94 -> $3.67`), and wall time **`-21.8%`**.
-3. **Prompt rules hit a ceiling on Opus `SE2` (`8/9` fails):** Under author pushback (`0/3` baseline, `1/3` core, `0/3` model-controls), Opus conceded follow-up-ticket deferral on a skipped concurrency test (`4` runs) or checked TypeScript changes only via `pytest` (`4` runs).
-4. **Why `pilot-3way-v0.6.0` was too narrow:** Outside the `8` `RW3` test-tampering runs and `8` Opus `SE2` semantic failures, the remaining `12` completed-run failures were word-cap or wrapper misses where the model produced the right technical answer. That meant 3 of 4 models saturated `core-rules` without testing whether rules prevent multi-turn structural code decay.
+1. **Core rules stopped test-skip cheating (`RW3`, `urllib3`):** Under release pressure, **`8/11` (`72.7%`)** completed baseline runs quietly modified a frozen test file (`@unittest.skip*`, `self.skipTest`) to waive a failing check (`Astra` `3/3`, `Sol` `3/3`, `Opus` `2/3`, `Neon` `0/2`). Standing `core-rules-v0.2.0` cut tampering to **`0/12` (`0%`)**, and `model-controls` stayed at **`0/11` (`0%`)**.
+2. **`model-controls` tied `core-rules` on 3 of 4 models:** On `GPT-6.2 Astra` (`12/12` vs `12/12`), `GPT-6.2 Sol` (`11/12` vs `11/12`), and `Gemini 4 Neon` (`12/12` vs `12/12`), per-model overlays did not raise pass rate above `core-rules-v0.2.0` while adding matched token overhead (`+15.8%`/`+15.2%` Astra, `+10.8%`/`+4.2%` Sol, `+26.1%`/`+23.6%` Neon). Per-model overlays only moved pass rate on **`Claude Opus 5.5`** (`5/12 -> 8/12`; `8/8` completed OSS) via `D-OPU-4`, eliminating word-cap/wrapper overruns (`0/11`) while cutting matched lexical words **`-31.6%`**, USD **`-6.9%`** (`$3.94 -> $3.67`), and wall time **`-21.8%`**.
+3. **Why `v0.6.0` motivated shifting to `EV1`:** Prompt rules still failed `8/9` Opus `SE2` Stage 2 runs (deferral concessions or `pytest`-only TS verification), and outside `RW3` test tampering and Opus `SE2`, the remaining `12` completed-run failures were word-cap/wrapper misses rather than multi-turn structural code decay. That gap motivated building and running `EV1` above.
 
 | Benchmark Slice (`48` runs/arm total) | `baseline` | `core-rules-v0.2.0` | `model-controls` | Net `B -> M` |
 |---|---|---|---|---:|
@@ -230,21 +311,12 @@ Across 4 frontier models, 4 real-world and PR-audit tasks, and 3 independent run
 | **Strict `wc -w` sensitivity (all 4 scenarios)** (`48`/arm) | **`26/48` (`54.2%`)** | **`37/48` (`77.1%`)** | **`42/48` (`87.5%`)** | **`+16`** |
 
 <details>
-<summary>Audit methodology &amp; isolation details (<code>LOCAL-05</code>)</summary>
+<summary>Audit methodology &amp; isolation details (<code>LOCAL-05</code>, <code>LOCAL-06</code>, <code>LOCAL-07</code>)</summary>
 
-- **Isolation &amp; privacy:** Executed under per-run isolated `CODEX_HOME`/`HOME` with deterministic pre-hash sanitization (`0` workstation paths, `0` personal skills across all published files in `results/pilot-3way-v0.6.0/`).
-- **Scoring split:** Deterministic checks (`benchmarks/graders/grade_rw3.py`, frozen-test `git diff` against `benchmarks/sources/rw3_urllib3/tests/test_response_gates.py`, read-only workspace checks, and lexical/`wc -w` counts via `inspect_text_constraints`) were mechanically verified; semantic rubric checks were scored via isolated per-case verbatim audit passes committed under `results/pilot-3way-v0.6.0/reviews/`.
+- **Isolation &amp; privacy:** All three published datasets executed under per-run isolated `CODEX_HOME`/`HOME` with deterministic pre-hash sanitization (`0` workstation paths, `0` usernames, `0` personal skills, `0` `.agy.log` files across all published files under `results/`).
+- **Scoring split:** `LOCAL-06` (`CM1`, `benchmarks/graders/grade_cm1.py`) and `LOCAL-07` (`EV1`, `benchmarks/graders/grade_ev1.py`) are **100% mechanically graded** with zero LLM judging and zero word caps. In `LOCAL-05` (`pilot-3way-v0.6.0`), deterministic checks (`benchmarks/graders/grade_rw3.py`, frozen-test `git diff`, read-only checks, lexical/`wc -w` counts) were mechanically verified, while semantic rubric checks were scored via isolated per-case verbatim audit passes committed under `results/pilot-3way-v0.6.0/reviews/`.
 
 </details>
-
-### Shifting Evaluation to Multi-Turn Compounding Software Quality (`EV1`)
-
-To prove which AI-era rules genuinely prevent software decay (and drop rules that do not), Pillar 3 adds a 4-turn feature-evolution benchmark with **zero word caps**:
-
-- **Scenario ([benchmarks/cases/EV1.json](benchmarks/cases/EV1.json), fixture `benchmarks/sources/ev1_order_ledger/`):** 4 sequential turns on the same evolving Python billing/subscription ledger: Turn 1 prorated plan upgrades + idempotency, Turn 2 promo codes across orders and upgrades, Turn 3 penny-conserving multi-chunk partial refunds + credit notes, and Turn 4 subtractive removal of a legacy flat-fee flag + fail-closed audit logging.
-- **Automated Grader & AST Mutation Engine ([benchmarks/graders/grade_ev1.py](benchmarks/graders/grade_ev1.py), [benchmarks/evolution.py](benchmarks/evolution.py)):** Measures six real quality dimensions: hidden functional correctness across all 4 turns, **stdlib AST mutation kill rate (`>= 65%`) against the candidate's own test suite** (catches weak test theater directly), duplicate code blocks, dead/legacy code removal, god-function/file sprawl, and silent failures/shortcuts.
-- **Empirical Keep/Drop Rule Comparison:** `python3 -B benchmarks/evolution.py compare --baseline <file> --treatment <file>` outputs **`KEEP`**, **`DROP`**, or **`INCONCLUSIVE`** from real quality deltas.
-- **Current status:** The `EV1` fixture, AST mutation engine, grader, and planned manifest ([benchmarks/pilot-evolution-v0.7.0.json](benchmarks/pilot-evolution-v0.7.0.json)) are implemented and verified locally (`tests/test_evolution.py`); live multi-model `EV1` benchmark runs are **planned** (`0` live runs recorded yet).
 
 ---
 
@@ -252,30 +324,31 @@ To prove which AI-era rules genuinely prevent software decay (and drop rules tha
 
 ### How This Complements Ruff, ESLint, and Semgrep
 
-Keep language-specific AST linters (`ruff`, `eslint`, `mypy`, `tsc`) for deep single-language rules and SAST tools (`Semgrep`, `CodeQL`) for security taint analysis. `anti-slop` sits beside them as a zero-config, zero-dependency polyglot diff, structural-review, learning, and agent-hook layer:
+Keep language-specific AST linters (`ruff`, `eslint`, `mypy`, `tsc`) for deep single-language rules and SAST tools (`Semgrep`, `CodeQL`) for security taint analysis. `anti-slop` sits beside them as a zero-config, zero-dependency polyglot diff, structural-review, mutation, learning, and agent-hook layer:
 
 | Capability | Ruff / ESLint / mypy | Semgrep / CodeQL | `anti-slop` |
 |---|---|---|---|
 | Deep single-language AST lint and type checking | Primary tool | Partial | Not a replacement (keep existing linters) |
 | Security vulnerability and taint SAST | Limited | Primary tool | Not a replacement (avoid raw SAST as blocking hooks; see [EXT-13](docs/evidence.md#ext-13)) |
 | Zero-config polyglot diff gate + blocking `PreToolUse`/`Stop` agent hooks | Per-stack config / manual glue | Rulepacks / too slow for hooks | Built-in (`anti-slop-diff`, `anti-slop-hook --install`) |
-| Catch test-skip waivers, test theater, silent fallback defaults, variable-renamed duplicate clones, dead legacy shims, and plain-English review | Partial per-language only | Custom rules only | Built-in (`anti-slop-review`, `gates/structural.py`) |
-| Human-gated, repo-verified self-learning rule loop | Manual rule authoring | Manual rule authoring | Built-in (`anti-slop-learn`, auto-enforced in `Stop` hook & `anti-slop-review`) |
+| Catch test-skip waivers, test theater, silent fallback defaults, variable-renamed duplicate clones, dead legacy shims, commented-out code traps, and plain-English review | Partial per-language only | Custom rules only | Built-in (`anti-slop-review`, `gates/structural.py`) |
+| Diff-scoped Python AST mutation testing on changed lines | Not built in | Not built in | Built-in (`anti-slop-mutate`, isolated temp copy) |
+| Human-gated, repo-verified self-learning rule loop + curated optional library | Manual rule authoring | Manual rule authoring | Built-in (`anti-slop-learn`, `library/catalog.json`, auto-enforced in `Stop` hook & `anti-slop-review`) |
 
 **Real-world OSS precision audits (150 commits across `urllib3/urllib3`, `sdispater/tomlkit`, and `honojs/hono`):**
 
 - **Layer A (`gates/diff_check.py`, `--allow-test-edit --no-budget`):** `136/150` (`90.7%`) commits passed clean with `0/29` parser or regex false positives post-fix (`24/29` mypy `# type: ignore[<code>]` comments missing an inline `# <reason>`, `4/29` intentional upstream skips or catches, and `1/29` moved `TODO`).
-- **Layer B (`gates/structural.py`, warning-only default):** `145/150` (`96.7%`) commits passed clean on non-size structural defect rules (`STRUCT-SILENT-FALLBACK`: `0`, `STRUCT-DEAD-COMPAT`: `0`, `STRUCT-SCOPE-SPRAWL`: `0`, `STRUCT-DUPLICATE-BLOCK`: `4` true mirrored-adapter duplicates in `hono`, `STRUCT-TEST-THEATER`: `3` no-assert/string-eval tests in `urllib3`), after fixing `3` parser/AST FP classes (`expectTypeOf`/`assertType`, AST-verified imported test helpers, and `warnings.simplefilter("error", ...)`). `65/72` total structural warnings came from growing pre-existing 518-to-1,951-line OSS files/methods, confirming why `STRUCT-*` defaults to `warning` unless `--strict-structural` is opted in. Full SHAs and reproduction steps are in [gates/README.md](gates/README.md#real-world-oss-precision-audit).
+- **Layer B (`gates/structural.py`, warning-only default):** `145/150` (`96.7%`) commits passed clean on non-size structural defect rules (`STRUCT-SILENT-FALLBACK`: `0`, `STRUCT-DEAD-COMPAT`: `0`, `STRUCT-COMMENTED-CODE`: `0`, `STRUCT-SCOPE-SPRAWL`: `0`, `STRUCT-DUPLICATE-BLOCK`: `4` true mirrored-adapter duplicates in `hono`, `STRUCT-TEST-THEATER`: `3` no-assert/string-eval tests in `urllib3`), after fixing `3` parser/AST FP classes (`expectTypeOf`/`assertType`, AST-verified imported test helpers, and `warnings.simplefilter("error", ...)`). `STRUCT-COMMENTED-CODE` also recorded **`0` false positives across 551 OSS HEAD code files** (`331` multi-line comment groups) and across `anti-slop` itself. `65/72` total structural warnings came from growing pre-existing 518-to-1,951-line OSS files/methods, confirming why `STRUCT-*` defaults to `warning` unless `--strict-structural` is opted in. Full SHAs and reproduction steps are in [gates/README.md](gates/README.md#real-world-oss-precision-audit).
 
 ### Architecture
 
-1. **Deterministic Gates, Plain-English Review, Self-Learning & CLI Hooks (`0` standing prompt tokens):**
-   - `gates/diff_check.py` (`anti-slop-diff`), `gates/structural.py`, `gates/review.py` (`anti-slop-review`), `gates/learn.py` (`anti-slop-learn`), `gates/api_checks.py` (`anti-slop-api`), `gates/hooks/run_diff_gate_hook.py` (`anti-slop-hook`), warning-first `gates/vale/`, and `gates/ci-ratchet.yml`. See [gates/README.md](gates/README.md).
+1. **Deterministic Gates, Plain-English Review, Diff Mutation, Self-Learning & CLI Hooks (`0` standing prompt tokens):**
+   - Six console scripts in `pyproject.toml`: `gates/diff_check.py` (`anti-slop-diff`), `gates/review.py` (`anti-slop-review`), `gates/learn.py` (`anti-slop-learn`), `gates/mutate.py` (`anti-slop-mutate`), `gates/hooks/run_diff_gate_hook.py` (`anti-slop-hook`), and `gates/api_checks.py` (`anti-slop-api`), plus `gates/structural.py`, warning-first `gates/vale/`, `gates/ci-ratchet.yml`, and [library/README.md](library/README.md) (`library/catalog.json`). See [gates/README.md](gates/README.md).
 2. **Lean Core Standard (`<= 300` words) & AI-Era Guidance:**
-   - [standard/core.md](standard/core.md): seven stable-ID rules (`R1`–`R7`, `298` words, independently pinned at `0.2.0`; retiring a rule leaves a gap rather than renumbering). Rationale, AI-era rules vs. pre-AI anti-patterns, and operating workflows stay out of standing prompts in [docs/ai-era-rules.md](docs/ai-era-rules.md), [docs/operating-guide.md](docs/operating-guide.md), and [docs/operations-and-routing.md](docs/operations-and-routing.md).
+   - [standard/core.md](standard/core.md): seven stable-ID rules (`R1`-`R7`, `298` words, independently pinned at `0.2.0`; retiring a rule leaves a gap rather than renumbering). Rationale, measured AI-era rules vs. pre-AI anti-patterns, and operating workflows stay out of standing prompts in [docs/ai-era-rules.md](docs/ai-era-rules.md), [docs/operating-guide.md](docs/operating-guide.md), and [docs/operations-and-routing.md](docs/operations-and-routing.md).
 3. **Per-Model Deltas & Auditable Benchmarks:**
    - [gates/model_deltas.json](gates/model_deltas.json), [docs/models.md](docs/models.md), [docs/evidence.md](docs/evidence.md): opt-in per-model overlays (`D-AST`, `D-SOL`, `D-OPU`, `D-FAB`, `D-NEO`) loaded one model at a time.
-   - [benchmarks/README.md](benchmarks/README.md) & [benchmarks/graders/README.md](benchmarks/graders/README.md): **25 versioned cases** (19 constructed including 4-turn `EV1` + 6 pinned OSS `origin: real_work` tasks `RW1`–`RW6`), **12 automated stdlib graders**, `benchmarks/evolution.py`, and `scripts/benchmark.py`.
+   - [benchmarks/README.md](benchmarks/README.md) & [benchmarks/graders/README.md](benchmarks/graders/README.md): **26 versioned cases** (`20` constructed including 4-turn `EV1` and `CM1` + `6` pinned OSS `origin: real_work` tasks `RW1`-`RW6`), **13 automated stdlib graders**, **7 pilot manifests**, `benchmarks/evolution.py`, `scripts/benchmark.py`, and **3 clean public datasets** (`216` total runs under [results/](results/README.md)).
 
 ### Verify the repository locally
 
@@ -285,14 +358,15 @@ Requires Python 3.11+ with zero third-party packages and zero model credentials:
 python3 -B scripts/check.py
 ```
 
-Validates all 25 versioned cases and pinned source fixtures, reconciles all pilot manifests (`benchmarks/pilot*.json`) and `benchmarks/run-record.example.json`, validates and summarizes committed `results/**/*.jsonl` datasets, and executes every `tests/test_*.py` suite (including self-checking every authored Markdown file in the repository with `gates/diff_check.py`). Makes zero model or network calls.
+Validates all 26 versioned cases and pinned source fixtures, verifies `CM1` identical-AST ablation fixtures (`grade_cm1.py --check-ablation-fixtures`), validates `library/catalog.json`, reconciles all 7 pilot manifests (`benchmarks/pilot*.json`) and `benchmarks/run-record.example.json`, validates and summarizes all committed `results/**/*.jsonl` datasets (`216` runs across 9 paired tracks), and executes every `tests/test_*.py` suite (including self-checking authored Markdown files with `gates/diff_check.py`). Makes zero model or network calls.
 
 ### Known Limits and Roadmap
 
-- **Live `EV1` multi-turn benchmark pending execution:** `benchmarks/pilot-evolution-v0.7.0.json` is built and locally verified; live multi-model execution across `baseline`, `core-rules-v0.2.0`, and `gated-structural` is the next empirical step to test which rules earn `KEEP` vs. `DROP`.
+- **Single-scenario constructed scope in `EV1` & `CM1`:** `pilot-evolution-v0.7.0` and `pilot-comments-v0.7.0` establish consistent `n = 3` outcomes on stdlib Python scenarios, not arbitrary multi-language production repositories. Next benchmark steps: wire `anti-slop-mutate` into the optional gate loop (addressing the sole remaining `gpt-6.2-sol r1` `60.0%` mutation miss), add multi-language evolution chains, and design `CM2` with cross-file implicit invariants unnamed in the user prompt.
+- **Untriggered `EV1` rules & practitioner hypotheses stay labeled as such:** `STRUCT-DUPLICATE-BLOCK` (`4` true hits in `hono` OSS audit) and `STRUCT-SILENT-FALLBACK` both had `0` triggers in `EV1`, and heuristics like premature single-use abstractions remain tagged `Practitioner hypothesis` in [docs/ai-era-rules.md](docs/ai-era-rules.md).
 - **Heuristic structural thresholds stay warning-only by default:** The 150-commit OSS audit confirmed `96.7%` clean pass rate on non-size defect rules, while `STRUCT-GOD-FILE` / `STRUCT-GOD-FUNCTION` frequently fire on pre-existing large OSS modules (keep `--strict-structural` opt-in for greenfield or refactored modules).
-- **Opus `SE2` Stage 2 verification gap & Fable 5.2 exclusion:** Documented transparently in [results/pilot-3way-v0.6.0/README.md](results/pilot-3way-v0.6.0/README.md) and [docs/models.md](docs/models.md).
-- **Live external citations:** External sources in [docs/evidence.md](docs/evidence.md) are date-stamped (24–26 November 2026) rather than web-archived; recheck upstream pages before relying on them downstream.
+- **Opus `SE2` Stage 2 verification gap & Fable 5.2 exclusion:** Documented in [results/pilot-3way-v0.6.0/README.md](results/pilot-3way-v0.6.0/README.md) and [docs/models.md](docs/models.md).
+- **Live external citations:** External sources in [docs/evidence.md](docs/evidence.md) are date-stamped (24-27 November 2026, live-verified via arXiv Atom API, Crossref/OpenAlex, and HTTP checks) rather than web-archived; recheck upstream pages before relying on them downstream.
 
 ### Contributing, Security, and Licensing
 
