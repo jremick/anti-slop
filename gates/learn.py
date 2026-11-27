@@ -31,6 +31,7 @@ import io
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import tempfile
 import tokenize
@@ -41,11 +42,15 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from gates import diff_check as _dc  # noqa: E402
+from gates import structural as _struct  # noqa: E402
 
 
 SCHEMA_VERSION = 1
 LIBRARY_SCHEMA_VERSION = 1
 DEFAULT_STORE_REL = ".anti-slop/learned/rules.json"
+DEFAULT_TELEMETRY_REL = ".anti-slop/telemetry.jsonl"
+DEFAULT_MINE_COMMITS = 30
+DEFAULT_STALE_DAYS = 60
 VALID_LAYERS = ("deterministic_check", "codebase_example", "prompt_rule")
 VALID_LIBRARY_LAYERS = ("deterministic_check", "prompt_rule")
 VALID_EVIDENCE_STATUSES = (
@@ -127,6 +132,10 @@ def compute_proposal_sha256(rule: Dict[str, Any]) -> str:
 
 def default_store_path(repo_root: Path | str = ".") -> Path:
     return Path(repo_root).resolve() / DEFAULT_STORE_REL
+
+
+def default_telemetry_path(repo_root: Path | str = ".") -> Path:
+    return Path(repo_root).resolve() / DEFAULT_TELEMETRY_REL
 
 
 def load_store(store_path: Path | str) -> Dict[str, Any]:
@@ -1608,6 +1617,780 @@ def enable_library_rules(
     }
 
 
+_FIX_SUBJECT_RE = re.compile(r"^(?:fix|bugfix|hotfix)(?:\([^)]*\))?!?:", re.IGNORECASE)
+_REVERT_SUBJECT_RE = re.compile(r"^(?:revert\b|rollback\b)", re.IGNORECASE)
+
+
+def _parse_utc_iso(ts: str) -> Optional[datetime]:
+    raw = (ts or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_telemetry_jsonl(telemetry_path: Path) -> Dict[str, Any]:
+    """Parse optional local hook/review telemetry JSONL safely (read-only)."""
+    code_counts: Dict[str, int] = {}
+    code_last_seen: Dict[str, str] = {}
+    events_by_type: Dict[str, int] = {}
+    harnesses: Dict[str, int] = {}
+    file_ext_counts: Dict[str, int] = {}
+    records_parsed = 0
+    malformed_lines = 0
+    blocked_events = 0
+    allowed_events = 0
+    earliest_dt: Optional[datetime] = None
+    latest_dt: Optional[datetime] = None
+    earliest_ts: Optional[str] = None
+    latest_ts: Optional[str] = None
+
+    if not telemetry_path.is_file():
+        return {
+            "exists": False,
+            "path": str(telemetry_path),
+            "records_parsed": 0,
+            "malformed_lines": 0,
+            "blocked_events": 0,
+            "allowed_events": 0,
+            "events_by_type": {},
+            "harnesses": {},
+            "file_ext_counts": {},
+            "code_counts": {},
+            "code_last_seen": {},
+            "earliest_ts": None,
+            "latest_ts": None,
+        }
+
+    try:
+        raw_lines = telemetry_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        raw_lines = []
+
+    for raw in raw_lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+        except json.JSONDecodeError:
+            malformed_lines += 1
+            continue
+        if not isinstance(obj, dict):
+            malformed_lines += 1
+            continue
+
+        records_parsed += 1
+        if obj.get("blocked") is True:
+            blocked_events += 1
+        else:
+            allowed_events += 1
+
+        event = str(obj.get("event") or "unknown").strip() or "unknown"
+        events_by_type[event] = events_by_type.get(event, 0) + 1
+
+        harness = str(obj.get("harness") or "").strip()
+        if harness:
+            harnesses[harness] = harnesses.get(harness, 0) + 1
+
+        ts_raw = str(obj.get("ts") or "").strip()
+        dt = _parse_utc_iso(ts_raw)
+        if dt is not None:
+            norm_ts = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if earliest_dt is None or dt < earliest_dt:
+                earliest_dt = dt
+                earliest_ts = norm_ts
+            if latest_dt is None or dt > latest_dt:
+                latest_dt = dt
+                latest_ts = norm_ts
+        else:
+            norm_ts = None
+
+        codes = obj.get("codes")
+        if isinstance(codes, list):
+            for raw_code in codes:
+                if not isinstance(raw_code, str):
+                    continue
+                code = raw_code.strip()
+                if not code:
+                    continue
+                code_counts[code] = code_counts.get(code, 0) + 1
+                if norm_ts is not None:
+                    prev = code_last_seen.get(code)
+                    if prev is None or norm_ts > prev:
+                        code_last_seen[code] = norm_ts
+
+        exts = obj.get("file_exts")
+        if isinstance(exts, list):
+            for raw_ext in exts:
+                if isinstance(raw_ext, str) and raw_ext.strip():
+                    ext = raw_ext.strip().lower()
+                    file_ext_counts[ext] = file_ext_counts.get(ext, 0) + 1
+
+    return {
+        "exists": True,
+        "path": str(telemetry_path),
+        "records_parsed": records_parsed,
+        "malformed_lines": malformed_lines,
+        "blocked_events": blocked_events,
+        "allowed_events": allowed_events,
+        "events_by_type": dict(sorted(events_by_type.items())),
+        "harnesses": dict(sorted(harnesses.items())),
+        "file_ext_counts": dict(sorted(file_ext_counts.items())),
+        "code_counts": dict(sorted(code_counts.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "code_last_seen": dict(sorted(code_last_seen.items())),
+        "earliest_ts": earliest_ts,
+        "latest_ts": latest_ts,
+    }
+
+
+def _is_excluded_mining_path(rel_path: str) -> bool:
+    norm = _dc._normalize_relpath(rel_path)
+    parts = Path(norm).parts
+    if any(part in EXCLUDED_SCAN_DIRS for part in parts):
+        return True
+    if len(parts) >= 2 and parts[:2] == ("benchmarks", "sources"):
+        return True
+    return False
+
+
+def _filter_unified_diff_for_mining(diff_text: str) -> str:
+    """Drop diff sections under excluded directories (results, fixtures, .anti-slop, etc.)."""
+    blocks: List[List[str]] = []
+    current: List[str] = []
+    for line in diff_text.splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            if current:
+                blocks.append(current)
+            current = [line]
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append(current)
+
+    kept: List[str] = []
+    for block in blocks:
+        target_path: Optional[str] = None
+        for ln in block[1:8]:
+            if ln.startswith("+++ b/"):
+                target_path = ln[6:].strip()
+                break
+            if ln.startswith("+++ /dev/null"):
+                target_path = ""
+                break
+        if target_path is None:
+            parts = block[0].strip().split(" b/", 1)
+            if len(parts) == 2:
+                target_path = parts[1].strip()
+        if not target_path or _is_excluded_mining_path(target_path):
+            continue
+        kept.extend(block)
+    return "".join(kept)
+
+
+def _compile_uninstalled_opt_rules(
+    catalog: Dict[str, Any],
+    active_lib_map: Dict[str, str],
+) -> List[Dict[str, Any]]:
+    compiled_rules: List[Dict[str, Any]] = []
+    for pack in catalog.get("optional_packs") or []:
+        for rule in pack.get("rules") or []:
+            if rule.get("layer") != "deterministic_check":
+                continue
+            rid = str(rule.get("id") or "")
+            if rid.upper() in active_lib_map:
+                continue
+            match_mode = str(rule.get("match_mode") or "line")
+            try:
+                compiled = _validate_regex_pattern(str(rule.get("pattern") or ""), match_mode)
+            except LearnError:
+                continue
+            file_glob = str(rule.get("file_glob") or "*")
+            ignore_comments = _should_ignore_code_comments(
+                str(rule.get("bad_example") or ""),
+                compiled,
+                match_mode,
+                file_glob=file_glob,
+            )
+            compiled_rules.append({
+                "rule": rule,
+                "pack": pack,
+                "compiled": compiled,
+                "match_mode": match_mode,
+                "file_glob": file_glob,
+                "ignore_comments": ignore_comments,
+                "targets_tests": "test" in file_glob.lower(),
+            })
+    return compiled_rules
+
+
+def _scan_commit_diff_opt_rules(
+    parsed_diff: Dict[str, Any],
+    compiled_opt_rules: Sequence[Dict[str, Any]],
+    short_sha: str,
+    opt_hits_by_rule: Dict[str, Dict[str, Any]],
+) -> None:
+    for fentry in parsed_diff.get("files") or []:
+        path = str(fentry.get("path") or "")
+        if not path or fentry.get("is_deleted") or _is_excluded_mining_path(path):
+            continue
+        is_test = _dc._is_test_file(path)
+        for item in compiled_opt_rules:
+            if is_test and not item["targets_tests"]:
+                continue
+            if not _matches_file_glob(path, item["file_glob"]):
+                continue
+            rid = str(item["rule"]["id"])
+            matched_in_file: List[Tuple[int, str]] = []
+            for hunk in fentry.get("hunks") or []:
+                visible = [(k, ln, txt) for k, ln, txt in hunk["lines"] if k != "-"]
+                if not visible:
+                    continue
+                added_1based = {i + 1 for i, (k, _, _) in enumerate(visible) if k == "+"}
+                if not added_1based:
+                    continue
+                hunk_text = "\n".join(txt for _, _, txt in visible)
+                line_map = {i + 1: ln for i, (_, ln, _) in enumerate(visible)}
+                for ln1, snippet in _find_pattern_hits_in_text(
+                    hunk_text,
+                    item["compiled"],
+                    item["match_mode"],
+                    added_lines=added_1based,
+                    rel_path=path,
+                    ignore_comments=item["ignore_comments"],
+                ):
+                    matched_in_file.append((line_map.get(ln1, ln1), snippet))
+            if matched_in_file:
+                bucket = opt_hits_by_rule.setdefault(
+                    rid,
+                    {
+                        "rule": item["rule"],
+                        "pack": item["pack"],
+                        "commits": [],
+                        "total_hits": 0,
+                        "sample_hits": [],
+                    },
+                )
+                if short_sha not in bucket["commits"]:
+                    bucket["commits"].append(short_sha)
+                bucket["total_hits"] += len(matched_in_file)
+                for real_ln, snippet in matched_in_file:
+                    if len(bucket["sample_hits"]) < 5:
+                        bucket["sample_hits"].append(f"{short_sha} {path}:{real_ln}: {snippet[:60]}")
+
+
+def _mine_git_history(
+    root: Path,
+    commits: int,
+    compiled_opt_rules: Sequence[Dict[str, Any]],
+) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Read-only git log/show mining across the last N non-merge commits."""
+    opt_hits_by_rule: Dict[str, Dict[str, Any]] = {}
+    git_code_stats: Dict[str, Dict[str, Any]] = {}
+    empty_summary: Dict[str, Any] = {
+        "available": False,
+        "commits_scanned": 0,
+        "fix_commit_count": 0,
+        "revert_commit_count": 0,
+        "fix_commit_ratio": 0.0,
+        "churn_signals": [],
+        "high_churn_files": [],
+        "diff_and_structural_code_counts": {},
+    }
+    if commits == 0:
+        empty_summary["available"] = True
+        return empty_summary, opt_hits_by_rule, git_code_stats
+
+    try:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return empty_summary, opt_hits_by_rule, git_code_stats
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        return empty_summary, opt_hits_by_rule, git_code_stats
+
+    log_proc = subprocess.run(
+        ["git", "log", "--no-merges", "-n", str(commits), "--format=%H%x1f%aI%x1f%s"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        errors="replace",
+        check=False,
+    )
+    if log_proc.returncode != 0:
+        empty_summary["available"] = True
+        return empty_summary, opt_hits_by_rule, git_code_stats
+
+    commit_rows: List[Tuple[str, str, str]] = []
+    for line in log_proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\x1f", 2)
+        if len(parts) == 3:
+            commit_rows.append((parts[0].strip(), parts[1].strip(), parts[2].strip()))
+
+    fix_count = 0
+    revert_count = 0
+    churn_signals: List[Dict[str, str]] = []
+    file_touch_counts: Dict[str, Dict[str, Any]] = {}
+
+    for full_sha, author_iso, subject in commit_rows:
+        short_sha = full_sha[:7]
+        is_revert = bool(_REVERT_SUBJECT_RE.search(subject))
+        is_fix = (not is_revert) and bool(_FIX_SUBJECT_RE.search(subject))
+        if is_revert:
+            revert_count += 1
+            if len(churn_signals) < 10:
+                churn_signals.append({"kind": "revert", "commit": short_sha, "date": author_iso, "subject": subject})
+        elif is_fix:
+            fix_count += 1
+            if len(churn_signals) < 10:
+                churn_signals.append({"kind": "fix", "commit": short_sha, "date": author_iso, "subject": subject})
+
+        diff_proc = subprocess.run(
+            ["git", "show", "--format=", "--unified=3", "--no-color", "--no-ext-diff", full_sha],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=False,
+        )
+        if diff_proc.returncode != 0 or not diff_proc.stdout.strip():
+            continue
+        filtered_diff = _filter_unified_diff_for_mining(diff_proc.stdout)
+        if not filtered_diff.strip():
+            continue
+
+        parsed = _dc.parse_unified_diff(filtered_diff)
+        for fentry in parsed.get("files") or []:
+            fpath = str(fentry.get("path") or "")
+            if not fpath or _is_excluded_mining_path(fpath):
+                continue
+            ft = file_touch_counts.setdefault(
+                fpath,
+                {"file": fpath, "commit_count": 0, "fix_or_revert_count": 0, "sample_commits": []},
+            )
+            ft["commit_count"] += 1
+            if is_fix or is_revert:
+                ft["fix_or_revert_count"] += 1
+            if len(ft["sample_commits"]) < 5:
+                ft["sample_commits"].append(short_sha)
+
+        if compiled_opt_rules:
+            _scan_commit_diff_opt_rules(parsed, compiled_opt_rules, short_sha, opt_hits_by_rule)
+
+        diff_res = _dc.check_diff(
+            filtered_diff,
+            repo_root=None,
+            allow_test_edit=True,
+            no_budget=True,
+        )
+        struct_res = _struct.check_structural_diff(filtered_diff, repo_root=None)
+        commit_findings = (
+            list(diff_res.get("errors") or [])
+            + list(diff_res.get("warnings") or [])
+            + list(struct_res.get("errors") or [])
+            + list(struct_res.get("warnings") or [])
+        )
+        seen_in_commit: Set[str] = set()
+        for finding in commit_findings:
+            code = str(finding.get("code") or "").strip()
+            if not code:
+                continue
+            stat = git_code_stats.setdefault(code, {"commit_count": 0, "hit_count": 0, "commits": []})
+            stat["hit_count"] += 1
+            if code not in seen_in_commit:
+                seen_in_commit.add(code)
+                stat["commit_count"] += 1
+                if len(stat["commits"]) < 5:
+                    stat["commits"].append(short_sha)
+
+    scanned = len(commit_rows)
+    high_churn_files = sorted(
+        [
+            item
+            for item in file_touch_counts.values()
+            if item["fix_or_revert_count"] >= 2
+        ],
+        key=lambda x: (-x["fix_or_revert_count"], -x["commit_count"], x["file"]),
+    )[:10]
+
+    summary = {
+        "available": True,
+        "commits_scanned": scanned,
+        "fix_commit_count": fix_count,
+        "revert_commit_count": revert_count,
+        "fix_commit_ratio": round((fix_count + revert_count) / scanned, 4) if scanned else 0.0,
+        "churn_signals": churn_signals,
+        "high_churn_files": high_churn_files,
+        "diff_and_structural_code_counts": dict(
+            sorted(
+                ((code, st["commit_count"]) for code, st in git_code_stats.items()),
+                key=lambda kv: (-kv[1], kv[0]),
+            )
+        ),
+    }
+    return summary, opt_hits_by_rule, git_code_stats
+
+
+def _build_recommended_library_packs(
+    opt_hits_by_rule: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    by_pack: Dict[str, Dict[str, Any]] = {}
+    for rid, info in sorted(opt_hits_by_rule.items()):
+        pack = info["pack"]
+        pack_id = str(pack["id"])
+        rule = info["rule"]
+        entry = by_pack.setdefault(
+            pack_id,
+            {
+                "pack_id": pack_id,
+                "pack_name": pack["name"],
+                "description": pack["description"],
+                "when_to_enable": pack["when_to_enable"],
+                "commits": [],
+                "total_hits": 0,
+                "matched_rules": [],
+            },
+        )
+        for sha in info["commits"]:
+            if sha not in entry["commits"]:
+                entry["commits"].append(sha)
+        entry["total_hits"] += info["total_hits"]
+        entry["matched_rules"].append({
+            "id": rid,
+            "title": rule["title"],
+            "severity": rule["severity"],
+            "commit_count": len(info["commits"]),
+            "total_hits": info["total_hits"],
+            "sample_commits": info["commits"][:5],
+            "sample_hits": info["sample_hits"][:5],
+        })
+
+    recommended: List[Dict[str, Any]] = []
+    for pack_id, entry in by_pack.items():
+        recommended.append({
+            "pack_id": pack_id,
+            "pack_name": entry["pack_name"],
+            "description": entry["description"],
+            "when_to_enable": entry["when_to_enable"],
+            "matched_commits_count": len(entry["commits"]),
+            "sample_commits": entry["commits"][:5],
+            "total_hits": entry["total_hits"],
+            "matched_rules": sorted(
+                entry["matched_rules"], key=lambda r: (-r["commit_count"], r["id"])
+            ),
+            "verify_command": f"anti-slop learn library enable {pack_id} --by <your-name> --dry-run",
+            "enable_command": f"anti-slop learn library enable {pack_id} --by <your-name>",
+        })
+    recommended.sort(key=lambda p: (-p["matched_commits_count"], -p["total_hits"], p["pack_id"]))
+    return recommended
+
+
+def _find_retirement_candidates(
+    store_data: Dict[str, Any],
+    telemetry_summary: Dict[str, Any],
+    stale_days: int,
+    now_dt: datetime,
+) -> List[Dict[str, Any]]:
+    code_counts: Dict[str, int] = telemetry_summary.get("code_counts") or {}
+    code_last_seen: Dict[str, str] = telemetry_summary.get("code_last_seen") or {}
+    records_parsed = int(telemetry_summary.get("records_parsed") or 0)
+    candidates: List[Dict[str, Any]] = []
+
+    for entry in store_data.get("rules") or []:
+        if not _is_valid_approved_entry(entry):
+            continue
+        rule_id = str(entry["id"])
+        learned_code = f"LEARNED-{rule_id}"
+        hits = code_counts.get(learned_code, 0) + code_counts.get(rule_id, 0)
+        last_hit_ts = code_last_seen.get(learned_code) or code_last_seen.get(rule_id)
+
+        approval = entry.get("approval") or {}
+        approved_at = str(
+            approval.get("approved_at") or entry.get("updated_at") or entry.get("created_at") or ""
+        )
+        approved_dt = _parse_utc_iso(approved_at)
+        age_days = round((now_dt - approved_dt).total_seconds() / 86400.0, 1) if approved_dt else None
+
+        stale = False
+        reason = ""
+        days_since_hit: Optional[float] = None
+        if hits == 0 and age_days is not None and age_days >= stale_days:
+            stale = True
+            if records_parsed > 0:
+                reason = (
+                    f"Zero hits across {records_parsed} telemetry record(s) over {age_days:.1f} days "
+                    f"since approval (threshold: {stale_days} days)."
+                )
+            else:
+                reason = (
+                    f"Zero recorded hits (no telemetry log yet) and rule is {age_days:.1f} days old "
+                    f"(threshold: {stale_days} days); check retirement trigger."
+                )
+        elif hits > 0 and last_hit_ts:
+            last_dt = _parse_utc_iso(last_hit_ts)
+            if last_dt is not None:
+                days_since_hit = round((now_dt - last_dt).total_seconds() / 86400.0, 1)
+                if days_since_hit >= stale_days:
+                    stale = True
+                    reason = (
+                        f"Zero hits in the last {days_since_hit:.1f} days "
+                        f"(last seen {last_hit_ts}; threshold: {stale_days} days)."
+                    )
+
+        if stale:
+            proposal = entry.get("proposal") or {}
+            candidates.append({
+                "id": rule_id,
+                "title": entry["title"],
+                "layer": proposal.get("layer"),
+                "approved_at": approved_at,
+                "age_days": age_days,
+                "telemetry_hits": hits,
+                "last_hit_ts": last_hit_ts,
+                "days_since_last_hit": days_since_hit,
+                "retirement_trigger": proposal.get("retirement_trigger", ""),
+                "reason": reason,
+                "retire_command": f'anti-slop learn retire {rule_id} --reason "<reason>"',
+            })
+
+    candidates.sort(key=lambda c: (-(c["age_days"] or 0.0), c["id"]))
+    return candidates
+
+
+def _build_recurring_patterns(
+    telemetry_summary: Dict[str, Any],
+    git_code_stats: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    t_counts: Dict[str, int] = telemetry_summary.get("code_counts") or {}
+    t_last: Dict[str, str] = telemetry_summary.get("code_last_seen") or {}
+    all_codes = set(t_counts.keys()) | set(git_code_stats.keys())
+    recurring: List[Dict[str, Any]] = []
+
+    for code in sorted(all_codes):
+        t_cnt = int(t_counts.get(code, 0))
+        g_info = git_code_stats.get(code) or {}
+        g_commits = int(g_info.get("commit_count", 0))
+        g_hits = int(g_info.get("hit_count", 0))
+        total = t_cnt + g_commits
+        if total < 2:
+            continue
+        sources: List[str] = []
+        if t_cnt > 0:
+            sources.append("telemetry")
+        if g_commits > 0:
+            sources.append("git")
+        if code.startswith("LEARNED-"):
+            action = "Existing learned rule is actively catching repeat slop; keep enforced or fix root cause in canonical examples."
+        elif g_commits >= 2 and t_cnt == 0:
+            action = "Pattern is slipping into git commits uncaught by local hooks; install blocking hooks or CI diff checks."
+        else:
+            action = "Recurring pattern; fix root cause via canonical example, linter config, or scoped learned rule if not already blocked."
+        recurring.append({
+            "code": code,
+            "telemetry_count": t_cnt,
+            "git_commit_count": g_commits,
+            "git_hit_count": g_hits,
+            "total_count": total,
+            "sources": sources,
+            "last_seen_ts": t_last.get(code),
+            "sample_commits": list(g_info.get("commits") or [])[:5],
+            "suggested_action": action,
+        })
+
+    recurring.sort(key=lambda item: (-item["total_count"], item["code"]))
+    return recurring
+
+
+def _build_mine_next_steps(
+    recurring_patterns: Sequence[Dict[str, Any]],
+    recommended_packs: Sequence[Dict[str, Any]],
+    retirement_candidates: Sequence[Dict[str, Any]],
+    telemetry_summary: Dict[str, Any],
+    git_summary: Dict[str, Any],
+) -> List[str]:
+    steps: List[str] = []
+    for pack in recommended_packs[:3]:
+        pid = pack["pack_id"]
+        steps.append(
+            f"Inspect and dry-run verify optional pack '{pid}' "
+            f"({pack['matched_commits_count']} commit(s)): "
+            f"anti-slop learn library show {pid} && "
+            f"anti-slop learn library enable {pid} --by <your-name> --dry-run"
+        )
+    for cand in retirement_candidates[:3]:
+        steps.append(
+            f"Review stale rule {cand['id']} ({cand['title']}) against its retirement trigger; "
+            f"retire if obsolete: anti-slop learn retire {cand['id']} --reason \"<reason>\""
+        )
+    for pat in recurring_patterns[:3]:
+        if pat["git_commit_count"] >= 2 and pat["telemetry_count"] == 0:
+            steps.append(
+                f"Pattern {pat['code']} appeared in {pat['git_commit_count']} recent commit(s) without hook blocks: "
+                "install blocking agent hooks via anti-slop hook --install <claude|antigravity|codex>."
+            )
+            break
+    if git_summary.get("high_churn_files"):
+        top_file = git_summary["high_churn_files"][0]
+        steps.append(
+            f"Inspect high-churn file {top_file['file']} "
+            f"({top_file['fix_or_revert_count']} fix/revert commit(s)) for missing characterization tests or structural coupling."
+        )
+    if not steps:
+        if not telemetry_summary.get("exists"):
+            steps.append(
+                "No recurring slop or stale rules found. Optional: enable local hook telemetry "
+                "(ANTI_SLOP_TELEMETRY=1) or widen --commits to monitor over a longer history."
+            )
+        else:
+            steps.append(
+                "No recurring slop, uninstalled pack matches, or stale learned rules found in the current window."
+            )
+    return steps
+
+
+def mine_patterns(
+    repo_root: Path | str = ".",
+    *,
+    store_path: Optional[Path | str] = None,
+    telemetry_path: Optional[Path | str] = None,
+    commits: int = DEFAULT_MINE_COMMITS,
+    stale_days: int = DEFAULT_STALE_DAYS,
+    catalog_path: Optional[Path | str] = None,
+    now: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """Read-only continuous monitoring: mine hook telemetry + git history for recurring slop and stale rules.
+
+    Strictly read-only: never creates, edits, or approves rules in .anti-slop/learned/rules.json.
+    """
+    if isinstance(commits, bool) or not isinstance(commits, int) or commits < 0:
+        raise LearnError("commits must be a non-negative integer.")
+    if isinstance(stale_days, bool) or not isinstance(stale_days, int) or stale_days < 0:
+        raise LearnError("stale_days must be a non-negative integer.")
+
+    root = Path(repo_root).resolve()
+    store = Path(store_path) if store_path is not None else default_store_path(root)
+    telemetry = Path(telemetry_path) if telemetry_path is not None else default_telemetry_path(root)
+    now_dt = now.astimezone(timezone.utc) if now is not None else datetime.now(timezone.utc)
+
+    store_data = load_store(store)
+    active_lib_map = _active_library_rule_map(store_data)
+    catalog = load_library_catalog(catalog_path)
+    compiled_opt_rules = _compile_uninstalled_opt_rules(catalog, active_lib_map)
+
+    telemetry_summary = _parse_telemetry_jsonl(telemetry)
+    git_summary, opt_hits_by_rule, git_code_stats = _mine_git_history(
+        root, commits, compiled_opt_rules
+    )
+
+    recurring_patterns = _build_recurring_patterns(telemetry_summary, git_code_stats)
+    recommended_library_packs = _build_recommended_library_packs(opt_hits_by_rule)
+    retirement_candidates = _find_retirement_candidates(
+        store_data, telemetry_summary, stale_days, now_dt
+    )
+    suggested_next_steps = _build_mine_next_steps(
+        recurring_patterns,
+        recommended_library_packs,
+        retirement_candidates,
+        telemetry_summary,
+        git_summary,
+    )
+
+    return {
+        "ok": True,
+        "read_only": True,
+        "repo_root": str(root),
+        "store_path": str(store),
+        "telemetry_path": str(telemetry),
+        "commits_requested": commits,
+        "stale_days": stale_days,
+        "telemetry_summary": telemetry_summary,
+        "git_summary": git_summary,
+        "recurring_patterns": recurring_patterns,
+        "recommended_library_packs": recommended_library_packs,
+        "retirement_candidates": retirement_candidates,
+        "suggested_next_steps": suggested_next_steps,
+    }
+
+
+def _format_mine_report(report: Dict[str, Any]) -> str:
+    t = report["telemetry_summary"]
+    g = report["git_summary"]
+    lines = [
+        "Anti-Slop Continuous Mining Report (read-only)",
+        f"  Telemetry: {t['records_parsed']} record(s), {t['blocked_events']} blocked, "
+        f"{t['malformed_lines']} malformed line(s) skipped ({'present' if t['exists'] else 'not found'})",
+        f"  Git scan:  {g['commits_scanned']} non-merge commit(s), "
+        f"{g['fix_commit_count']} fix / {g['revert_commit_count']} revert commit(s)",
+        "",
+    ]
+
+    recurring = report["recurring_patterns"]
+    lines.append(f"Recurring patterns (count >= 2): {len(recurring)}")
+    if recurring:
+        for item in recurring:
+            src = "+".join(item["sources"])
+            commits_str = f" [commits: {', '.join(item['sample_commits'])}]" if item["sample_commits"] else ""
+            lines.append(
+                f"  - {item['code']}: total={item['total_count']} "
+                f"(telemetry={item['telemetry_count']}, git_commits={item['git_commit_count']}, {src}){commits_str}"
+            )
+    else:
+        lines.append("  None found.")
+    lines.append("")
+
+    packs = report["recommended_library_packs"]
+    lines.append(f"Recommended optional library packs (uninstalled): {len(packs)}")
+    if packs:
+        for pack in packs:
+            rule_ids = ", ".join(r["id"] for r in pack["matched_rules"])
+            shas = ", ".join(pack["sample_commits"])
+            lines.append(
+                f"  - {pack['pack_id']} ({pack['pack_name']}): "
+                f"{pack['matched_commits_count']} commit(s), {pack['total_hits']} hit(s) "
+                f"[{rule_ids}; sample commits: {shas}]"
+            )
+            lines.append(f"      verify: {pack['verify_command']}")
+    else:
+        lines.append("  None matched recent commits.")
+    lines.append("")
+
+    retire = report["retirement_candidates"]
+    lines.append(f"Retirement candidates (zero hits >= {report['stale_days']} days): {len(retire)}")
+    if retire:
+        for cand in retire:
+            lines.append(f"  - {cand['id']} ({cand['title']}): {cand['reason']}")
+            if cand["retirement_trigger"]:
+                lines.append(f"      trigger: {cand['retirement_trigger']}")
+            lines.append(f"      retire:  {cand['retire_command']}")
+    else:
+        lines.append("  None flagged.")
+    lines.append("")
+
+    lines.append("Suggested next steps (verify before human approval):")
+    for idx, step in enumerate(report["suggested_next_steps"], start=1):
+        lines.append(f"  {idx}. {step}")
+    lines.append("")
+    lines.append(
+        "Read-only check: .anti-slop/learned/rules.json was not modified. "
+        "Run verification and obtain explicit human approval before enabling or retiring rules."
+    )
+    return "\n".join(lines)
+
+
 def _format_library_list(summary: Dict[str, Any]) -> str:
     dc = summary["default_core"]
     lines = [
@@ -1854,6 +2637,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Run full 3-way verification without modifying the learned-rule store.",
     )
 
+    p_mine = sub.add_parser(
+        "mine",
+        parents=[common],
+        help="Read-only continuous monitoring: mine local telemetry and recent git commits for recurring slop, optional packs, and stale rules.",
+    )
+    p_mine.add_argument(
+        "--telemetry",
+        default=None,
+        help=f"Path to local hook/review telemetry JSONL (default: <repo-root>/{DEFAULT_TELEMETRY_REL}).",
+    )
+    p_mine.add_argument(
+        "--commits",
+        type=int,
+        default=DEFAULT_MINE_COMMITS,
+        help=f"Recent non-merge commits to inspect (default: {DEFAULT_MINE_COMMITS}; 0 skips git mining).",
+    )
+    p_mine.add_argument(
+        "--stale-days",
+        type=int,
+        default=DEFAULT_STALE_DAYS,
+        help=f"Days without hits before flagging an approved rule as a retirement candidate (default: {DEFAULT_STALE_DAYS}).",
+    )
+
     args = parser.parse_args(argv)
     store_path = Path(args.store) if args.store else default_store_path(args.repo_root)
 
@@ -2063,6 +2869,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 else:
                     print(_format_library_enable(res))
                 return 0 if res["ok"] else 1
+
+        if args.command == "mine":
+            report = mine_patterns(
+                args.repo_root,
+                store_path=store_path,
+                telemetry_path=args.telemetry,
+                commits=args.commits,
+                stale_days=args.stale_days,
+            )
+            if args.emit_json:
+                print(json.dumps(report, indent=2))
+            else:
+                print(_format_mine_report(report))
+            return 0
 
     except LearnError as exc:
         if args.emit_json:

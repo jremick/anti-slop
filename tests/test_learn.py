@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -571,6 +572,220 @@ class SelfLearningLoopTests(unittest.TestCase):
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(p_excl.returncode, 2)
+
+    def _init_git_repo(self, repo_dir: Path) -> None:
+        env_cmds = [
+            ["git", "init"],
+            ["git", "config", "user.email", "test@example.com"],
+            ["git", "config", "user.name", "Test Author"],
+        ]
+        for cmd in env_cmds:
+            proc = subprocess.run(cmd, cwd=repo_dir, capture_output=True, text=True, check=False)
+            self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
+    def _git_commit(self, repo_dir: Path, message: str) -> str:
+        subprocess.run(["git", "add", "."], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short=7", "HEAD"],
+            cwd=repo_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return sha
+
+    def test_mine_telemetry_malformed_tolerance_retirement_and_read_only(self) -> None:
+        # Prepare two approved rules: L-001 (stale, zero hits) and L-002 (active, recent hits).
+        for title, bad, valid, pat in (
+            ("No float money", "x = float(cents)\n", "x = float(sec)\n", r"\bfloat\s*\(\s*cents\s*\)"),
+            ("No debug print", "print('DEBUG:', x)\n", "logger.debug('%s', x)\n", r"print\(['\"]DEBUG:"),
+        ):
+            ent = learn.capture_pattern(
+                self.store,
+                title=title,
+                bad_example=bad,
+                desired_outcome="Follow repo convention.",
+                valid_neighbouring_case=valid,
+            )
+            learn.propose_prevention(
+                self.store,
+                ent["id"],
+                layer="deterministic_check",
+                severity="error",
+                pattern=pat,
+                remediation="Fix pattern.",
+                retirement_trigger="Retire once static linter enforces this.",
+            )
+            learn.verify_rule(self.store, ent["id"], repo_root=self.root)
+            learn.approve_rule(self.store, ent["id"], approved_by="alice")
+
+        # Backdate L-001 approval to 90 days ago; keep L-002 recent.
+        now_dt = datetime(2026, 11, 27, 12, 0, 0, tzinfo=timezone.utc)
+        old_ts = (now_dt - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        recent_ts = (now_dt - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        raw_store = json.loads(self.store.read_text(encoding="utf-8"))
+        raw_store["rules"][0]["approval"]["approved_at"] = old_ts
+        raw_store["rules"][1]["approval"]["approved_at"] = old_ts
+        self.store.write_text(json.dumps(raw_store, indent=2) + "\n", encoding="utf-8")
+        store_snapshot_before = self.store.read_text(encoding="utf-8")
+
+        # Write telemetry JSONL with valid records + malformed lines + non-dict JSON.
+        telemetry_file = self.root / ".anti-slop/telemetry.jsonl"
+        telemetry_lines = [
+            json.dumps({
+                "ts": recent_ts,
+                "event": "stop_hook",
+                "harness": "claude",
+                "blocked": True,
+                "codes": ["DIFF-TEST-SKIP", "LEARNED-L-002"],
+                "file_exts": [".py"],
+            }),
+            "{this is broken json",
+            "[1, 2, 3]",
+            "",
+            json.dumps({
+                "ts": recent_ts,
+                "event": "pretool_hook",
+                "harness": "codex",
+                "blocked": True,
+                "codes": ["DIFF-TEST-SKIP"],
+                "file_exts": [".py"],
+            }),
+            json.dumps({
+                "ts": recent_ts,
+                "event": "review",
+                "harness": "antigravity",
+                "blocked": False,
+                "codes": ["STRUCT-GOD-FUNCTION"],
+                "file_exts": [".py"],
+            }),
+        ]
+        telemetry_file.write_text("\n".join(telemetry_lines) + "\n", encoding="utf-8")
+
+        report = learn.mine_patterns(
+            self.root,
+            store_path=self.store,
+            telemetry_path=telemetry_file,
+            commits=10,
+            stale_days=60,
+            now=now_dt,
+        )
+        self.assertTrue(report["ok"])
+        self.assertTrue(report["read_only"])
+
+        tsum = report["telemetry_summary"]
+        self.assertTrue(tsum["exists"])
+        self.assertEqual(tsum["records_parsed"], 3)
+        self.assertEqual(tsum["malformed_lines"], 2)
+        self.assertEqual(tsum["blocked_events"], 2)
+        self.assertEqual(tsum["allowed_events"], 1)
+        self.assertEqual(tsum["code_counts"]["DIFF-TEST-SKIP"], 2)
+
+        # Recurring patterns flags DIFF-TEST-SKIP (count=2), not single-hit STRUCT-GOD-FUNCTION.
+        rec_codes = {item["code"]: item for item in report["recurring_patterns"]}
+        self.assertIn("DIFF-TEST-SKIP", rec_codes)
+        self.assertEqual(rec_codes["DIFF-TEST-SKIP"]["telemetry_count"], 2)
+        self.assertNotIn("STRUCT-GOD-FUNCTION", rec_codes)
+
+        # Retirement candidates flags L-001 (90d old, 0 hits), NOT L-002 (hit 2 days ago).
+        ret_ids = [c["id"] for c in report["retirement_candidates"]]
+        self.assertEqual(ret_ids, ["L-001"])
+        self.assertEqual(report["retirement_candidates"][0]["telemetry_hits"], 0)
+        self.assertGreaterEqual(report["retirement_candidates"][0]["age_days"], 89.0)
+
+        # Strict read-only guarantee: rules.json is untouched byte-for-byte.
+        self.assertEqual(self.store.read_text(encoding="utf-8"), store_snapshot_before)
+
+    def test_mine_git_history_recommends_opt_pack_detects_churn_and_cli_works(self) -> None:
+        self._init_git_repo(self.root)
+        self._git_commit(self.root, "chore: initial commit")
+
+        # Commit 1: adds Python requests.get without timeout + bare type: ignore suppression.
+        (self.root / "src/http_client.py").write_text(
+            "import requests\n\n"
+            "def fetch_status():\n"
+            "    return requests.get('https://api.example.com/status')  # type: ignore\n",
+            encoding="utf-8",
+        )
+        sha1 = self._git_commit(self.root, "fix: fetch remote status")
+
+        # Commit 2: second commit with requests.post without timeout + second bare type: ignore.
+        (self.root / "src/http_client.py").write_text(
+            "import requests\n\n"
+            "def fetch_status():\n"
+            "    return requests.get('https://api.example.com/status')  # type: ignore\n\n"
+            "def push_event(body):\n"
+            "    return requests.post('https://api.example.com/events')  # type: ignore\n",
+            encoding="utf-8",
+        )
+        sha2 = self._git_commit(self.root, "fix: push event payload")
+
+        # Store does not exist yet — mine must NEVER create it!
+        self.assertFalse(self.store.exists())
+
+        cli = [
+            sys.executable, "-B", str(REPO_ROOT / "gates/learn.py"),
+            "mine", "--repo-root", str(self.root), "--store", str(self.store),
+            "--commits", "10", "--stale-days", "60",
+        ]
+        proc_json = subprocess.run(cli + ["--json"], capture_output=True, text=True, check=False)
+        self.assertEqual(proc_json.returncode, 0, msg=proc_json.stderr)
+        data = json.loads(proc_json.stdout)
+
+        # Store still does not exist (strict read-only guarantee).
+        self.assertFalse(self.store.exists())
+        self.assertTrue(data["read_only"])
+
+        # Recommends uninstalled `network-timeouts` pack with exact commit count & SHAs.
+        packs = {p["pack_id"]: p for p in data["recommended_library_packs"]}
+        self.assertIn("network-timeouts", packs)
+        net_pack = packs["network-timeouts"]
+        self.assertEqual(net_pack["matched_commits_count"], 2)
+        self.assertIn(sha1, net_pack["sample_commits"])
+        self.assertIn(sha2, net_pack["sample_commits"])
+        self.assertEqual(net_pack["matched_rules"][0]["id"], "OPT-NET-01")
+
+        # Detects recurring DIFF-SUPPRESSION across 2 commits + fix churn on src/http_client.py.
+        rec_codes = {r["code"]: r for r in data["recurring_patterns"]}
+        self.assertIn("DIFF-SUPPRESSION", rec_codes)
+        self.assertEqual(rec_codes["DIFF-SUPPRESSION"]["git_commit_count"], 2)
+        self.assertEqual(data["git_summary"]["fix_commit_count"], 2)
+        self.assertTrue(
+            any(f["file"] == "src/http_client.py" for f in data["git_summary"]["high_churn_files"])
+        )
+        self.assertTrue(data["suggested_next_steps"])
+
+        # Human-readable CLI output also works cleanly.
+        proc_txt = subprocess.run(cli, capture_output=True, text=True, check=False)
+        self.assertEqual(proc_txt.returncode, 0, msg=proc_txt.stderr)
+        self.assertIn("network-timeouts", proc_txt.stdout)
+        self.assertIn("Read-only check:", proc_txt.stdout)
+
+        # Once OPT-NET-01 is enabled in store, mine stops recommending network-timeouts.
+        learn.enable_library_rules(
+            self.store,
+            "OPT-NET-01",
+            approved_by="alice",
+            repo_root=self.root,
+            max_repo_hits=5,
+        )
+        after = learn.mine_patterns(self.root, store_path=self.store, commits=10)
+        after_packs = {p["pack_id"] for p in after["recommended_library_packs"]}
+        self.assertNotIn("network-timeouts", after_packs)
+
+        # Negative --commits / --stale-days fail cleanly with exit 2.
+        bad_cli = subprocess.run(
+            [sys.executable, "-B", str(REPO_ROOT / "gates/learn.py"), "mine", "--commits", "-1"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(bad_cli.returncode, 2)
 
 
 if __name__ == "__main__":
