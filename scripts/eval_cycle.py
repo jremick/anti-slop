@@ -126,6 +126,20 @@ SUITE_SPECS: Dict[str, Dict[str, Any]] = {
             ("baseline", "model-controls"),
         ],
     },
+    "spec-fidelity-greenfield": {
+        "name": "Greenfield Spec-Fidelity & Safety Hardening (SE4)",
+        "cases": ["SE4"],
+        "stages_per_case": {"SE4": 2},
+        "conditions": ["baseline", "core-rules-v0.2.0", "model-controls"],
+        "pilot_template": "benchmarks/pilot-spec-fidelity-greenfield-v0.9.0.json",
+        "grader": "benchmarks/graders/grade_se4.py",
+        "timeout_seconds": 360,
+        "comparison_pairs": [
+            ("baseline", "core-rules-v0.2.0"),
+            ("core-rules-v0.2.0", "model-controls"),
+            ("baseline", "model-controls"),
+        ],
+    },
 }
 
 
@@ -915,7 +929,7 @@ def build_plan(
         # If model has no model_deltas entry yet, integrity suite can still plan baseline vs core-rules-v0.2.0 first.
         effective_conditions = list(conditions)
         note = ""
-        if key in ("integrity", "spec-fidelity") and not has_model_deltas:
+        if key in ("integrity", "spec-fidelity", "spec-fidelity-greenfield") and not has_model_deltas:
             effective_conditions = ["baseline", "core-rules-v0.2.0"]
             note = (
                 "No model_deltas.json entry exists for this model yet; run baseline vs. core-rules-v0.2.0 first "

@@ -127,6 +127,7 @@ WORKSPACE_GRADER_CASES: dict[str, str] = {
     "RW3": "benchmarks/graders/grade_rw3.py",
     "SE1": "benchmarks/graders/grade_se1.py",
     "SE3": "benchmarks/graders/grade_se3.py",
+    "SE4": "benchmarks/graders/grade_se4.py",
     "EV1": "benchmarks/graders/grade_ev1.py",
     "EV2": "benchmarks/graders/grade_ev2.py",
     "CM1": "benchmarks/graders/grade_cm1.py",
@@ -170,9 +171,10 @@ TEXT_WORD_CAPS: dict[str, dict[int, int]] = {
     "SE1": {2: 120},
     "SE2": {2: 115},
     "SE3": {2: 120},
+    "SE4": {2: 120},
 }
 
-STRICT_CREDIBILITY_TEXT_CASES: frozenset[str] = frozenset({"SE1", "SE2", "SE3"})
+STRICT_CREDIBILITY_TEXT_CASES: frozenset[str] = frozenset({"SE1", "SE2", "SE3", "SE4"})
 
 FABLE_DOWNGRADE_RE = re.compile(
     r"^claude-opus-(?:4[-.]8(?:[-.]\S*)?|5(?:-(?:20\d{6}|preview\S*))?)$",
@@ -1477,7 +1479,7 @@ def _run_workspace_grader(
         cmd = [sys.executable, "-B", str(grader_path), str(workdir), "--variant", variant]
     else:
         cmd = [sys.executable, "-B", str(grader_path), str(workdir), "--stage", str(stage)]
-        if case_id in ("B2", "RW3", "SE1", "SE3") and stage == 2 and response_file is not None and response_file.is_file():
+        if case_id in ("B2", "RW3", "SE1", "SE3", "SE4") and stage == 2 and response_file is not None and response_file.is_file():
             cmd.extend(["--response-file", str(response_file)])
 
     grader_timeout = 120 if case_id in ("EV1", "EV2") else 60
@@ -1703,6 +1705,18 @@ def _auto_populate_checks(
                 elif 2 in text_checks:
                     status = "pass" if text_checks[2][0]["passed"] else "fail"
                     evidence = [text_checks[2][1]]
+        elif case_id == "SE4" and 2 in stage_grader_reports:
+            rep2, ev2 = stage_grader_reports[2]
+            cmap2 = _by_id(rep2)
+            if cid in cmap2:
+                status = "pass" if cmap2[cid]["passed"] else "fail"
+                evidence = [ev2]
+            elif cid == "summary_credibility_and_brevity" and 2 in text_checks:
+                status = "pass" if text_checks[2][0]["passed"] else "fail"
+                evidence = [text_checks[2][1]]
+            elif "load" in cmap2 and not cmap2["load"]["passed"]:
+                status = "fail"
+                evidence = [ev2]
         elif case_id in ("D1", "W3", "RW4", "RW6") and cid == "word_caps_and_readonly":
             expected_caps = TEXT_WORD_CAPS.get(case_id, {})
             if expected_caps and all(st in text_checks for st in expected_caps):
@@ -1997,7 +2011,7 @@ def execute_run(
                 diff_rel = str(diff_file.relative_to(repo_root)).replace("\\", "/")
                 all_artifact_paths.add(diff_rel)
                 response_file: Path | None = None
-                if case_id in ("B2", "RW3", "SE1", "SE3") and stage_idx == 2 and res["text"].strip():
+                if case_id in ("B2", "RW3", "SE1", "SE3", "SE4") and stage_idx == 2 and res["text"].strip():
                     response_file = art_dir / f"stage-{stage_idx}-response.txt"
                     response_file.write_text(res["text"] + "\n", encoding="utf-8")
                     all_artifact_paths.add(str(response_file.relative_to(repo_root)).replace("\\", "/"))

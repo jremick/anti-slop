@@ -122,6 +122,11 @@ def main() -> int:
             "validate",
         ],
         [
+            sys.executable, "-B", "scripts/benchmark.py",
+            "--pilot", "benchmarks/pilot-spec-fidelity-greenfield-v0.9.0.json",
+            "validate",
+        ],
+        [
             sys.executable, "-B", "benchmarks/graders/grade_cm1.py",
             "--check-ablation-fixtures",
         ],

@@ -1327,6 +1327,69 @@ class RunnerIntegrityTests(unittest.TestCase):
             },
         )
 
+    def test_se4_runner_wiring_grades_final_stage2_state_and_dry_runs(self) -> None:
+        cases = benchmark.load_cases(REPO_ROOT / "benchmarks" / "cases", REPO_ROOT)
+        se4_case = cases[("SE4", "0.9.0")]
+
+        # Stage 1 miss fixed during Stage 2 hardening still passes; Stage 2 regression fails!
+        rep1_miss = {
+            "passed": False,
+            "checks": [
+                {"id": "no_unrequested_constraints_or_cheats", "passed": True, "detail": "ok"},
+                {"id": "greenfield_spec_fidelity", "passed": False, "detail": "missing bool check"},
+            ],
+        }
+        rep2_fixed = {
+            "passed": True,
+            "checks": [
+                {"id": "no_unrequested_constraints_or_cheats", "passed": True, "detail": "ok"},
+                {"id": "greenfield_spec_fidelity", "passed": True, "detail": "ok"},
+                {"id": "summary_credibility_and_brevity", "passed": True, "detail": "ok"},
+            ],
+        }
+        checks_ok, _ = run_benchmark._auto_populate_checks(
+            se4_case, {1: (rep1_miss, "g1.json"), 2: (rep2_fixed, "g2.json")}, {}
+        )
+        self.assertEqual(
+            {c["id"]: c["status"] for c in checks_ok},
+            {
+                "greenfield_spec_fidelity": "pass",
+                "no_unrequested_constraints_or_cheats": "pass",
+                "summary_credibility_and_brevity": "pass",
+            },
+        )
+
+        rep2_regressed = {
+            "passed": False,
+            "checks": [
+                {"id": "no_unrequested_constraints_or_cheats", "passed": False, "detail": "PROTECTED_FIELDS"},
+                {"id": "greenfield_spec_fidelity", "passed": False, "detail": "12MB cap"},
+                {"id": "summary_credibility_and_brevity", "passed": True, "detail": "ok"},
+            ],
+        }
+        checks_reg, _ = run_benchmark._auto_populate_checks(
+            se4_case, {1: (rep2_fixed, "g1.json"), 2: (rep2_regressed, "g2.json")}, {}
+        )
+        self.assertEqual(
+            {c["id"]: c["status"] for c in checks_reg},
+            {
+                "greenfield_spec_fidelity": "fail",
+                "no_unrequested_constraints_or_cheats": "fail",
+                "summary_credibility_and_brevity": "pass",
+            },
+        )
+
+        out_root = self.root / "out_se4"
+        rc = run_benchmark.main([
+            "--experiment-id", "dry-se4",
+            "--cases", "SE4",
+            "--models", "claude-opus-5-5", "gpt-6.2-astra",
+            "--conditions", "baseline", "core-rules-v0.2.0", "model-controls",
+            "--output-root", str(out_root),
+            "--dry-run",
+        ])
+        self.assertEqual(rc, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
