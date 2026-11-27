@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-ts-evolution-v0.8.0",
+  "status": "planned",
+  "standard_version": "0.2.0",
+  "suite": "multi-turn-ts-compounding-quality",
+  "cases": [
+    {
+      "case_id": "EV2",
+      "case_version": "0.8.0",
+      "stages": 4,
+      "automated_grader": "benchmarks/graders/grade_ev2.py"
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "baseline",
+    "core-rules-v0.2.0",
+    "gated-structural"
+  ],
+  "replicates": 3,
+  "planned_matched_pairs": 12,
+  "planned_run_records": 36,
+  "planned_generation_stages": 144,
+  "comparison_tracks": [
+    {
+      "track_id": "baseline-vs-core-rules-v0.2.0",
+      "baseline": "baseline",
+      "treatment": "core-rules-v0.2.0",
+      "description": "Measure whether standing core rules alone prevent compounding TypeScript decay across 4 sequential turns (holds/overlap pricing, multi-room group bookings, fail-closed cancellation config, legacy removal & atomic notify hooks).",
+      "case_ids": ["EV2"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 96
+    },
+    {
+      "track_id": "baseline-vs-gated-structural",
+      "baseline": "baseline",
+      "treatment": "gated-structural",
+      "description": "Measure whether mechanical diff, structural, architectural, and JS/TS mutation gating prevents compounding TypeScript slop across 4 sequential turns.",
+      "case_ids": ["EV2"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 96
+    },
+    {
+      "track_id": "core-rules-v0.2.0-vs-gated-structural",
+      "baseline": "core-rules-v0.2.0",
+      "treatment": "gated-structural",
+      "description": "Head-to-head comparison of standing prose core rules versus mechanical diff + structural + architectural + TS mutation gates on EV2.",
+      "case_ids": ["EV2"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 96
+    }
+  ],
+  "limits": [
+    "Planned 36-run (144-stage) TypeScript multi-turn evolution pilot; no live model runs executed yet.",
+    "EV2 uses zero-dependency erasable TypeScript executed natively via Node.js (`node --test`); replicate across bundled frontend/backend TypeScript repositories before generalizing.",
+    "Zero word-cap checks are included by design: every acceptance check is 100% mechanical via benchmarks/graders/grade_ev2.py and gates/mutate.py."
+  ]
+}

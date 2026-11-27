@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Diff-scoped AST mutation testing CLI for Python repositories (`anti-slop-mutate`).
+"""Diff-scoped mutation testing CLI for Python and JS/TS repositories (`anti-slop-mutate`).
 
 Inspired by Google Critique diff-based mutation with arid-node suppression
 (Petrovic et al., arXiv:2102.11378): tests whether your test suite actually
-catches real bugs injected strictly on the executable Python lines changed in
-your current diff (or explicit --files / line ranges).
+catches real bugs injected strictly on the executable Python or JS/TS lines
+changed in your current diff (or explicit --files / line ranges).
 
 Safety guarantees:
   - NEVER mutates the user's working tree in place: copies the repository into
@@ -46,6 +46,10 @@ DEFAULT_MAX_MUTANTS = 24
 DEFAULT_TIMEOUT_S = 15.0
 DEFAULT_MIN_KILL_RATE = 0.65
 
+PYTHON_EXTENSIONS = frozenset({".py"})
+JS_TS_EXTENSIONS = frozenset({".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"})
+SUPPORTED_EXTENSIONS = PYTHON_EXTENSIONS | JS_TS_EXTENSIONS
+
 COPY_IGNORE_DIRS = frozenset({
     ".git", ".venv", "venv", "node_modules", "__pycache__",
     "runs-local", "results", ".mypy_cache", ".pytest_cache",
@@ -56,6 +60,68 @@ ARID_CALL_NAMES = frozenset({
     "print", "debug", "info", "warning", "warn",
     "error", "exception", "critical", "fatal", "log",
 })
+
+JS_TS_IMPORT_RE = re.compile(r"^\s*import\b")
+JS_TS_PURE_EXPORT_RE = re.compile(r"^\s*export\s+(?:\*|\{)")
+JS_TS_TYPE_DECL_RE = re.compile(r"^\s*(?:export\s+)?(?:declare\s+)?(?:interface|type)\b")
+JS_TS_DECLARE_RE = re.compile(r"^\s*(?:export\s+)?declare\b")
+JS_TS_LOGGING_RE = re.compile(r"^\s*(?:console|logger|log)\.\w+\s*\(")
+JS_TS_STRUCTURAL_ONLY_RE = re.compile(
+    r"^\s*(?:[\{\}\(\)\[\];,]+|else\s*\{|\}\s*else\s*\{|try\s*\{|finally\s*\{|\}?\s*catch\b[^\{]*\{)\s*$"
+)
+JS_TS_HEADER_ONLY_RE = re.compile(
+    r"^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(?:class|function\*?)\b.*\{\s*$"
+)
+JS_TS_PROP_TYPE_ONLY_RE = re.compile(
+    r"^\s*(?:(?:public|private|protected|readonly|static)\s+)*[A-Za-z_$][\w$]*\??\s*:\s*[^=]+;\s*$"
+)
+JS_TS_REGEX_PREFIX_RE = re.compile(r"(?:^|[(\[{,;=!?:&|]|\b(?:return|throw|case|in|of|typeof|void))\s*$")
+JS_TS_DIV_PREFIX_RE = re.compile(r"[\w$)\]]\s*$")
+JS_TS_CASE_RE = re.compile(r"^\s*case\s+\d+\s*:")
+JS_TS_IF_WHILE_RE = re.compile(r"\b(if|while)\s*\(")
+JS_TS_RETURN_RE = re.compile(r"^(\s*return\s+)(.+?)(;?\s*)$")
+JS_TS_THROW_RE = re.compile(r"\bthrow\b")
+JS_TS_INT_LITERAL_RE = re.compile(r"(?<![.\w$])(\d+)(?![.\w$])")
+
+JS_TS_COMPARE_RULES: Tuple[Tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"==="), "!==", "=== -> !=="),
+    (re.compile(r"!=="), "===", "!== -> ==="),
+    (re.compile(r"(?<![=!<>])==(?!=)"), "!=", "== -> !="),
+    (re.compile(r"(?<![=!<>])!=(?!=)"), "==", "!= -> =="),
+    (re.compile(r"(?<![<])<=(?!=)"), "<", "<= -> <"),
+    (re.compile(r"(?<![>=])>=(?!=)"), ">", ">= -> >"),
+    (re.compile(r"(?<=\s)<(?=\s)"), "<=", "< -> <="),
+    (re.compile(r"(?<=\s)>(?=\s)"), ">=", "> -> >="),
+)
+
+JS_TS_BOOL_RULES: Tuple[Tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"&&(?!=)"), "||", "&& -> ||"),
+    (re.compile(r"\|\|(?!=)"), "&&", "|| -> &&"),
+    (re.compile(r"\btrue\b"), "false", "true -> false"),
+    (re.compile(r"\bfalse\b"), "true", "false -> true"),
+)
+
+JS_TS_ARITH_RULES: Tuple[Tuple[re.Pattern[str], str, str], ...] = (
+    (re.compile(r"(?<=\s)\+(?=\s)"), "-", "+ -> -"),
+    (re.compile(r"(?<=\s)-(?=\s)"), "+", "- -> +"),
+    (re.compile(r"(?<=\s)\*(?=\s)"), "/", "* -> /"),
+    (re.compile(r"(?<=\s)/(?=\s)"), "*", "/ -> *"),
+)
+
+
+def detect_language(path: str | Path) -> Optional[str]:
+    """Return 'python', 'js_ts', or None based on file extension."""
+    suffix = Path(str(path)).suffix.lower()
+    if suffix in PYTHON_EXTENSIONS:
+        return "python"
+    if suffix in JS_TS_EXTENSIONS:
+        return "js_ts"
+    return None
+
+
+def is_mutable_path(path: str | Path) -> bool:
+    """Return True when path is a supported non-test source file."""
+    return detect_language(path) is not None and not _dc._is_test_file(str(path))
 
 COMPARE_SWAPS: Dict[type, Tuple[str, type]] = {
     ast.Eq: ("== -> !=", ast.NotEq),
@@ -406,6 +472,354 @@ def _apply_mutation(
     return target, mutated_node, parents
 
 
+def _mask_single_js_ts_line(
+    line: str,
+    in_block: bool,
+    in_template: bool,
+) -> Tuple[str, bool, bool, bool]:
+    """Mask one JS/TS line while tracking block-comment and template-literal state."""
+    n = len(line)
+    chars: List[str] = [" "] * n
+    quoted = False
+    in_quote: Optional[str] = None
+    i = 0
+
+    while i < n:
+        ch = line[i]
+        if in_block:
+            if line[i : i + 2] == "*/":
+                in_block = False
+                i += 2
+            else:
+                i += 1
+            continue
+        if in_template or in_quote is not None:
+            quoted = True
+            if ch == "\\" and i + 1 < n:
+                i += 2
+                continue
+            delim = "`" if in_template else in_quote
+            if ch == delim:
+                chars[i] = ch
+                if in_template:
+                    in_template = False
+                else:
+                    in_quote = None
+            i += 1
+            continue
+        if line[i : i + 2] == "//":
+            break
+        if line[i : i + 2] == "/*":
+            in_block = True
+            i += 2
+            continue
+        if ch in ("'", '"', "`"):
+            quoted = True
+            chars[i] = ch
+            if ch == "`":
+                in_template = True
+            else:
+                in_quote = ch
+            i += 1
+            continue
+        if ch == "/" and JS_TS_REGEX_PREFIX_RE.search("".join(chars[:i])):
+            end_rx = _scan_js_regex_end(line, i)
+            if end_rx is not None:
+                i = end_rx
+                continue
+        chars[i] = ch
+        i += 1
+
+    return "".join(chars), quoted, in_block, in_template
+
+
+def _mask_js_ts_lines(lines: Sequence[str]) -> Tuple[List[str], List[bool]]:
+    """Mask JS/TS comments, string/template interiors, and regex literals with spaces (1:1 indices)."""
+    masked_lines: List[str] = []
+    has_quotes: List[bool] = []
+    in_block = False
+    in_template = False
+    for line in lines:
+        masked, quoted, in_block, in_template = _mask_single_js_ts_line(line, in_block, in_template)
+        masked_lines.append(masked)
+        has_quotes.append(quoted)
+    return masked_lines, has_quotes
+
+
+def _scan_js_regex_end(line: str, start: int) -> Optional[int]:
+    """Return index past closing `/flags` for a same-line JS regex literal, or None."""
+    n = len(line)
+    i = start + 1
+    in_class = False
+    while i < n:
+        ch = line[i]
+        if ch == "\\" and i + 1 < n:
+            i += 2
+            continue
+        if ch == "[":
+            in_class = True
+        elif ch == "]":
+            in_class = False
+        elif ch == "/" and not in_class:
+            i += 1
+            while i < n and line[i].isalpha():
+                i += 1
+            return i
+        i += 1
+    return None
+
+
+def _is_balanced_single_line(text: str) -> bool:
+    """Return True if (), [], {} are balanced and never drop below 0 within text."""
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack: List[str] = []
+    for ch in text:
+        if ch in "([{":
+            stack.append(ch)
+        elif ch in ")]}":
+            if not stack or stack[-1] != pairs[ch]:
+                return False
+            stack.pop()
+    return not stack
+
+
+def _find_matching_paren(text: str, open_idx: int) -> Optional[int]:
+    depth = 0
+    for idx in range(open_idx, len(text)):
+        ch = text[idx]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return idx
+    return None
+
+
+def _collect_js_ts_arid_lines(masked_lines: Sequence[str]) -> Set[int]:
+    """Return 1-based line numbers for comments, blank lines, imports/exports, types, and console logging."""
+    arid: Set[int] = set()
+    skip_brace_depth = 0
+    in_import = False
+    in_type_alias = False
+    in_log_parens = 0
+
+    for idx, mline in enumerate(masked_lines):
+        ln = idx + 1
+        stripped = mline.strip()
+        if not stripped:
+            arid.add(ln)
+            continue
+        if skip_brace_depth > 0:
+            arid.add(ln)
+            skip_brace_depth += mline.count("{") - mline.count("}")
+            if skip_brace_depth < 0:
+                skip_brace_depth = 0
+            continue
+        if in_import:
+            arid.add(ln)
+            if ";" in stripped or " from " in stripped:
+                in_import = False
+            continue
+        if in_type_alias:
+            arid.add(ln)
+            if ";" in stripped or (not stripped.endswith(("|", "&")) and not stripped.startswith(("|", "&"))):
+                in_type_alias = False
+            continue
+        if in_log_parens > 0:
+            arid.add(ln)
+            in_log_parens += mline.count("(") - mline.count(")")
+            if in_log_parens < 0:
+                in_log_parens = 0
+            continue
+
+        if JS_TS_TYPE_DECL_RE.match(stripped) or JS_TS_DECLARE_RE.match(stripped):
+            arid.add(ln)
+            delta = mline.count("{") - mline.count("}")
+            if delta > 0:
+                skip_brace_depth = delta
+            elif ";" not in stripped and stripped.endswith(("=", "|", "&")):
+                in_type_alias = True
+            continue
+        if JS_TS_IMPORT_RE.match(stripped) or JS_TS_PURE_EXPORT_RE.match(stripped):
+            arid.add(ln)
+            if "{" in stripped and "}" not in stripped:
+                in_import = True
+            continue
+        if JS_TS_LOGGING_RE.match(stripped):
+            arid.add(ln)
+            pdelta = mline.count("(") - mline.count(")")
+            if pdelta > 0:
+                in_log_parens = pdelta
+            continue
+        if (
+            JS_TS_STRUCTURAL_ONLY_RE.match(stripped)
+            or JS_TS_HEADER_ONLY_RE.match(stripped)
+            or JS_TS_PROP_TYPE_ONLY_RE.match(stripped)
+        ):
+            arid.add(ln)
+    return arid
+
+
+def _collect_js_ts_return_sites(
+    raw_line: str,
+    masked_line: str,
+) -> Tuple[List[Tuple[str, str, str]], bool, bool]:
+    """Return ([(cat, label, mutated_line)], is_return_bool, is_return_zero)."""
+    ret_m = JS_TS_RETURN_RE.match(masked_line)
+    if ret_m is None:
+        return [], False, False
+    expr_masked = ret_m.group(2).strip()
+    expr_start, expr_end = ret_m.start(2), ret_m.end(2)
+    raw_expr = raw_line[expr_start:expr_end].strip()
+    if expr_masked == "true":
+        return [("return_value", "return true -> return false", raw_line[:expr_start] + "false" + raw_line[expr_end:])], True, False
+    if expr_masked == "false":
+        return [("return_value", "return false -> return true", raw_line[:expr_start] + "true" + raw_line[expr_end:])], True, False
+    if expr_masked == "0":
+        return [("return_value", "return 0 -> return 1", raw_line[:expr_start] + "1" + raw_line[expr_end:])], False, True
+    if (
+        expr_masked not in ("null", "undefined")
+        and raw_expr
+        and _is_balanced_single_line(expr_masked)
+        and not expr_masked.endswith((",", "?", ":", "&&", "||", "+", "-", "*", "/", "(", "[", "{"))
+    ):
+        return [("return_value", "return value -> return 0", raw_line[:expr_start] + "0" + raw_line[expr_end:])], False, False
+    return [], False, False
+
+
+def _collect_js_ts_operator_sites(
+    raw_line: str,
+    masked_line: str,
+    has_quote: bool,
+    is_return_bool: bool,
+) -> List[Tuple[str, str, str]]:
+    """Collect compare, boolean, and arithmetic swap mutations for one JS/TS line."""
+    out: List[Tuple[str, str, str]] = []
+    for pat, repl, label in JS_TS_COMPARE_RULES:
+        for m in pat.finditer(masked_line):
+            out.append(("compare", label, raw_line[: m.start()] + repl + raw_line[m.end() :]))
+    for pat, repl, label in JS_TS_BOOL_RULES:
+        if is_return_bool and repl in ("true", "false"):
+            continue
+        for m in pat.finditer(masked_line):
+            out.append(("boolean", label, raw_line[: m.start()] + repl + raw_line[m.end() :]))
+    for pat, repl, label in JS_TS_ARITH_RULES:
+        if label.startswith("+") and has_quote:
+            continue
+        for m in pat.finditer(masked_line):
+            if label.startswith("/") and not JS_TS_DIV_PREFIX_RE.search(masked_line[: m.start()]):
+                continue
+            out.append(("arithmetic", label, raw_line[: m.start()] + repl + raw_line[m.end() :]))
+    return out
+
+
+def _collect_js_ts_line_sites(
+    rel_path: str,
+    lineno: int,
+    raw_line: str,
+    masked_line: str,
+    has_quote: bool,
+    start_idx: int,
+) -> List[Tuple[str, int, str, int, str]]:
+    """Collect single-line JS/TS mutation candidates: (category, site_id, desc, lineno, mutated_line)."""
+    raw_candidates: List[Tuple[str, str, str]] = []
+
+    cond_m = JS_TS_IF_WHILE_RE.search(masked_line)
+    if cond_m is not None:
+        open_idx = cond_m.end() - 1
+        close_idx = _find_matching_paren(masked_line, open_idx)
+        if close_idx is not None:
+            inner = raw_line[open_idx + 1 : close_idx].strip()
+            if inner:
+                raw_candidates.append(("condition", "negate", raw_line[: open_idx + 1] + f"!({inner})" + raw_line[close_idx:]))
+
+    ret_cands, is_return_bool, is_return_zero = _collect_js_ts_return_sites(raw_line, masked_line)
+    raw_candidates.extend(ret_cands)
+    raw_candidates.extend(_collect_js_ts_operator_sites(raw_line, masked_line, has_quote, is_return_bool))
+
+    throw_m = JS_TS_THROW_RE.search(masked_line)
+    if throw_m is not None:
+        tail = masked_line[throw_m.start() :].strip()
+        if _is_balanced_single_line(tail) and not tail.endswith((",", "(", "[", "{", "+", "&&", "||")):
+            raw_candidates.append(("validation", "throw -> noop", raw_line[: throw_m.start()] + ";"))
+
+    if not is_return_zero and not JS_TS_CASE_RE.match(masked_line):
+        for m in JS_TS_INT_LITERAL_RE.finditer(masked_line):
+            val = int(m.group(1))
+            new_val = val + 1
+            raw_candidates.append(("boundary", f"{val} -> {new_val}", raw_line[: m.start(1)] + str(new_val) + raw_line[m.end(1) :]))
+
+    sites: List[Tuple[str, int, str, int, str]] = []
+    next_id = start_idx
+    for cat, label, mutated_line in raw_candidates:
+        if mutated_line != raw_line:
+            sites.append((cat, next_id, f"{rel_path}:{lineno} {cat} ({label})", lineno, mutated_line))
+            next_id += 1
+    return sites
+
+
+def generate_js_ts_mutants(
+    rel_path: str,
+    source: str,
+    *,
+    target_lines: Optional[Set[int]] = None,
+    max_per_file: int = DEFAULT_MAX_MUTANTS,
+) -> List[Dict[str, Any]]:
+    """Generate deterministic single-site JS/TS mutants scoped to target_lines."""
+    raw_lines = source.splitlines()
+    if not raw_lines:
+        return []
+    masked_lines, has_quotes = _mask_js_ts_lines(raw_lines)
+    arid_lines = _collect_js_ts_arid_lines(masked_lines)
+
+    full_sites: List[Tuple[str, int, str, int, str]] = []
+    for idx, raw_line in enumerate(raw_lines):
+        lineno = idx + 1
+        if lineno in arid_lines:
+            continue
+        if target_lines is not None and lineno not in target_lines:
+            continue
+        full_sites.extend(
+            _collect_js_ts_line_sites(
+                rel_path,
+                lineno,
+                raw_line,
+                masked_lines[idx],
+                has_quotes[idx],
+                len(full_sites),
+            )
+        )
+    if not full_sites:
+        return []
+
+    by_id = {item[1]: item[4] for item in full_sites}
+    rr_input = [(cat, sid, desc, ln) for cat, sid, desc, ln, _ in full_sites]
+    selected = _select_sites_round_robin(rr_input, max_per_file)
+
+    trailing_nl = "\n" if source.endswith("\n") else ""
+    mutants: List[Dict[str, Any]] = []
+    seen_sources: Set[str] = set()
+    for cat, sid, desc, lineno in selected:
+        mut_line = by_id[sid]
+        new_lines = list(raw_lines)
+        new_lines[lineno - 1] = mut_line
+        mutated_source = "\n".join(new_lines) + trailing_nl
+        if mutated_source == source or mutated_source in seen_sources:
+            continue
+        seen_sources.add(mutated_source)
+        mutants.append({
+            "file": rel_path,
+            "line": lineno,
+            "operator": cat,
+            "description": desc,
+            "original_line": raw_lines[lineno - 1].strip(),
+            "mutated_line": mut_line.strip(),
+            "mutated_source": mutated_source,
+        })
+    return mutants
+
+
 def generate_scoped_mutants(
     rel_path: str,
     source: str,
@@ -413,7 +827,14 @@ def generate_scoped_mutants(
     target_lines: Optional[Set[int]] = None,
     max_per_file: int = DEFAULT_MAX_MUTANTS,
 ) -> List[Dict[str, Any]]:
-    """Generate deterministic single-site Python AST mutants scoped to target_lines."""
+    """Generate deterministic single-site Python AST or JS/TS mutants scoped to target_lines."""
+    lang = detect_language(rel_path)
+    if lang == "js_ts":
+        return generate_js_ts_mutants(
+            rel_path, source, target_lines=target_lines, max_per_file=max_per_file
+        )
+    if lang != "python":
+        return []
     try:
         base_tree = ast.parse(source)
     except SyntaxError:
@@ -495,14 +916,14 @@ def _interleave_buckets(
 
 
 def targets_from_diff(diff_text: str) -> Dict[str, Optional[Set[int]]]:
-    """Extract {rel_path: set_of_added_lines} for non-test Python files in a unified diff."""
+    """Extract {rel_path: set_of_added_lines} for non-test Python and JS/TS files in a unified diff."""
     parsed = _dc.parse_unified_diff(diff_text)
     targets: Dict[str, Optional[Set[int]]] = {}
     for entry in parsed["files"]:
         rel = entry["path"]
         if not rel or entry["is_deleted"]:
             continue
-        if Path(rel).suffix.lower() != ".py" or _dc._is_test_file(rel):
+        if not is_mutable_path(rel):
             continue
         added = {ln for ln, _ in entry["added_lines"]}
         if added and not (rel in targets and targets[rel] is None):
@@ -604,6 +1025,13 @@ def _evaluate_mutants(
     return killed_list, survived_list, timed_out_list
 
 
+def _default_test_cmd_for_targets(targets: Dict[str, Optional[Set[int]]]) -> List[str]:
+    langs = {detect_language(rel) for rel in targets if is_mutable_path(rel)}
+    if langs == {"js_ts"}:
+        return ["node", "--test"]
+    return [sys.executable, "-B", "-m", "unittest", "discover"]
+
+
 def run_diff_mutation(
     repo_root: Path | str,
     targets: Dict[str, Optional[Set[int]]],
@@ -614,9 +1042,9 @@ def run_diff_mutation(
     min_kill_rate: float = DEFAULT_MIN_KILL_RATE,
     mode: str = "diff",
 ) -> Dict[str, Any]:
-    """Run diff-scoped AST mutation testing inside an isolated temporary copy of repo_root."""
+    """Run diff-scoped Python/JS/TS mutation testing inside an isolated temporary copy of repo_root."""
     src_root = Path(repo_root).resolve()
-    cmd_list = list(test_cmd) if test_cmd else [sys.executable, "-B", "-m", "unittest", "discover"]
+    cmd_list = list(test_cmd) if test_cmd else _default_test_cmd_for_targets(targets)
     if not src_root.is_dir():
         return _baseline_failure_report(
             mode=mode, cmd_list=cmd_list, min_kill_rate=min_kill_rate,
@@ -643,8 +1071,7 @@ def run_diff_mutation(
         valid_targets = [
             (_dc._normalize_relpath(rel), targets[rel])
             for rel in sorted(targets)
-            if Path(_dc._normalize_relpath(rel)).suffix.lower() == ".py"
-            and not _dc._is_test_file(_dc._normalize_relpath(rel))
+            if is_mutable_path(_dc._normalize_relpath(rel))
             and (copy_root / _dc._normalize_relpath(rel)).is_file()
         ]
         originals: Dict[str, str] = {}
@@ -686,6 +1113,30 @@ def run_diff_mutation(
             "killed_mutants": killed_list,
             "timed_out_mutants": timed_out_list,
         }
+
+
+def run_mutation_for_files(
+    workspace_root: Path | str,
+    rel_paths: Sequence[str],
+    *,
+    test_cmd: Optional[Sequence[str]] = None,
+    max_mutants: int = DEFAULT_MAX_MUTANTS,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    min_kill_rate: float = DEFAULT_MIN_KILL_RATE,
+) -> Dict[str, Any]:
+    """Run whole-file Python/JS/TS mutation testing across explicit relative file paths."""
+    targets: Dict[str, Optional[Set[int]]] = {
+        _dc._normalize_relpath(rel): None for rel in rel_paths
+    }
+    return run_diff_mutation(
+        workspace_root,
+        targets,
+        test_cmd=test_cmd,
+        max_mutants=max_mutants,
+        timeout_s=timeout_s,
+        min_kill_rate=min_kill_rate,
+        mode="files",
+    )
 
 
 def _format_survived_section(survived: Sequence[Dict[str, Any]], *, markdown: bool) -> List[str]:
@@ -747,7 +1198,7 @@ def format_mutation_report(report: Dict[str, Any], *, markdown: bool = False) ->
             "",
         ]
     if tested == 0:
-        lines.append("No mutable executable Python lines found in the selected scope.")
+        lines.append("No mutable executable Python or JS/TS lines found in the selected scope.")
     elif not survived:
         lines.append(f"All {tested} mutants on your changed lines were killed by the test suite.")
     else:
@@ -811,22 +1262,22 @@ def _resolve_diff_text(args: argparse.Namespace, root: Path) -> str:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run diff-scoped AST mutation testing in an isolated temp copy to verify "
-            "whether your tests catch real bugs introduced on your changed Python lines."
+            "Run diff-scoped mutation testing in an isolated temp copy to verify "
+            "whether your tests catch real bugs introduced on your changed Python or JS/TS lines."
         )
     )
     parser.add_argument("--diff", default=None, help="Path to unified diff, or '-' for stdin.")
     parser.add_argument("--base", default=None, help="Git base ref to diff against (e.g., origin/main).")
-    parser.add_argument("--no-untracked", action="store_true", help="Exclude untracked Python files when auto-diffing git.")
-    parser.add_argument("--files", nargs="+", default=None, help="Explicit Python files to mutate (optional :LINE or :START-END).")
+    parser.add_argument("--no-untracked", action="store_true", help="Exclude untracked source files when auto-diffing git.")
+    parser.add_argument("--files", nargs="+", default=None, help="Explicit Python or JS/TS files to mutate (optional :LINE or :START-END).")
     parser.add_argument("--repo-root", default=".", help="Target repository root (default: '.').")
-    parser.add_argument("--test-cmd", default=None, help='Test command to run (default: "python3 -m unittest discover").')
-    parser.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS, help=f"Max AST mutants (default: {DEFAULT_MAX_MUTANTS}).")
+    parser.add_argument("--test-cmd", default=None, help='Test command to run (default: unittest for Python, "node --test" for JS/TS).')
+    parser.add_argument("--max-mutants", type=int, default=DEFAULT_MAX_MUTANTS, help=f"Max mutants (default: {DEFAULT_MAX_MUTANTS}).")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_S, help=f"Per-mutant timeout seconds (default: {DEFAULT_TIMEOUT_S:g}).")
     parser.add_argument("--min-kill-rate", type=float, default=DEFAULT_MIN_KILL_RATE, help=f"Minimum kill rate to exit 0 (default: {DEFAULT_MIN_KILL_RATE}; 0 for report-only).")
     parser.add_argument("--markdown", action="store_true", help="Format output as Markdown.")
     parser.add_argument("--json", action="store_true", dest="emit_json", help="Emit structured JSON.")
-    parser.add_argument("paths", nargs="*", metavar="PATH", help="Optional positional Python file targets.")
+    parser.add_argument("paths", nargs="*", metavar="PATH", help="Optional positional Python or JS/TS file targets.")
     return parser
 
 

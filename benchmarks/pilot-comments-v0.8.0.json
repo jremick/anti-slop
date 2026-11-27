@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "experiment_id": "pilot-comments-v0.8.0",
+  "status": "planned",
+  "standard_version": "0.2.0",
+  "suite": "comment-hygiene-ablation-multifile",
+  "cases": [
+    {
+      "case_id": "CM2",
+      "case_version": "0.8.0",
+      "stages": 1,
+      "automated_grader": "benchmarks/graders/grade_cm2.py"
+    }
+  ],
+  "models": [
+    {
+      "provider": "anthropic",
+      "id": "claude-opus-5-5",
+      "display_name": "Claude Opus 5.5"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-astra",
+      "display_name": "GPT-6.2 Astra"
+    },
+    {
+      "provider": "openai",
+      "id": "gpt-6.2-sol",
+      "display_name": "GPT-6.2 Sol"
+    },
+    {
+      "provider": "google",
+      "id": "gemini-4-neon",
+      "display_name": "Gemini 4 Neon"
+    }
+  ],
+  "conditions": [
+    "no-comments",
+    "invariant-comments",
+    "comment-traps"
+  ],
+  "variant_map": {
+    "no-comments": "benchmarks/sources/cm2_multifile_comments/no_comments",
+    "invariant-comments": "benchmarks/sources/cm2_multifile_comments/invariant_comments",
+    "comment-traps": "benchmarks/sources/cm2_multifile_comments/comment_traps"
+  },
+  "replicates": 3,
+  "planned_matched_pairs": 12,
+  "planned_run_records": 36,
+  "planned_generation_stages": 36,
+  "comparison_tracks": [
+    {
+      "track_id": "no-comments-vs-invariant-comments",
+      "baseline": "no-comments",
+      "treatment": "invariant-comments",
+      "description": "Measure whether four concise 1-line '# INVARIANT:' why-comments across a 6-module job-queue package prevent silent breakage of unstated cross-file crash/replay invariants relative to zero-comment code.",
+      "case_ids": ["CM2"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 24
+    },
+    {
+      "track_id": "no-comments-vs-comment-traps",
+      "baseline": "no-comments",
+      "treatment": "comment-traps",
+      "description": "Measure whether defective commented-out code blocks and stale contradictory comments poison multi-file refactoring when subtle cross-file invariants are not restated in the prompt.",
+      "case_ids": ["CM2"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 24
+    },
+    {
+      "track_id": "invariant-comments-vs-comment-traps",
+      "baseline": "invariant-comments",
+      "treatment": "comment-traps",
+      "description": "Measure the full controlled accuracy and latency spread between crisp cross-file invariant comments and comment-trap pollution across all four focus models.",
+      "case_ids": ["CM2"],
+      "planned_matched_pairs": 12,
+      "planned_run_records": 24,
+      "planned_generation_stages": 24
+    }
+  ],
+  "limits": [
+    "Planned 36-run multi-file comment-hygiene ablation designed to eliminate CM1's 12/12 accuracy ceiling by withholding the two subtle cross-file invariants from the task prompt.",
+    "All three variants share 100% identical executable Python AST across all 6 production modules (verified by benchmarks/graders/grade_cm2.py --check-ablation-fixtures).",
+    "100% mechanically graded by benchmarks/graders/grade_cm2.py with zero word caps or subjective rubric scoring."
+  ]
+}

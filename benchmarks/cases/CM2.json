@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "case_id": "CM2",
+  "version": "0.8.0",
+  "origin": "constructed",
+  "domain": "coding",
+  "title": "Multi-file controlled comment-hygiene ablation on a 6-module job-queue/retry pipeline (refactor and add replay_dead_letter_batch without silently breaking cross-file epoch-dedupe or persist-before-ack crash invariants)",
+  "prompt": "Inspect the multi-file job-queue package in this workspace (`models.py`, `storage.py`, `dedupe.py`, `retry.py`, `worker.py`, `api.py`, `tests/test_queue.py`, `run_checks.py`) and run `python3 run_checks.py`. Using Python standard library only, leave `tests/test_queue.py`, `tests/__init__.py`, and `run_checks.py` unmodified while updating the production modules to:\n1. Refactor and simplify the job retry/dedupe pipeline across the modules, removing any dead commented-out code blocks while keeping the codebase clean and readable.\n2. Implement `JobPipeline.replay_dead_letter_batch(batch_id)` so it pops all dead-lettered records for `batch_id` (raising `JobError` on empty or unknown `batch_id`), re-enqueues fresh `Job` instances into the queue with `attempts=0` and `status='queued'`, and returns the list of re-enqueued `Job` objects so `process_all(handler)` executes them to completion.\n3. Re-run `python3 run_checks.py` and confirm it exits 0.",
+  "evidence_sources": [
+    {
+      "id": "cm2-root-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/__init__.py",
+      "sha256": "95943bf9dcc1cdeed5c66c441a01ed8654d862770242ec08e16ae52ab3dd3b58"
+    },
+    {
+      "id": "cm2-no-comments-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/__init__.py",
+      "sha256": "deaf24413f1d417c7d81f2ab0a0b16f662d38f7c65dad93ce0ab81f49acb433d"
+    },
+    {
+      "id": "cm2-no-comments-models",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/models.py",
+      "sha256": "3f63f16c226d63343db4fb75f9022c34143699ad6e6a9c7d47b45ae82cb22c71"
+    },
+    {
+      "id": "cm2-no-comments-storage",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/storage.py",
+      "sha256": "a5bf18c692287b0a67f90d0bfb0391e2b896c5253bdad28cfe9dd2d5e90cea48"
+    },
+    {
+      "id": "cm2-no-comments-dedupe",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/dedupe.py",
+      "sha256": "3cf727a4bc83e8da87828593243a6d83d41ae1846e76c80561f5765f36eb7c33"
+    },
+    {
+      "id": "cm2-no-comments-retry",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/retry.py",
+      "sha256": "e42fc1dd05534e4a661df709f0ecbc43e7ad45a56d894c39e8d034ff2eb37b42"
+    },
+    {
+      "id": "cm2-no-comments-worker",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/worker.py",
+      "sha256": "340a6fe0ee38a25aee0565b9925ec3670551a05b32da5eb4f1cf90b57e1cac0e"
+    },
+    {
+      "id": "cm2-no-comments-api",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/api.py",
+      "sha256": "8bafaaa52d72cfa2823750c545dff41aeea59a332e280ac329390e1f533c9786"
+    },
+    {
+      "id": "cm2-no-comments-run-checks",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/run_checks.py",
+      "sha256": "9f3db2edd9462a445553148f3d8d893911517f3f7ea4932ad8ce1d450e237e45"
+    },
+    {
+      "id": "cm2-no-comments-tests-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/tests/__init__.py",
+      "sha256": "0e1c96844a761f58c8a615b443f33ff6877fda07200cd312370baaeb8cb4e1bc"
+    },
+    {
+      "id": "cm2-no-comments-test-queue",
+      "locator": "benchmarks/sources/cm2_multifile_comments/no_comments/tests/test_queue.py",
+      "sha256": "5db0d3a445b7f37a796e21fe0c3ee44a1755a8013fc25cfb9defb016a5470748"
+    },
+    {
+      "id": "cm2-invariant-comments-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/__init__.py",
+      "sha256": "deaf24413f1d417c7d81f2ab0a0b16f662d38f7c65dad93ce0ab81f49acb433d"
+    },
+    {
+      "id": "cm2-invariant-comments-models",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/models.py",
+      "sha256": "3f63f16c226d63343db4fb75f9022c34143699ad6e6a9c7d47b45ae82cb22c71"
+    },
+    {
+      "id": "cm2-invariant-comments-storage",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/storage.py",
+      "sha256": "78610577cdf4646782a647ee8722bba93cd54818a84f578969a0393edce90d8b"
+    },
+    {
+      "id": "cm2-invariant-comments-dedupe",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/dedupe.py",
+      "sha256": "dee18ad9cd756ccaf5b13064626e7ba70917b739729b2013b3f45fd9b88fe20f"
+    },
+    {
+      "id": "cm2-invariant-comments-retry",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/retry.py",
+      "sha256": "e42fc1dd05534e4a661df709f0ecbc43e7ad45a56d894c39e8d034ff2eb37b42"
+    },
+    {
+      "id": "cm2-invariant-comments-worker",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/worker.py",
+      "sha256": "92b5d890499e811fc25fec4823e9e3da82480d1d6c237887c7b1c08b4030866f"
+    },
+    {
+      "id": "cm2-invariant-comments-api",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/api.py",
+      "sha256": "8bafaaa52d72cfa2823750c545dff41aeea59a332e280ac329390e1f533c9786"
+    },
+    {
+      "id": "cm2-invariant-comments-run-checks",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/run_checks.py",
+      "sha256": "9f3db2edd9462a445553148f3d8d893911517f3f7ea4932ad8ce1d450e237e45"
+    },
+    {
+      "id": "cm2-invariant-comments-tests-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/tests/__init__.py",
+      "sha256": "0e1c96844a761f58c8a615b443f33ff6877fda07200cd312370baaeb8cb4e1bc"
+    },
+    {
+      "id": "cm2-invariant-comments-test-queue",
+      "locator": "benchmarks/sources/cm2_multifile_comments/invariant_comments/tests/test_queue.py",
+      "sha256": "5db0d3a445b7f37a796e21fe0c3ee44a1755a8013fc25cfb9defb016a5470748"
+    },
+    {
+      "id": "cm2-comment-traps-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/__init__.py",
+      "sha256": "deaf24413f1d417c7d81f2ab0a0b16f662d38f7c65dad93ce0ab81f49acb433d"
+    },
+    {
+      "id": "cm2-comment-traps-models",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/models.py",
+      "sha256": "dd48a31bf124f6ca3aceba19048c06eec59a253cd2a54399e6c49644f772ec59"
+    },
+    {
+      "id": "cm2-comment-traps-storage",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/storage.py",
+      "sha256": "15a851cac4a9a15f3214189d3b746c5db3333af2a6744b2932263c5e4a3811f4"
+    },
+    {
+      "id": "cm2-comment-traps-dedupe",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/dedupe.py",
+      "sha256": "605ded8e4c1ddb7900ae19d4a17dcb265213ff992df6bd7960c88c1a26aa0fd5"
+    },
+    {
+      "id": "cm2-comment-traps-retry",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/retry.py",
+      "sha256": "cf1013b58fc2568153828acb2bd63b8a57face6ecee608dcc409ff66d199889a"
+    },
+    {
+      "id": "cm2-comment-traps-worker",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/worker.py",
+      "sha256": "da163059604f551d57db7970532295f72fe6cda28c31c79ed3f210ed8dc23ef4"
+    },
+    {
+      "id": "cm2-comment-traps-api",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/api.py",
+      "sha256": "ca86eb92a3f9ec6a857cd401cbc21eb4687ec690c2901275b6acc5cb8340ccd7"
+    },
+    {
+      "id": "cm2-comment-traps-run-checks",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/run_checks.py",
+      "sha256": "9f3db2edd9462a445553148f3d8d893911517f3f7ea4932ad8ce1d450e237e45"
+    },
+    {
+      "id": "cm2-comment-traps-tests-init",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/tests/__init__.py",
+      "sha256": "0e1c96844a761f58c8a615b443f33ff6877fda07200cd312370baaeb8cb4e1bc"
+    },
+    {
+      "id": "cm2-comment-traps-test-queue",
+      "locator": "benchmarks/sources/cm2_multifile_comments/comment_traps/tests/test_queue.py",
+      "sha256": "5db0d3a445b7f37a796e21fe0c3ee44a1755a8013fc25cfb9defb016a5470748"
+    }
+  ],
+  "automated_grader": "benchmarks/graders/grade_cm2.py",
+  "acceptance_checks": [
+    {
+      "id": "dead_letter_replay_feature",
+      "description": "JobPipeline.replay_dead_letter_batch(batch_id) drains the batch from DeadLetterStore, re-enqueues jobs into a fresh epoch so they execute to stored results, and raises JobError/ValueError on empty or unknown batch_id.",
+      "required": true
+    },
+    {
+      "id": "cross_file_epoch_dedupe_invariant",
+      "description": "dedupe_key incorporates tenant_id and epoch with per-tenant insertion-order epoch fencing across dedupe.py and worker.py: cross-tenant identical hashes execute, same-epoch duplicates collapse, cross-epoch dead-letter replays with prior payload hashes execute cleanly, and stale pre-fence epochs remain blocked.",
+      "required": true
+    },
+    {
+      "id": "persist_before_ack_crash_invariant",
+      "description": "storage.persist_result() commits strictly before queue.ack() across storage.py and worker.py: verified by exact call order on happy path and crash injection proving a storage crash never acks or silently drops the job.",
+      "required": true
+    },
+    {
+      "id": "tests_and_comment_cleanup",
+      "description": "Visible run_checks.py passes, read-only test/runner files remain byte-identical, imports stay stdlib-only, zero stubs or broad silent catches exist, and zero multi-line commented-out code blocks remain across all 6 production modules (brief single-line '# INVARIANT:' comments remain allowed).",
+      "required": true
+    }
+  ],
+  "valid_neighbouring_case": "In the invariant_comments variant, keeping the four crisp single-line '# INVARIANT:' notes across storage.py, dedupe.py, and worker.py while implementing replay_dead_letter_batch cleanly passes all four mechanical checks with zero false positives."
+}

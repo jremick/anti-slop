@@ -39,6 +39,24 @@ def _init_git_repo(root: Path) -> None:
     subprocess.run(["git", "config", "user.name", "CI"], cwd=root, check=True)
 
 
+def _node_supports_native_ts() -> bool:
+    """Return True when `node` >= 22.6 is available on PATH for native TS execution."""
+    try:
+        proc = subprocess.run(["node", "--version"], capture_output=True, text=True, check=False)
+    except OSError:
+        return False
+    if proc.returncode != 0:
+        return False
+    raw = proc.stdout.strip().lstrip("v")
+    parts = raw.split(".")
+    try:
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+    except ValueError:
+        return False
+    return (major, minor) >= (22, 6)
+
+
 class MutateUnitTests(unittest.TestCase):
     def test_parse_file_target_spec(self) -> None:
         self.assertEqual(mutate.parse_file_target_spec("src/calc.py"), ("src/calc.py", None))
@@ -380,6 +398,251 @@ class MutateIntegrationCliTests(unittest.TestCase):
         self.assertTrue(res["ok"], msg=res)
         self.assertGreaterEqual(res["summary"]["timed_out"], 1)
         self.assertEqual(res["summary"]["survived"], 0)
+
+
+class MutateJsTsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def test_language_detection_and_js_ts_operators_and_arid_suppression(self) -> None:
+        for ext in (".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"):
+            self.assertEqual(mutate.detect_language(f"src/app{ext}"), "js_ts")
+            self.assertTrue(mutate.is_mutable_path(f"src/app{ext}"))
+            self.assertFalse(mutate.is_mutable_path(f"tests/app.test{ext}"))
+        self.assertEqual(mutate.detect_language("src/app.py"), "python")
+        self.assertIsNone(mutate.detect_language("README.md"))
+
+        ts_src = (
+            'import type { Foo } from "./types.ts";\n'
+            'export { Foo } from "./types.ts";\n'
+            "export interface Quote {\n"
+            "  readonly subtotal: number;\n"
+            "  readonly total: number;\n"
+            "}\n"
+            "export type Tier = 'standard' | 'vip';\n"
+            "// comment with x === 1 && y >= 2 + 3\n"
+            "/* block comment\n"
+            "   if (a <= b) return true;\n"
+            "*/\n"
+            "export function priceOrder(qty: number, unitCents: number, vip: boolean): number {\n"
+            "  console.log('pricing', qty + 1);\n"
+            "  const cache = new Map<string, number>();\n"
+            "  if (qty <= 0) {\n"
+            "    throw new Error('qty must be positive');\n"
+            "  }\n"
+            "  const gross = qty * unitCents;\n"
+            "  let finalCents = gross;\n"
+            "  if (vip && gross >= 1000) {\n"
+            "    finalCents = gross - 100;\n"
+            "  }\n"
+            "  const tag = 'USD:' + 'cents';\n"
+            "  const exact = finalCents === 900;\n"
+            "  const half = Math.floor((finalCents + 1) / 2);\n"
+            "  if (exact || half > 0) {\n"
+            "    return finalCents;\n"
+            "  }\n"
+            "  return 0;\n"
+            "}\n"
+            "export function isEligible(active: boolean): boolean {\n"
+            "  if (active === true) {\n"
+            "    return true;\n"
+            "  }\n"
+            "  return false;\n"
+            "}\n"
+        )
+        mutants = mutate.generate_scoped_mutants("src/pricing.ts", ts_src, max_per_file=60)
+        operators = {m["operator"] for m in mutants}
+        self.assertEqual(
+            operators,
+            {"condition", "compare", "validation", "return_value", "arithmetic", "boolean", "boundary"},
+        )
+        mutated_lines = {m["line"] for m in mutants}
+        # Arid lines: import(1), export(2), interface(3-6), type(7), comments(8-11),
+        # function header(12), console.log(13), Map<string, number>(14), string concat(23).
+        for arid_ln in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 23):
+            self.assertNotIn(arid_ln, mutated_lines, msg=f"Arid TS line {arid_ln} should not be mutated")
+        # Verify string concatenation `+` on line 23 was never flipped, while numeric `+`/`-`/`*`/`/` were.
+        arith_descs = [m["description"] for m in mutants if m["operator"] == "arithmetic"]
+        self.assertTrue(any("* -> /" in d for d in arith_descs), msg=arith_descs)
+        self.assertTrue(any("- -> +" in d for d in arith_descs), msg=arith_descs)
+        self.assertTrue(any("+ -> -" in d for d in arith_descs), msg=arith_descs)
+        self.assertTrue(any("/ -> *" in d for d in arith_descs), msg=arith_descs)
+        # Verify return true/false swaps are present.
+        ret_descs = [m["description"] for m in mutants if m["operator"] == "return_value"]
+        self.assertTrue(any("return true -> return false" in d for d in ret_descs), msg=ret_descs)
+        self.assertTrue(any("return false -> return true" in d for d in ret_descs), msg=ret_descs)
+        self.assertTrue(any("return 0 -> return 1" in d for d in ret_descs), msg=ret_descs)
+
+        # Diff-scoped targets_from_diff picks up added TS lines and skips TS test files.
+        diff_text = (
+            "diff --git a/src/pricing.ts b/src/pricing.ts\n"
+            "--- a/src/pricing.ts\n"
+            "+++ b/src/pricing.ts\n"
+            "@@ -15,2 +15,3 @@\n"
+            "   if (qty <= 0) {\n"
+            "+    throw new Error('qty must be positive');\n"
+            "   }\n"
+            "diff --git a/tests/pricing.test.ts b/tests/pricing.test.ts\n"
+            "--- a/tests/pricing.test.ts\n"
+            "+++ b/tests/pricing.test.ts\n"
+            "@@ -1,1 +1,2 @@\n"
+            "+test('x', () => {});\n"
+        )
+        targets = mutate.targets_from_diff(diff_text)
+        self.assertEqual(targets, {"src/pricing.ts": {16}})
+
+    def _write_ts_project(self, target_dir: Path, *, strong_tests: bool) -> None:
+        (target_dir / "src").mkdir(parents=True, exist_ok=True)
+        (target_dir / "tests").mkdir(parents=True, exist_ok=True)
+        base_ts = (
+            "export function legacyUntested(x: number): number {\n"
+            "  if (x > 10) {\n"
+            "    return x * 2;\n"
+            "  }\n"
+            "  return x + 1;\n"
+            "}\n"
+        )
+        (target_dir / "src/calc.ts").write_text(base_ts, encoding="utf-8")
+        (target_dir / "tests/calc.test.ts").write_text(
+            'import test from "node:test";\n'
+            'import assert from "node:assert/strict";\n'
+            'import { legacyUntested } from "../src/calc.ts";\n'
+            'test("placeholder", () => { assert.ok(typeof legacyUntested === "function"); });\n',
+            encoding="utf-8",
+        )
+        _init_git_repo(target_dir)
+        subprocess.run(["git", "add", "."], cwd=target_dir, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "initial ts"], cwd=target_dir, check=True)
+
+        updated_ts = (
+            base_ts
+            + "\n"
+            + "export function computeTotal(qty: number, unitCents: number, vip: boolean): number {\n"
+            + "  if (qty <= 0) {\n"
+            + "    throw new Error('qty must be positive');\n"
+            + "  }\n"
+            + "  let total = qty * unitCents;\n"
+            + "  if (vip && total >= 1000) {\n"
+            + "    total = total - 100;\n"
+            + "  }\n"
+            + "  return total;\n"
+            + "}\n"
+        )
+        (target_dir / "src/calc.ts").write_text(updated_ts, encoding="utf-8")
+
+        if strong_tests:
+            test_ts = (
+                'import test from "node:test";\n'
+                'import assert from "node:assert/strict";\n'
+                'import { computeTotal } from "../src/calc.ts";\n\n'
+                'test("rejects zero and negative qty", () => {\n'
+                "  assert.throws(() => computeTotal(0, 100, false), /positive/);\n"
+                "  assert.throws(() => computeTotal(-2, 100, false), /positive/);\n"
+                "});\n\n"
+                'test("computes vip discount boundary accurately", () => {\n'
+                "  assert.equal(computeTotal(2, 500, true), 900);\n"
+                "  assert.equal(computeTotal(2, 500, false), 1000);\n"
+                "  assert.equal(computeTotal(1, 999, true), 999);\n"
+                "  assert.equal(computeTotal(3, 400, false), 1200);\n"
+                "});\n"
+            )
+        else:
+            test_ts = (
+                'import test from "node:test";\n'
+                'import assert from "node:assert/strict";\n'
+                'import { computeTotal } from "../src/calc.ts";\n\n'
+                'test("weak smoke test", () => {\n'
+                "  computeTotal(1, 100, false);\n"
+                "  assert.equal(true, true);\n"
+                "});\n"
+            )
+        (target_dir / "tests/calc.test.ts").write_text(test_ts, encoding="utf-8")
+
+    def test_real_node_ts_diff_scoped_strong_and_weak_suites(self) -> None:
+        if not _node_supports_native_ts():
+            return
+
+        # 1. Strong TypeScript tests kill all diff-scoped mutants via real `node --test`
+        #    without modifying the working tree.
+        strong_dir = self.root / "strong_ts"
+        self._write_ts_project(strong_dir, strong_tests=True)
+        before_snap = _snapshot_tree(strong_dir)
+        proc = subprocess.run(
+            [
+                sys.executable, "-B", str(MUTATE_SCRIPT),
+                "--repo-root", str(strong_dir),
+                "--test-cmd", "node --test tests/calc.test.ts",
+                "--json",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(before_snap, _snapshot_tree(strong_dir))
+        self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
+        data = json.loads(proc.stdout)
+        self.assertTrue(data["ok"])
+        self.assertTrue(data["baseline"]["passed"])
+        self.assertEqual(data["scope"]["files_targeted"], ["src/calc.ts"])
+        self.assertGreater(data["summary"]["mutants_tested"], 0)
+        self.assertGreaterEqual(data["summary"]["kill_rate"], 0.65)
+        self.assertEqual(data["summary"]["survived"], 0)
+        all_muts = data["killed_mutants"] + data["survived_mutants"]
+        self.assertTrue(all(m["line"] >= 8 for m in all_muts), msg=all_muts)
+
+        # Verify --diff - with `node --test` and exported run_mutation_for_files helper.
+        git_diff = subprocess.run(
+            ["git", "diff", "HEAD"], cwd=strong_dir, capture_output=True, text=True, check=True
+        ).stdout
+        proc_diff = subprocess.run(
+            [
+                sys.executable, "-B", str(MUTATE_SCRIPT),
+                "--repo-root", str(strong_dir),
+                "--diff", "-",
+                "--test-cmd", "node --test tests/calc.test.ts",
+                "--max-mutants", "6",
+                "--json",
+            ],
+            input=git_diff,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc_diff.returncode, 0, msg=proc_diff.stdout + proc_diff.stderr)
+        self.assertTrue(json.loads(proc_diff.stdout)["ok"])
+
+        helper_res = mutate.run_mutation_for_files(
+            strong_dir,
+            ["src/calc.ts"],
+            test_cmd=["node", "--test", "tests/calc.test.ts"],
+            max_mutants=12,
+        )
+        self.assertTrue(helper_res["baseline"]["passed"], msg=helper_res)
+        self.assertGreater(helper_res["summary"]["mutants_tested"], 0)
+
+        # 2. Weak TypeScript tests let mutants survive and fail with exit code 1.
+        weak_dir = self.root / "weak_ts"
+        self._write_ts_project(weak_dir, strong_tests=False)
+        proc_weak = subprocess.run(
+            [
+                sys.executable, "-B", str(MUTATE_SCRIPT),
+                "--repo-root", str(weak_dir),
+                "--test-cmd", "node --test tests/calc.test.ts",
+                "--json",
+            ],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc_weak.returncode, 1, msg=proc_weak.stdout + proc_weak.stderr)
+        wdata = json.loads(proc_weak.stdout)
+        self.assertFalse(wdata["ok"])
+        self.assertGreater(wdata["summary"]["survived"], 0)
+        self.assertLess(wdata["summary"]["kill_rate"], 0.65)
 
 
 if __name__ == "__main__":
