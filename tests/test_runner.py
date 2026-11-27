@@ -907,6 +907,357 @@ class RunnerIntegrityTests(unittest.TestCase):
         pairs = benchmark.comparable_pairs([rec_clean, rec_trap], "no-comments", "comment-traps")
         self.assertEqual(len(pairs), 1)
 
+    def test_ev2_dry_run_auto_populate_and_gated_structural_ts_repair_loop(self) -> None:
+        # 1. Dry-run CLI succeeds for EV2 across baseline, core-rules-v0.2.0, and gated-structural.
+        rc_ev2 = run_benchmark.main([
+            "--experiment-id", "dry-ev2",
+            "--cases", "EV2",
+            "--models", "claude-opus-5-5",
+            "--conditions", "baseline", "core-rules-v0.2.0", "gated-structural",
+            "--output-root", str(self.root / "out_ev2"),
+            "--dry-run",
+        ])
+        self.assertEqual(rc_ev2, 0)
+        manifest = json.loads((self.root / "out_ev2" / "dry-ev2" / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["cases"], ["EV2"])
+        self.assertEqual(set(manifest["conditions"].keys()), {"baseline", "core-rules-v0.2.0", "gated-structural"})
+
+        # 2. _auto_populate_checks maps all 6 EV2 acceptance checks from Stage 4 grader report.
+        cases = benchmark.load_cases(REPO_ROOT / "benchmarks" / "cases", REPO_ROOT)
+        ev2_case = cases[("EV2", "0.8.0")]
+        fake_ev2_report = {
+            "case_id": "EV2",
+            "passed": False,
+            "checks": [
+                {"id": spec["id"], "passed": spec["id"] != "no_sprawl_or_god_functions", "detail": "ok"}
+                for spec in ev2_case["acceptance_checks"]
+            ],
+        }
+        populated, defects = run_benchmark._auto_populate_checks(
+            ev2_case, {4: (fake_ev2_report, "ev2-s4.json")}, {}
+        )
+        self.assertEqual(defects, [])
+        by_id = {c["id"]: c for c in populated}
+        self.assertEqual(len(by_id), 6)
+        self.assertEqual(by_id["functional_all_turns"]["status"], "pass")
+        self.assertEqual(by_id["mutation_test_strength"]["status"], "pass")
+        self.assertEqual(by_id["no_sprawl_or_god_functions"]["status"], "fail")
+        self.assertEqual(by_id["no_sprawl_or_god_functions"]["evidence"], ["ev2-s4.json"])
+
+        # 3. execute_run under gated-structural runs gates.review.review_diff across all 4 TS stages
+        #    and triggers repair turns for both STRUCT-* and ARCH-* TypeScript findings.
+        fake_repo = self.root / "fake_ev2_repo"
+        src_dir = fake_repo / "benchmarks" / "sources" / "ev2_ts_bookings"
+        shutil.copytree(REPO_ROOT / "benchmarks" / "sources" / "ev2_ts_bookings", src_dir)
+        exp_dir = fake_repo / "runs-local" / "exp_ev2_gated"
+        exp_dir.mkdir(parents=True)
+        gated_cond = run_benchmark.freeze_conditions(
+            REPO_ROOT, exp_dir / "conditions", ["gated-structural"], cases=["EV2"]
+        )["gated-structural"]
+
+        orig_pricing = (REPO_ROOT / "benchmarks/sources/ev2_ts_bookings/src/pricing.ts").read_text(encoding="utf-8")
+        orig_bookings = (REPO_ROOT / "benchmarks/sources/ev2_ts_bookings/src/bookings.ts").read_text(encoding="utf-8")
+        prompts_seen: list[str] = []
+
+        def fake_invoke(**kwargs):
+            wd = kwargs["workdir"]
+            prompts_seen.append(kwargs["prompt"])
+            kwargs["trace_log_path"].write_text("trace\n", encoding="utf-8")
+            pricing_ts = wd / "benchmarks/sources/ev2_ts_bookings/src/pricing.ts"
+            bookings_ts = wd / "benchmarks/sources/ev2_ts_bookings/src/bookings.ts"
+            corporate_ts = wd / "benchmarks/sources/ev2_ts_bookings/src/corporate.ts"
+            call_no = len(prompts_seen)
+            if call_no == 1:
+                # Stage 1: inject silent TS catch fallback -> STRUCT-SILENT-FALLBACK.
+                pricing_ts.write_text(
+                    orig_pricing + "\nexport function safeRate(x: number): number {\n  try { return x; } catch { return 0; }\n}\n",
+                    encoding="utf-8",
+                )
+            elif call_no == 2:
+                # Stage 1 repair: remove silent catch fallback.
+                pricing_ts.write_text(
+                    orig_pricing + "\nexport function safeRate(x: number): number {\n  return x;\n}\n",
+                    encoding="utf-8",
+                )
+            elif call_no == 3:
+                # Stage 2: inject circular TS import between bookings.ts and corporate.ts -> ARCH-CIRCULAR-IMPORT.
+                corporate_ts.write_text(
+                    'import { BookingService } from "./bookings.ts";\n'
+                    "export function groupHelper(svc: BookingService): boolean { return Boolean(svc); }\n",
+                    encoding="utf-8",
+                )
+                bookings_ts.write_text(
+                    'import { groupHelper } from "./corporate.ts";\n'
+                    + orig_bookings
+                    + "\nexport function pingGroup(svc: BookingService): boolean { return groupHelper(svc); }\n",
+                    encoding="utf-8",
+                )
+            elif call_no == 4:
+                # Stage 2 repair: break circular import cleanly.
+                bookings_ts.write_text(orig_bookings, encoding="utf-8")
+                corporate_ts.write_text(
+                    'import { BookingService } from "./bookings.ts";\n'
+                    "export function groupHelper(svc: BookingService): boolean { return Boolean(svc); }\n",
+                    encoding="utf-8",
+                )
+            # Calls 5 and 6 (Stages 3 and 4) keep the workspace clean with no new defects.
+            return {
+                "status": "completed",
+                "text": f"Stage call {call_no} done.",
+                "session_id": "sid-ev2-gated",
+                "total_tokens": 100 * call_no,
+                "cost_usd": 0.01 * call_no,
+                "observed_model": "claude-opus-5-5",
+                "downgraded_models": [],
+                "elapsed_s": 0.1,
+            }
+
+        def fake_ws_grader(_repo_root, _case, _workdir, _stage, grader_out_path, **_kw):
+            rep = {
+                "case_id": "EV2",
+                "passed": True,
+                "checks": [
+                    {"id": spec["id"], "passed": True, "detail": "ok"}
+                    for spec in ev2_case["acceptance_checks"]
+                ],
+            }
+            grader_out_path.write_text(json.dumps(rep) + "\n", encoding="utf-8")
+            return rep
+
+        with (
+            mock.patch("scripts.run_benchmark._invoke_stage", side_effect=fake_invoke),
+            mock.patch("scripts.run_benchmark._run_workspace_grader", side_effect=fake_ws_grader),
+        ):
+            rec = run_benchmark.execute_run(
+                repo_root=fake_repo,
+                exp_dir=exp_dir,
+                experiment_id="exp_ev2_gated",
+                case=ev2_case,
+                model_cfg=run_benchmark.DEFAULT_MODELS["claude-opus-5-5"],
+                cli_version="claude 1.0",
+                condition="gated-structural",
+                condition_file=gated_cond,
+                replicate=1,
+                source_snapshot_id="git-deadbeef1234",
+                timeout_seconds=30,
+            )
+
+        self.assertEqual(rec["status"], "completed")
+        # 4 base stages + 2 repair turns (Stage 1 STRUCT-SILENT-FALLBACK, Stage 2 ARCH-CIRCULAR-IMPORT).
+        self.assertEqual(len(prompts_seen), 6)
+        self.assertIn("STRUCT-SILENT-FALLBACK", prompts_seen[1])
+        self.assertIn("ARCH-CIRCULAR-IMPORT", prompts_seen[3])
+        art_prefix = f"runs-local/exp_ev2_gated/artifacts/{rec['run_id']}/"
+        for expected_art in (
+            "stage-1-gate-review.txt",
+            "stage-1-gate-repair-trace.log",
+            "stage-2-gate-review.txt",
+            "stage-2-gate-repair-trace.log",
+            "stage-3-gate-review.txt",
+            "stage-4-gate-review.txt",
+        ):
+            self.assertIn(art_prefix + expected_art, rec["artifact_hashes"])
+        self.assertEqual({c["id"]: c["status"] for c in rec["checks"]}, {spec["id"]: "pass" for spec in ev2_case["acceptance_checks"]})
+        benchmark.validate_run(rec, {("EV2", "0.8.0"): ev2_case}, fake_repo, "ev2-gated")
+
+    def test_cm2_ablation_freeze_prepare_dry_run_and_mechanical_grading(self) -> None:
+        from benchmarks.graders import grade_cm2
+        from tests.test_cm2 import CLEAN_REPLAY_METHOD, _apply_clean_solution
+
+        conds = ["no-comments", "invariant-comments", "comment-traps"]
+
+        # 1. Shared condition freezing for CM2 pins all 6 module SHA-256s per arm across all models.
+        cond_dir = self.root / "cm2_conds"
+        snaps = run_benchmark.freeze_conditions(
+            REPO_ROOT,
+            cond_dir,
+            conds,
+            models=["claude-opus-5-5", "gpt-6.2-astra"],
+            cases=["CM2"],
+        )
+        self.assertEqual(set(snaps.keys()), set(conds))
+        self.assertEqual(len({benchmark.sha256(snaps[c]) for c in conds}), 3)
+        for cond in conds:
+            variant = run_benchmark.CM1_CONDITION_VARIANTS[cond]
+            self.assertFalse(benchmark.is_per_model_condition(cond))
+            self.assertEqual(
+                run_benchmark.resolve_condition_file(snaps, cond, "claude-opus-5-5"),
+                run_benchmark.resolve_condition_file(snaps, cond, "gpt-6.2-astra"),
+            )
+            snap_text = snaps[cond].read_text(encoding="utf-8")
+            self.assertIn("CM2 multi-file comment-hygiene ablation arm:", snap_text)
+            self.assertIn(run_benchmark.BASELINE_INSTRUCTION.strip(), snap_text)
+            for mod in grade_cm2.PROD_MODULES:
+                expected_sha = benchmark.sha256(
+                    REPO_ROOT / "benchmarks" / "sources" / "cm2_multifile_comments" / variant / mod
+                )
+                self.assertIn(f"{mod}: {expected_sha}", snap_text)
+
+        # Dry-run CLI succeeds for CM2 and rejects pairing comment-ablation arms with EV2.
+        rc_cm2 = run_benchmark.main([
+            "--experiment-id", "dry-cm2",
+            "--cases", "CM2",
+            "--models", "claude-opus-5-5",
+            "--conditions", *conds,
+            "--output-root", str(self.root / "out_cm2"),
+            "--dry-run",
+        ])
+        self.assertEqual(rc_cm2, 0)
+        rc_bad = run_benchmark.main([
+            "--experiment-id", "dry-bad-cm2",
+            "--cases", "EV2",
+            "--models", "claude-opus-5-5",
+            "--conditions", *conds,
+            "--output-root", str(self.root / "out_cm2"),
+            "--dry-run",
+        ])
+        self.assertEqual(rc_bad, 2)
+
+        # 2. prepare_clean_workspace isolates ONLY the requested CM2 variant at workspace root.
+        cases = benchmark.load_cases(REPO_ROOT / "benchmarks" / "cases", REPO_ROOT)
+        cm2_case = cases[("CM2", "0.8.0")]
+        for cond, variant in run_benchmark.CM1_CONDITION_VARIANTS.items():
+            workdir, hashes = run_benchmark.prepare_clean_workspace(
+                REPO_ROOT,
+                cm2_case,
+                run_benchmark.BASELINE_INSTRUCTION,
+                write_agents_md=True,
+                run_id=f"cm2_prep_{cond}",
+                condition=cond,
+            )
+            self.addCleanup(lambda p=workdir: shutil.rmtree(p, ignore_errors=True))
+            self.assertEqual(set(hashes.keys()), set(grade_cm2.EXPECTED_FILES) | {"AGENTS.md"})
+            self.assertFalse((workdir / "benchmarks").exists())
+            for vname in run_benchmark.CM1_CONDITION_VARIANTS.values():
+                self.assertFalse((workdir / vname).exists())
+            for mod in grade_cm2.PROD_MODULES:
+                expected_sha = benchmark.sha256(
+                    REPO_ROOT / "benchmarks" / "sources" / "cm2_multifile_comments" / variant / mod
+                )
+                self.assertEqual(hashes[mod], expected_sha)
+            self.assertEqual((workdir / "AGENTS.md").read_text(encoding="utf-8"), run_benchmark.BASELINE_INSTRUCTION)
+
+        # 3. _auto_populate_checks marks all 4 CM2 checks fail on grader load error.
+        load_fail_checks, load_defects = run_benchmark._auto_populate_checks(
+            cm2_case,
+            {1: ({"case_id": "CM2", "passed": False, "checks": [{"id": "load", "passed": False, "detail": "SyntaxError"}]}, "g1.json")},
+            {},
+        )
+        self.assertEqual(load_defects, [])
+        self.assertEqual(len(load_fail_checks), 4)
+        self.assertTrue(all(c["status"] == "fail" and c["evidence"] == ["g1.json"] for c in load_fail_checks))
+
+        # 4. End-to-end execute_run runs REAL grade_cm2.py, delivers neutral BASELINE_INSTRUCTION, and validates cleanly.
+        fake_repo = self.root / "fake_cm2_repo"
+        shutil.copytree(
+            REPO_ROOT / "benchmarks" / "sources" / "cm2_multifile_comments",
+            fake_repo / "benchmarks" / "sources" / "cm2_multifile_comments",
+        )
+        exp_dir = fake_repo / "runs-local" / "exp_cm2"
+        exp_snaps = run_benchmark.freeze_conditions(
+            fake_repo, exp_dir / "conditions", conds, cases=["CM2"]
+        )
+        delivered_instructions: list[str] = []
+        delivered_prompts: list[str] = []
+
+        def fake_invoke_clean(**kwargs):
+            delivered_instructions.append(kwargs["condition_text"])
+            delivered_prompts.append(kwargs["prompt"])
+            kwargs["trace_log_path"].write_text("trace\n", encoding="utf-8")
+            _apply_clean_solution(kwargs["workdir"])
+            return {
+                "status": "completed",
+                "text": "Refactored modules, implemented replay_dead_letter_batch, and confirmed run_checks.py exits 0.",
+                "session_id": "sid-cm2-clean",
+                "total_tokens": 150,
+                "cost_usd": 0.01,
+                "observed_model": "claude-opus-5-5",
+                "downgraded_models": [],
+                "elapsed_s": 0.1,
+            }
+
+        def fake_invoke_trap(**kwargs):
+            delivered_instructions.append(kwargs["condition_text"])
+            delivered_prompts.append(kwargs["prompt"])
+            kwargs["trace_log_path"].write_text("trace\n", encoding="utf-8")
+            wd = kwargs["workdir"]
+            api_text = (wd / "api.py").read_text(encoding="utf-8")
+            target = (
+                "    def replay_dead_letter_batch(self, batch_id: str) -> list[Job]:\n"
+                "        # Replay handler placeholder error until implemented\n"
+                '        raise JobError(f"replay_dead_letter_batch not yet implemented for {batch_id}")\n'
+            )
+            (wd / "api.py").write_text(api_text.replace(target, CLEAN_REPLAY_METHOD), encoding="utf-8")
+            return {
+                "status": "completed",
+                "text": "Implemented replay_dead_letter_batch.",
+                "session_id": "sid-cm2-trap",
+                "total_tokens": 160,
+                "cost_usd": 0.01,
+                "observed_model": "claude-opus-5-5",
+                "downgraded_models": [],
+                "elapsed_s": 0.1,
+            }
+
+        with mock.patch("scripts.run_benchmark._invoke_stage", side_effect=fake_invoke_clean):
+            rec_clean = run_benchmark.execute_run(
+                repo_root=fake_repo,
+                exp_dir=exp_dir,
+                experiment_id="exp_cm2",
+                case=cm2_case,
+                model_cfg=run_benchmark.DEFAULT_MODELS["claude-opus-5-5"],
+                cli_version="claude 1.0",
+                condition="invariant-comments",
+                condition_file=exp_snaps["invariant-comments"],
+                replicate=1,
+                source_snapshot_id="git-deadbeef1234",
+                timeout_seconds=30,
+            )
+
+        with mock.patch("scripts.run_benchmark._invoke_stage", side_effect=fake_invoke_trap):
+            rec_trap = run_benchmark.execute_run(
+                repo_root=fake_repo,
+                exp_dir=exp_dir,
+                experiment_id="exp_cm2",
+                case=cm2_case,
+                model_cfg=run_benchmark.DEFAULT_MODELS["claude-opus-5-5"],
+                cli_version="claude 1.0",
+                condition="comment-traps",
+                condition_file=exp_snaps["comment-traps"],
+                replicate=1,
+                source_snapshot_id="git-deadbeef1234",
+                timeout_seconds=30,
+            )
+
+        self.assertEqual(delivered_instructions, [run_benchmark.BASELINE_INSTRUCTION, run_benchmark.BASELINE_INSTRUCTION])
+        self.assertEqual(delivered_prompts[0], delivered_prompts[1])
+        self.assertNotIn("comment_traps", delivered_prompts[0])
+
+        clean_map = {c["id"]: c["status"] for c in rec_clean["checks"]}
+        self.assertEqual(
+            clean_map,
+            {
+                "dead_letter_replay_feature": "pass",
+                "cross_file_epoch_dedupe_invariant": "pass",
+                "persist_before_ack_crash_invariant": "pass",
+                "tests_and_comment_cleanup": "pass",
+            },
+        )
+        trap_map = {c["id"]: c["status"] for c in rec_trap["checks"]}
+        self.assertEqual(trap_map["dead_letter_replay_feature"], "pass")
+        self.assertEqual(trap_map["tests_and_comment_cleanup"], "fail")
+
+        # Unified workspace diff was computed against the original variant file (not /dev/null).
+        clean_diff_rel = f"runs-local/exp_cm2/artifacts/{rec_clean['run_id']}/stage-1-workspace.diff"
+        self.assertIn(clean_diff_rel, rec_clean["artifact_hashes"])
+        self.assertIn("--- a/api.py", (fake_repo / clean_diff_rel).read_text(encoding="utf-8"))
+
+        cases_map = {("CM2", "0.8.0"): cm2_case}
+        benchmark.validate_run(rec_clean, cases_map, fake_repo, "cm2-clean")
+        benchmark.validate_run(rec_trap, cases_map, fake_repo, "cm2-trap")
+        pairs = benchmark.comparable_pairs([rec_clean, rec_trap], "invariant-comments", "comment-traps")
+        self.assertEqual(len(pairs), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

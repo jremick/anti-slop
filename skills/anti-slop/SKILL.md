@@ -1,6 +1,6 @@
 ---
 name: anti-slop
-description: Run plain-English AI slop reviews, diff-scoped mutation tests, human-approved self-learning rules, and continuous hygiene mining with the anti-slop CLI while keeping humans in charge of engineering judgment.
+description: Run plain-English AI slop reviews, live E2E verification, diff-scoped Python and JS/TS mutation tests, human-approved self-learning rules, and continuous hygiene mining with the anti-slop CLI while keeping humans in charge of engineering judgment.
 ---
 
 # anti-slop Agent Workflow
@@ -11,10 +11,10 @@ Operate `anti-slop` on the human's behalf so they never have to memorize CLI fla
 
 Trigger: Before declaring work ready, or when asked to review changes for AI slop.
 
-1. Run `anti-slop review --json` against the current git diff (or pass `--base origin/main` for a branch review).
-2. For Python logic changes, also run `anti-slop mutate --test-cmd "<repo test command>" --json` to check whether tests catch real bugs injected on your changed lines.
+1. Run `anti-slop review --json` against the current git diff (or pass `--base origin/main` for a branch review). It checks surface shortcuts (`DIFF-*`), structural risks (`STRUCT-*`), architectural compounding slop (`ARCH-*`: circular imports, single-implementation wrappers, env-var boundary scatter), and approved learned rules (`LEARNED-*`).
+2. For Python or JS/TS logic changes, also run `anti-slop mutate --test-cmd "<repo test command>" --json` to check whether tests catch real bugs injected on your changed lines.
 3. Fix blocking errors automatically (`DIFF-*` shortcuts such as stubs, test skips, unjustified suppressions, silent catches, debug leftovers, hardcoded host paths, broken doc paths, or approved `LEARNED-*` errors), then re-run `anti-slop review --json` to confirm `ok: true`.
-4. Summarize non-blocking structural risks (`STRUCT-*` warnings) and any survived mutants in plain English for the human: state what changed, why it can compound across future sessions, and concrete fix options with tradeoffs. Never dump raw JSON or unexplained error codes.
+4. Summarize non-blocking structural and architectural risks (`STRUCT-*` and `ARCH-*` warnings) and any survived mutants in plain English for the human: state what changed, why it can compound across future sessions, and concrete fix options with tradeoffs. Never dump raw JSON or unexplained error codes.
 
 ## Workflow 2: Conversational Self-Learning
 
@@ -57,15 +57,16 @@ Trigger: Periodic maintenance, end-of-sprint hygiene, or when asked to audit rec
 
 Before reporting a bug fix or feature complete, verify behavior at the highest feasible tier:
 
-1. **Tier 1 (Preferred): Live end-to-end or real-artifact proof.** Run the real CLI, server, API endpoint, or browser flow and observe real outputs or artifacts.
-2. **Tier 2: Behavioral and mutation-checked tests.** Run tests against real inputs and outputs, and confirm diff-scoped bug detection with `anti-slop mutate --test-cmd "<test cmd>"`.
+1. **Tier 1 (Preferred): Live end-to-end or real-artifact proof.** Run `anti-slop verify` (using a project verify recipe from `anti-slop verify --init-example`, or ad-hoc `--cmd` / `--start` + `--http-get` flags) to execute the real CLI, server, API endpoint, or artifact flow and record a tamper-evident receipt. Confirm receipt freshness before sign-off with `anti-slop verify --check-receipt`.
+2. **Tier 2: Behavioral and mutation-checked tests.** Run tests against real inputs and outputs, and confirm diff-scoped bug detection across Python or JS/TS changes with `anti-slop mutate --test-cmd "<test cmd>"`.
 3. **Tier 3 (Weakest): Isolated mocked unit tests.** Restrict mocks to external network or clock boundaries; never rely on mock-only assertions as sole proof that an application works.
 
 ## Command Quick Reference
 
 - `anti-slop review --json` (or `--base origin/main`, `--markdown`)
+- `anti-slop verify --json` (or `--cmd "..."`, `--start "..." --http-get ...`, `--check-receipt`, `--markdown`)
 - `anti-slop diff --diff - --no-budget`
-- `anti-slop mutate --test-cmd "pytest -q" --json`
+- `anti-slop mutate --test-cmd "pytest -q" --json` (supports Python and JS/TS, e.g. `node --test`)
 - `anti-slop learn library list` / `show <id>` / `enable <id> --by <human> --dry-run`
 - `anti-slop learn capture|propose|verify|approve|retire|list|mine`
 - `anti-slop hook --install claude|antigravity|codex --dry-run`

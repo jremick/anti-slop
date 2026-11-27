@@ -44,7 +44,7 @@ Install behavior:
 
 ## What the Skill Teaches Agents
 
-1. **Plain-English Change Review:** Run `anti-slop review --json` (plus `anti-slop mutate` for Python logic changes), fix blocking shortcuts automatically, and summarize structural risks in plain English with tradeoffs.
+1. **Plain-English Change Review:** Run `anti-slop review --json` (checking `DIFF-*`, `STRUCT-*`, `ARCH-*`, and `LEARNED-*`, plus `anti-slop mutate` for Python and JS/TS logic changes), fix blocking shortcuts automatically, and summarize structural and architectural risks in plain English with tradeoffs.
 2. **Conversational Self-Learning:** Check `anti-slop learn library list` first, draft narrow rules (`deterministic_check` > `codebase_example` > `<= 45`-word `prompt_rule`), run 3-way `anti-slop learn verify`, and pause for explicit human approval before `approve --by <human>`.
 3. **Continuous Monitoring and Hygiene Mining:** Run `anti-slop learn mine --json`, auto-verify candidates, discard anything that fails or false-positives, and present only the verified shortlist for a human yes/no decision.
-4. **Verification Hierarchy:** Prefer Tier 1 live end-to-end or real-artifact proof over Tier 2 behavioral/mutation tests over Tier 3 isolated mocked unit tests.
+4. **Verification Hierarchy:** Prefer Tier 1 live end-to-end or real-artifact proof (`anti-slop verify` + `--check-receipt`) over Tier 2 behavioral/mutation tests over Tier 3 isolated mocked unit tests.

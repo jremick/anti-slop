@@ -34,7 +34,10 @@
       {"code": "STRUCT-COMMENTED-CODE", "default_severity": "warning", "summary": "Flags newly added multi-line commented-out code blocks while allowing short why/invariant comments."},
       {"code": "STRUCT-GOD-FUNCTION", "default_severity": "warning", "summary": "Flags oversized (>60 code lines) or high-branch (>12 branches) functions (heuristic starting thresholds)."},
       {"code": "STRUCT-GOD-FILE", "default_severity": "warning", "summary": "Flags diffs growing monolithic files beyond 400 code lines (heuristic starting threshold)."},
-      {"code": "STRUCT-SCOPE-SPRAWL", "default_severity": "warning", "summary": "Flags single diffs scattered across more than 3 unrelated production module areas."}
+      {"code": "STRUCT-SCOPE-SPRAWL", "default_severity": "warning", "summary": "Flags single diffs scattered across more than 3 unrelated production module areas."},
+      {"code": "ARCH-CIRCULAR-IMPORT", "default_severity": "warning", "summary": "Flags static circular module dependency cycles in Python and JS/TS production modules (skipping TYPE_CHECKING, deferred imports, and type-only imports)."},
+      {"code": "ARCH-SINGLE-IMPL-WRAPPER", "default_severity": "warning", "summary": "Flags speculative single-implementation abstractions (Python ABC/Protocol or JS/TS abstract/interface wrappers with <= 1 concrete implementation, or trivial pass-through *Factory/*Wrapper/*Impl classes)."},
+      {"code": "ARCH-BOUNDARY-SCATTER", "default_severity": "warning", "summary": "Flags raw environment-variable reads for the same non-runtime key scattered across 3 or more production modules instead of centralized boundary config validation."}
     ],
     "standing_core_rules": {
       "path": "standard/core.md",

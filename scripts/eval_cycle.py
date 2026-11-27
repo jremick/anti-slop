@@ -56,6 +56,20 @@ SUITE_SPECS: Dict[str, Dict[str, Any]] = {
             ("core-rules-v0.2.0", "gated-structural"),
         ],
     },
+    "ts-evolution": {
+        "name": "Multi-Turn TypeScript Compounding Software Quality (EV2)",
+        "cases": ["EV2"],
+        "stages_per_case": {"EV2": 4},
+        "conditions": ["baseline", "core-rules-v0.2.0", "gated-structural"],
+        "pilot_template": "benchmarks/pilot-ts-evolution-v0.8.0.json",
+        "grader": "benchmarks/graders/grade_ev2.py",
+        "timeout_seconds": 720,
+        "comparison_pairs": [
+            ("baseline", "core-rules-v0.2.0"),
+            ("baseline", "gated-structural"),
+            ("core-rules-v0.2.0", "gated-structural"),
+        ],
+    },
     "comments": {
         "name": "Comment-Hygiene Controlled Ablation (CM1)",
         "cases": ["CM1"],
@@ -63,6 +77,20 @@ SUITE_SPECS: Dict[str, Dict[str, Any]] = {
         "conditions": ["no-comments", "invariant-comments", "comment-traps"],
         "pilot_template": "benchmarks/pilot-comments-v0.7.0.json",
         "grader": "benchmarks/graders/grade_cm1.py",
+        "timeout_seconds": 360,
+        "comparison_pairs": [
+            ("no-comments", "invariant-comments"),
+            ("no-comments", "comment-traps"),
+            ("invariant-comments", "comment-traps"),
+        ],
+    },
+    "comments-multifile": {
+        "name": "Multi-File Comment-Hygiene Controlled Ablation (CM2)",
+        "cases": ["CM2"],
+        "stages_per_case": {"CM2": 1},
+        "conditions": ["no-comments", "invariant-comments", "comment-traps"],
+        "pilot_template": "benchmarks/pilot-comments-v0.8.0.json",
+        "grader": "benchmarks/graders/grade_cm2.py",
         "timeout_seconds": 360,
         "comparison_pairs": [
             ("no-comments", "invariant-comments"),
@@ -220,6 +248,7 @@ def _slop_total(metrics: Dict[str, Any]) -> int:
         + int(metrics.get("dead_compat", 0))
         + int(metrics.get("god_functions", 0))
         + int(metrics.get("god_files", 0))
+        + int(metrics.get("circular_imports", 0))
         + int(metrics.get("test_theater", 0))
         + int(metrics.get("silent_failures_and_shortcuts", 0))
     )
@@ -360,7 +389,10 @@ def _aggregate_cm1_wall_time(
     repo_root: Path,
     exp_dir: Path,
 ) -> Optional[Dict[str, Any]]:
-    cm_runs = [r for r in records if r.get("case_id") == "CM1" or r.get("condition") == "no-comments"]
+    cm_runs = [
+        r for r in records
+        if r.get("case_id") in ("CM1", "CM2") or r.get("condition") == "no-comments"
+    ]
     if not cm_runs:
         return None
 
@@ -503,7 +535,7 @@ def _summarize_experiment(
 
     ev1_rows: List[Tuple[Dict[str, Any], Dict[str, Any]]] = []
     for rec in records:
-        if rec.get("case_id") == "EV1":
+        if rec.get("case_id") in ("EV1", "EV2"):
             m = _load_ev1_metrics(rec, repo_root=repo_root, exp_dir=exp_dir)
             if m is not None:
                 ev1_rows.append((rec, m))
@@ -682,7 +714,8 @@ def format_scorecard_markdown(card: Dict[str, Any]) -> str:
 
         if exp.get("ev1_metrics"):
             ev1 = exp["ev1_metrics"]
-            lines.append("### EV1 Mutation Kill Rate & Slop Totals")
+            ev_label = "/".join(c for c in exp["cases"] if c in ("EV1", "EV2")) or "EV1"
+            lines.append(f"### {ev_label} Mutation Kill Rate & Slop Totals")
             lines.append("")
             lines.append("| Condition | Mutation Kill Mean | Slop Defects Total (Avg/Run) | God Fns | Silent/Shortcuts | Test Theater |")
             lines.append("|---|---:|---:|---:|---:|---:|")
@@ -711,7 +744,8 @@ def format_scorecard_markdown(card: Dict[str, Any]) -> str:
 
         if exp.get("cm1_wall_time"):
             cm1 = exp["cm1_wall_time"]
-            lines.append("### CM1 Wall-Time Deltas (vs. `no-comments`)")
+            cm_label = "/".join(c for c in exp["cases"] if c in ("CM1", "CM2")) or "CM1"
+            lines.append(f"### {cm_label} Wall-Time Deltas (vs. `no-comments`)")
             lines.append("")
             lines.append("| Condition | Wall Time Sum | Median | Delta vs. `no-comments` |")
             lines.append("|---|---:|---:|---:|")
@@ -761,11 +795,12 @@ def format_scorecard_text(card: Dict[str, Any]) -> str:
                     mbits.append(f"{c}:{b['passed']}/{b['total']}")
             lines.append(f"  - {mid:<18} " + "  ".join(mbits))
         if exp.get("ev1_metrics"):
+            ev_label = "/".join(c for c in exp["cases"] if c in ("EV1", "EV2")) or "EV1"
             ev1_bits = [
                 f"{c}: mut={_pct(m['mutation_kill_rate_mean'])}, slop={m['slop_defects_total']}"
                 for c, m in exp["ev1_metrics"]["by_condition"].items()
             ]
-            lines.append("  EV1 quality:       " + " | ".join(ev1_bits))
+            lines.append(f"  {ev_label} quality:       " + " | ".join(ev1_bits))
         if exp.get("rw3_tampering"):
             rw3_bits = [
                 f"{c}={t['tampered']}/{t['completed']} ({_pct(t['tampering_rate'])})"
@@ -773,13 +808,14 @@ def format_scorecard_text(card: Dict[str, Any]) -> str:
             ]
             lines.append("  RW3 tampering:     " + " | ".join(rw3_bits))
         if exp.get("cm1_wall_time"):
+            cm_label = "/".join(c for c in exp["cases"] if c in ("CM1", "CM2")) or "CM1"
             cm1_bits = [
                 f"{c}={w['wall_time_sum_s']:.1f}s ({w['delta_vs_no_comments_pct']:+.1f}%)"
                 if w["delta_vs_no_comments_pct"] is not None
                 else f"{c}={w['wall_time_sum_s']:.1f}s"
                 for c, w in exp["cm1_wall_time"]["by_condition"].items()
             ]
-            lines.append("  CM1 wall time:     " + " | ".join(cm1_bits))
+            lines.append(f"  {cm_label} wall time:     " + " | ".join(cm1_bits))
         lines.append("")
 
     lines.append(f"Rule-Retirement Watch ({len(card['rule_retirement_watch'])} item(s)):")
@@ -845,7 +881,8 @@ def build_plan(
     elif suites in SUITE_SPECS:
         selected_suite_keys = [suites]
     else:
-        raise EvalCycleError(f"Unknown suite '{suites}'. Choose from: all, evolution, comments, integrity.")
+        valid_choices = ", ".join(["all", *SUITE_SPECS.keys()])
+        raise EvalCycleError(f"Unknown suite '{suites}'. Choose from: {valid_choices}.")
 
     root = Path(repo_root).resolve() if repo_root else REPO_ROOT
     registered_in_runner = model_id in _known_runner_models(root)
@@ -1021,7 +1058,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p_plan.add_argument(
         "--suites",
         default="all",
-        choices=("all", "evolution", "comments", "integrity"),
+        choices=("all", *SUITE_SPECS.keys()),
         help="Evaluation suites to include (default: all).",
     )
     p_plan.add_argument(

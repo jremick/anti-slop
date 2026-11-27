@@ -9,3 +9,4 @@ workspaces/
 runs-local/
 dist/
 .anti-slop/telemetry.jsonl
+.anti-slop/last-verify.json

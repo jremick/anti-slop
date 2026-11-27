@@ -2,10 +2,11 @@
 """Unified agent-friendly CLI entrypoint for anti-slop (`anti-slop`).
 
 Dispatches to all anti-slop subcommands with zero third-party dependencies:
-  - review: plain-English code review (shortcuts + structural risks + learned rules)
+  - review: plain-English code review (shortcuts + structural/architectural risks + learned rules)
   - diff:   deterministic diff and Markdown prose gate
   - learn:  verified human-gated self-learning loop, optional library, and mining
-  - mutate: diff-scoped AST mutation testing in an isolated temp copy
+  - mutate: diff-scoped Python and JS/TS mutation testing in an isolated temp copy
+  - verify: live end-to-end and real-artifact verification with tamper-evident receipts
   - hook:   Claude Code, Antigravity, and Codex lifecycle hooks + installer
   - api:    model API and harness configuration validator
   - skill:  inspect or install the bundled agent workflow skill (SKILL.md)
@@ -31,10 +32,11 @@ DEFAULT_VERSION = "0.7.0"
 SKILL_INSTALL_CHOICES: Tuple[str, ...] = ("claude", "antigravity", "codex")
 
 SUBCOMMAND_TARGETS: Dict[str, Tuple[str, str]] = {
-    "review": ("gates.review", "Run plain-English change review (shortcuts + structural + learned rules)."),
+    "review": ("gates.review", "Run plain-English change review (shortcuts + structural/architectural + learned rules)."),
     "diff": ("gates.diff_check", "Run deterministic diff and Markdown prose gate."),
     "learn": ("gates.learn", "Manage verified self-learning rules, optional packs, and pattern mining."),
-    "mutate": ("gates.mutate", "Run diff-scoped Python AST mutation testing in an isolated temp copy."),
+    "mutate": ("gates.mutate", "Run diff-scoped Python and JS/TS mutation testing in an isolated temp copy."),
+    "verify": ("gates.verify", "Run live end-to-end and real-artifact verification with tamper-evident receipts."),
     "hook": ("gates.hooks.run_diff_gate_hook", "Run or install Claude Code, Antigravity, and Codex lifecycle hooks."),
     "api": ("gates.api_checks", "Validate model API and harness JSON configs."),
 }

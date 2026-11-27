@@ -107,7 +107,21 @@ def main() -> int:
             "validate",
         ],
         [
+            sys.executable, "-B", "scripts/benchmark.py",
+            "--pilot", "benchmarks/pilot-ts-evolution-v0.8.0.json",
+            "validate",
+        ],
+        [
+            sys.executable, "-B", "scripts/benchmark.py",
+            "--pilot", "benchmarks/pilot-comments-v0.8.0.json",
+            "validate",
+        ],
+        [
             sys.executable, "-B", "benchmarks/graders/grade_cm1.py",
+            "--check-ablation-fixtures",
+        ],
+        [
+            sys.executable, "-B", "benchmarks/graders/grade_cm2.py",
             "--check-ablation-fixtures",
         ],
         [

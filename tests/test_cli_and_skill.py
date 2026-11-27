@@ -71,7 +71,7 @@ class UnifiedCliAndSkillTests(unittest.TestCase):
 
         proc_help = self._run_cli("--help")
         self.assertEqual(proc_help.returncode, 0, msg=proc_help.stderr)
-        for sub in ("review", "diff", "learn", "mutate", "hook", "api", "skill"):
+        for sub in ("review", "diff", "learn", "mutate", "verify", "hook", "api", "skill"):
             self.assertIn(sub, proc_help.stdout)
 
         proc_bad = self._run_cli("does-not-exist")
@@ -167,6 +167,22 @@ class UnifiedCliAndSkillTests(unittest.TestCase):
         self.assertEqual(proc_api_bad.returncode, 1, msg=proc_api_bad.stdout + proc_api_bad.stderr)
         self.assertIn("GPT-EFFORT-NONE", {e["code"] for e in json.loads(proc_api_bad.stdout)["errors"]})
 
+        # 7. verify (--help dispatch and live ad-hoc CLI check)
+        proc_ver_help = self._run_cli("verify", "--help")
+        self.assertEqual(proc_ver_help.returncode, 0, msg=proc_ver_help.stderr)
+        self.assertIn("--check-receipt", proc_ver_help.stdout)
+
+        proc_ver_live = self._run_cli(
+            "verify",
+            "--repo-root", str(proj),
+            "--cmd", f"{sys.executable} -B -c \"print('verify-ok')\"",
+            "--expect-stdout", "verify-ok",
+            "--no-receipt",
+            "--json",
+        )
+        self.assertEqual(proc_ver_live.returncode, 0, msg=proc_ver_live.stdout + proc_ver_live.stderr)
+        self.assertTrue(json.loads(proc_ver_live.stdout)["ok"])
+
     def test_skill_show_matches_source_meets_budget_and_passes_strict_prose(self) -> None:
         proc = self._run_cli("skill", "show")
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
@@ -184,7 +200,11 @@ class UnifiedCliAndSkillTests(unittest.TestCase):
         self.assertNotIn("\u2014", SKILLS_README.read_text(encoding="utf-8"))
         for required_phrase in (
             "anti-slop review --json",
+            "ARCH-*",
             "anti-slop mutate",
+            "JS/TS",
+            "anti-slop verify",
+            "--check-receipt",
             "anti-slop learn library list",
             "anti-slop learn verify",
             "approve",

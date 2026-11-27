@@ -53,6 +53,7 @@ class PackagingMetadataTests(unittest.TestCase):
             "anti-slop-hook": "gates.hooks.run_diff_gate_hook:main",
             "anti-slop-api": "gates.api_checks:main",
             "anti-slop-mutate": "gates.mutate:main",
+            "anti-slop-verify": "gates.verify:main",
         }
         if tomllib is not None:
             data = tomllib.loads(raw_text)
@@ -68,7 +69,7 @@ class PackagingMetadataTests(unittest.TestCase):
             else:
                 self.assertEqual(lic, "MIT")
 
-            self.assertEqual(len(project["scripts"]), 7)
+            self.assertEqual(len(project["scripts"]), 8)
             self.assertEqual(project["scripts"], expected_scripts)
 
             setuptools_cfg = data.get("tool", {}).get("setuptools", {})
@@ -323,10 +324,12 @@ class PackagingMetadataTests(unittest.TestCase):
             self.assertIn("src/real_bug.py", non_excluded_fail.stderr)
             self.assertNotIn("DIFF-BROKEN-DOC-PATH", non_excluded_fail.stderr)
 
-            # 4. Validate workflow tests Python 3.11-3.13 matrix and dogfoods `uses: ./`.
+            # 4. Validate workflow tests Python 3.11-3.13 matrix, Node 24, and dogfoods `uses: ./`.
             wf_text = (REPO_ROOT / ".github/workflows/validate.yml").read_text(encoding="utf-8")
             for py_ver in ("'3.11'", "'3.12'", "'3.13'"):
                 self.assertIn(py_ver, wf_text)
+            self.assertIn("actions/setup-node@v4", wf_text)
+            self.assertIn("node-version: '24'", wf_text)
             self.assertIn("dogfood-action:", wf_text)
             self.assertIn("uses: ./", wf_text)
             self.assertIn("persist-credentials: false", wf_text)

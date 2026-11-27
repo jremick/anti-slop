@@ -47,10 +47,17 @@ class OptionalRuleLibraryTests(unittest.TestCase):
             ],
         )
 
-        # Verify default_core covers Layer A, Layer B (including STRUCT-COMMENTED-CODE), and R1-R7.
+        # Verify default_core covers Layer A, Layer B (all 11 STRUCT-* + ARCH-* checks), and R1-R7.
         dc = catalog["default_core"]
         layer_b_codes = {item["code"] for item in dc["layer_b_structural_checks"]}
-        self.assertIn("STRUCT-COMMENTED-CODE", layer_b_codes)
+        self.assertEqual(len(layer_b_codes), 11)
+        for required_code in (
+            "STRUCT-COMMENTED-CODE",
+            "ARCH-CIRCULAR-IMPORT",
+            "ARCH-SINGLE-IMPL-WRAPPER",
+            "ARCH-BOUNDARY-SCATTER",
+        ):
+            self.assertIn(required_code, layer_b_codes)
         core_rule_ids = [item["id"] for item in dc["standing_core_rules"]["rules"]]
         self.assertEqual(core_rule_ids, ["R1", "R2", "R3", "R4", "R5", "R6", "R7"])
 

@@ -166,6 +166,31 @@ class EvalCycleTests(unittest.TestCase):
         )
         self.assertEqual(p_bad.returncode, 2)
 
+        # 4. v0.8.0 TS evolution (EV2) and multi-file comment ablation (CM2) plan suites.
+        plan_ev2 = eval_cycle.build_plan(
+            "anthropic:claude-opus-5-5",
+            suites="ts-evolution",
+            replicates=3,
+            repo_root=REPO_ROOT,
+        )
+        self.assertEqual(len(plan_ev2["suites"]), 1)
+        self.assertEqual(plan_ev2["suites"][0]["cases"], ["EV2"])
+        self.assertEqual(plan_ev2["suites"][0]["pilot_template"], "benchmarks/pilot-ts-evolution-v0.8.0.json")
+        self.assertEqual(plan_ev2["total_planned_runs"], 9)
+        self.assertEqual(plan_ev2["total_planned_generation_stages"], 36)
+
+        plan_cm2 = eval_cycle.build_plan(
+            "openai:gpt-6.2-astra",
+            suites="comments-multifile",
+            replicates=3,
+            repo_root=REPO_ROOT,
+        )
+        self.assertEqual(len(plan_cm2["suites"]), 1)
+        self.assertEqual(plan_cm2["suites"][0]["cases"], ["CM2"])
+        self.assertEqual(plan_cm2["suites"][0]["pilot_template"], "benchmarks/pilot-comments-v0.8.0.json")
+        self.assertEqual(plan_cm2["total_planned_runs"], 9)
+        self.assertEqual(plan_cm2["total_planned_generation_stages"], 9)
+
 
 if __name__ == "__main__":
     unittest.main()
