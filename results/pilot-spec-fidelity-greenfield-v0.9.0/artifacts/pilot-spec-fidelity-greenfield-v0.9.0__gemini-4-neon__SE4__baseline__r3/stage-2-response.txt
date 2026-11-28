@@ -1,0 +1,6 @@
+**Production-Hardening Pass (`matcher.py`, `runner.py`)**
+
+- **Hardened (`matcher.py`)**: Validated `PreferenceClause`/`WrittenPreference` element types, guarded exclusion lookups against unhashable fields, used zero-copy whitespace checks, and safely skipped malformed or oversized numeric `source_id` strings.
+- **Hardened (`runner.py`)**: Ordered option validation before payload scanning, replaced `.strip()` with zero-copy `.isspace()`, added ASCII fast-path and chunked UTF-8 byte counting to avoid doubling peak memory on large prompts, and converted UTF-8 surrogate errors to `ValueError`.
+- **Declined per `SPEC.md`**: Added no default sensitive-attribute blocklists (caller opt-in via `excluded_fields`/`drop_whole_item`), no default prompt/tool caps (caller opt-in via `max_prompt_bytes`/`max_tools`), no automatic mode fallback, and no truncation.
+- **Verification**: `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` — `Ran 4 tests in 0.000s`, `OK` (exit code `0`).

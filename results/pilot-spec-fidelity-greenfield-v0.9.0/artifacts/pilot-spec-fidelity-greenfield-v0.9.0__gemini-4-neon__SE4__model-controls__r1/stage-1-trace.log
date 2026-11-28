@@ -1,0 +1,21 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "a7714224-e48b-4800-ba4b-86d82bc48bcb", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 192644, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented [matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/matcher.py) and [runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/runner.py) per [SPEC.md](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/SPEC.md) without modifying `SPEC.md`, `models.py`, `tests/test_smoke.py`, or `run_checks.py`.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` (exit code `0`):
+```text
+test_basic_lifestyle_preference_compilation (test_smoke.SmokeMatcherTests) ... ok
+test_stale_excerpt_drops_source (test_smoke.SmokeMatcherTests) ... ok
+test_empty_prompt_rejected (test_smoke.SmokeRunnerTests) ... ok
+test_small_local_request_prepares_fast_tensor (test_smoke.SmokeRunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```
+
+STDERR:
+

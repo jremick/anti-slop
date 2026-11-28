@@ -1,0 +1,3 @@
+- Hardened matcher validation for malformed clauses and source records. Stale excerpts still invalidate the entire source before filtering. Sensitive fields remain eligible under the frozen spec, with exclusions explicitly controlled by callers.
+- Reduced runner memory use with chunked UTF-8 measurement and rejected tool lists over caller-supplied limits before traversal. Invalid UTF-8 produces a generic `ValueError`. Limits remain opt-in, and GPU capacity checks remain outside request preparation.
+- Verified all four frozen files are unchanged. `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` with `Ran 4 tests in 0.000s` and `OK`. Additional edge-case checks passed.

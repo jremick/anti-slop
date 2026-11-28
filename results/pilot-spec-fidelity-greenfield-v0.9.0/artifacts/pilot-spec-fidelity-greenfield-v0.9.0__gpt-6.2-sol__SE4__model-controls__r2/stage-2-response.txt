@@ -1,0 +1,5 @@
+Hardened `matcher.py` to reject malformed clause and source records and verify excerpts before applying caller-selected exclusions. Sensitive fields remain eligible by default, and retained excerpts can still mention excluded attributes. Field exclusion alone provides no redaction.
+
+Hardened `runner.py` to enforce caller limits early, count UTF-8 bytes in bounded chunks, and report encoding errors without exposing prompt text in the error message. Default limits remain unset, routing stays `fast_tensor`, and requests are never truncated. GPU capacity remains a caller responsibility.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` (`Ran 4 tests in 0.000s`, `OK`). Supplemental checks passed. Frozen files are byte-for-byte unchanged.

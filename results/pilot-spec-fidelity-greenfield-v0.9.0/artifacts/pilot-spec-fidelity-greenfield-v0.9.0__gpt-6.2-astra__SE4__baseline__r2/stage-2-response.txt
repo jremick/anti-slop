@@ -1,0 +1,11 @@
+`matcher.py` now raises `ValueError` for malformed preference records without echoing their contents. Excerpt verification still precedes filtering, and callers retain control over sensitive-field exclusions.
+
+`runner.py` checks configured limits before scanning oversized inputs, counts UTF-8 bytes in bounded chunks, and rejects invalid Unicode. This reduces peak memory during preparation. Callers must still set limits to bound accepted workloads. Default routing remains `fast_tensor`, with no truncation.
+
+Edge checks passed for exclusions, stale excerpts, malformed records, and a multimegabyte Unicode prompt with 700 tools. `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited with code `0`:
+
+```text
+Ran 4 tests in 0.000s
+
+OK
+```

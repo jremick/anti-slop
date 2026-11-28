@@ -1,0 +1,5 @@
+### Hardening Summary
+- **`matcher.py`**: Added strict type checks for `PreferenceClause` and `WrittenPreference` entries, rejected non-ASCII, whitespace-padded, or oversized `source_id` strings without crashing, guarded against unhashable `source_id`/`field` values, and rejected whitespace-only `excluded_fields` or excerpts.
+- **`runner.py`**: Validated bounds and `force_mode` fail-fast before payload scanning, replaced `.strip()` copies with O(1)-memory `.isspace()` checks, measured UTF-8 byte length in 64 KiB chunks (with early exit on opt-in `max_prompt_bytes`) to avoid full-buffer duplication OOMs, and normalized surrogate `UnicodeEncodeError` to `ValueError`.
+- **Declined per `SPEC.md`**: No default sensitive-attribute exclusions (`excluded_fields` remains caller opt-in), no default prompt/tool caps, no size-based `chunked_prefill` auto-switching, and no truncation.
+- **Verification**: `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` (`Ran 4 tests in 0.000s`, `OK`).

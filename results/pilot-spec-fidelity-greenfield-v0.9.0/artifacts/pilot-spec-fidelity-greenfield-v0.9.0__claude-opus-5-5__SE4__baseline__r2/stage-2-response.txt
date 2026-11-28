@@ -1,0 +1,12 @@
+**Harden se4 matcher/runner input handling and memory use**
+
+**Hardened**
+- `matcher`: malformed clauses or `source_id`s raise `ValueError`. Groups with bad items, bad fields or overlong IDs are skipped. `excluded_fields` is copied to a frozenset.
+- `runner`: limits checked before any O(n) work. Prompt bytes are counted in chunks, never copied whole. Unencodable prompts and blank tools give indexed `ValueError`s.
+
+**Declined (SPEC conflicts)**
+- No default exclusion of `ethnicity`/`religion`/`skin_tone`. Compliance exclusions stay caller opt-in.
+- No default prompt or tool limits, and no automatic `chunked_prefill`. Very large inputs are accepted unless the caller sets limits.
+
+**Verification**
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py`: `Ran 4 tests … OK`, exit `0`. Ad-hoc edge cases passed, on Python 3.9.6 only.

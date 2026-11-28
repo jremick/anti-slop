@@ -1,0 +1,18 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+## Production Hardening
+
+**Hardened:**
+- `matcher.py`: Validate `PreferenceClause` and `WrittenPreference` types (`ValueError` instead of `AttributeError`), guard non-string or unhashable `source_id`/`field` values, and keep base-10 `source_id` parsing safe on overlong digit strings.
+- `runner.py`: Avoid OOM copies on large prompts via zero-allocation `isspace()` checks, an ASCII fast path, 64 KiB chunked UTF-8 byte counting (rejecting lone surrogates with `ValueError`), and early rejection when opt-in bounds are exceeded.
+
+**Declined per `SPEC.md`:**
+- No default sensitive-attribute exclusions, byte/tool caps, auto-switching to `chunked_prefill`, or truncation; compliance and limits remain caller opt-in.
+
+**Verification:**
+- `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py`: `Ran 4 tests in 0.000s`, `OK` (exit code `0`).
+
+STDERR:
+

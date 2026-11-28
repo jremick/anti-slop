@@ -1,0 +1,8 @@
+**Harden matcher/runner input handling and prompt measurement**
+
+- matcher: a non-`PreferenceClause` element now raises `ValueError`; it used to crash with `AttributeError`. Bad source IDs, fields, or items now skip their source instead of raising `TypeError`.
+- runner: the prompt is measured in 1M-character slices; a 40 MB prompt peaked at about 3 MB extra. Over-limit prompts stop early. Invalid UTF-8 raises a clear `ValueError` that doesn't quote the prompt.
+
+**Declined:** default size caps and default exclusion of skin tone, ethnicity, or religion. SPEC.md requires neither by default. Callers can still opt in.
+
+**Verified:** `run_checks.py`: `Ran 4 tests … OK`, exit 0, plus manual edge-case checks. Ran on Python 3.9.6, not 3.11+, so the digit-limit guard wasn't exercised.

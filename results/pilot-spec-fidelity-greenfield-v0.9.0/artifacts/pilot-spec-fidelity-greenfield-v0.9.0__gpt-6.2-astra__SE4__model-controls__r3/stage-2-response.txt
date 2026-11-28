@@ -1,0 +1,11 @@
+`matcher.py` validates preference records and clause values with errors that omit user content. Verbatim excerpt checks still precede caller-selected exclusions, and sensitive fields remain eligible by default.
+
+`runner.py` checks tool limits before scanning names and measures UTF-8 bytes in chunks. A 6,000,000-byte prompt with 4,096 tools used under 1 MiB of additional traced memory. Limits remain opt-in, routing defaults to `fast_tensor`, and requests are never truncated. Callers still own the memory cost of constructing inputs.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited with code `0`.
+
+```text
+Ran 4 tests in 0.000s
+
+OK
+```

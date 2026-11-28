@@ -1,0 +1,19 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+### Production Hardening (`matcher.py`, `runner.py`)
+
+**Hardened**
+- `matcher.py`: Validated `PreferenceClause`, `WrittenPreference`, and non-empty `clause.field` (`ValueError`); tightened base-10 `source_id` parsing (`[+-]?[0-9]+`) to safely skip underscores, whitespace, unhashable values, and oversized digit strings.
+- `runner.py`: Avoided full-string copies on large prompts via `.isspace()`, O(1) ASCII byte counting, and 64K-char chunked UTF-8 measurement with early `max_prompt_bytes` exit and lone-surrogate `ValueError`; added fail-fast `max_tools` check before element scan.
+
+**Declined per `SPEC.md`**
+- No default filtering of demographic/appearance fields (caller opt-in via `excluded_fields`).
+- No default size/tool caps, auto `chunked_prefill` switching, or truncation (caller opt-in via `max_prompt_bytes`, `max_tools`, `force_mode`).
+
+**Verification**
+- `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py`: `Ran 4 tests in 0.000s`, `OK` (exit `0`).
+
+STDERR:
+

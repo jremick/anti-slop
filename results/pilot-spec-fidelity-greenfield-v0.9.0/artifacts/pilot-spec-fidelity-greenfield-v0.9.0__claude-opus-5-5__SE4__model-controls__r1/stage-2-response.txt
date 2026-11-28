@@ -1,0 +1,6 @@
+**Harden matcher/runner input handling**
+
+- `matcher.py`: a clause that isn't a `PreferenceClause` now raises `ValueError`. Non-string source IDs, oversized integer strings, non-`WrittenPreference` items and non-string statements now skip the source group instead of crashing.
+- `runner.py`: limit arguments are validated before measuring. When `max_prompt_bytes` is set, oversized prompts are rejected before UTF-8 encoding. Lone surrogates now raise a clear `ValueError`.
+- Declined: default size/tool caps and default exclusion of sensitive fields (`ethnicity`, `religion`, `skin_tone`). SPEC.md requires no default bounds and no default exclusions; callers can opt in via `max_*` and `excluded_fields`.
+- Verification: `run_checks.py` passes 4/4 tests (`OK`, exit 0) on Python 3.9.6; SPEC targets 3.11+.

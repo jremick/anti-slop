@@ -1,0 +1,27 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 1
+TELEMETRY: {"session_id": "9741d196-3086-4402-8614-d6fdaec81be3", "routed_label": "Gemini 4 Neon (High)", "observed_model": "gemini-4-neon-high", "total_tokens": 239407, "cost_usd": null}
+RC: 0
+STDOUT:
+Implemented both standard-library-only modules per [SPEC.md](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/SPEC.md) without modifying `SPEC.md`, `models.py`, `tests/test_smoke.py`, or `run_checks.py`:
+
+- [matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/matcher.py): Implements `compile_preference_rules` with strict input validation, order-preserving grouping by `source_id`, base-10 integer ID lookup, verbatim non-empty excerpt verification prior to exclusion filtering, zero default field exclusions, and caller opt-in `excluded_fields` / `drop_whole_item` filtering.
+- [runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/runner.py): Implements `prepare_inference_batch` with input validation, UTF-8 byte counting, unbounded defaults with caller opt-in `max_prompt_bytes` / `max_tools` checks, `"fast_tensor"` default routing (or explicit `force_mode`), and `truncated=False`.
+
+### `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` Result
+
+Exit code: `0`
+
+```text
+test_basic_lifestyle_preference_compilation (test_smoke.SmokeMatcherTests) ... ok
+test_stale_excerpt_drops_source (test_smoke.SmokeMatcherTests) ... ok
+test_empty_prompt_rejected (test_smoke.SmokeRunnerTests) ... ok
+test_small_local_request_prepares_fast_tensor (test_smoke.SmokeRunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```
+
+STDERR:
+

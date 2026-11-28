@@ -1,0 +1,181 @@
+--- a/benchmarks/sources/se4_greenfield_spec/matcher.py
++++ b/benchmarks/sources/se4_greenfield_spec/matcher.py
+@@ -2,9 +2,22 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Collection, Mapping, Sequence
++from collections.abc import Collection, Mapping, Sequence
++import re
+ 
+-from .models import CompiledRules, PreferenceClause, WrittenPreference
++from .models import CompiledRules, PreferenceClause, RuleSource, WrittenPreference
++
++_BASE10_INT_RE = re.compile(r"[+-]?[0-9]+")
++
++
++def _parse_base10_source_id(source_id: object) -> int | None:
++    """Parse a base-10 integer string, returning None for non-numeric inputs."""
++    if not isinstance(source_id, str) or not _BASE10_INT_RE.fullmatch(source_id):
++        return None
++    try:
++        return int(source_id, 10)
++    except ValueError:
++        return None
+ 
+ 
+ def compile_preference_rules(
+@@ -15,4 +28,80 @@
+     drop_whole_item: bool = False,
+ ) -> CompiledRules:
+     """Compile validated preference rule sources per SPEC.md."""
+-    raise NotImplementedError("Implement compile_preference_rules per SPEC.md")
++    if not isinstance(items, Mapping):
++        raise ValueError("items must be a Mapping")
++
++    if not isinstance(clauses, Sequence) or isinstance(
++        clauses, (str, bytes, bytearray)
++    ):
++        raise ValueError("clauses must be a Sequence and not str, bytes, or bytearray")
++
++    excluded_set: frozenset[str] | None
++    if excluded_fields is None:
++        excluded_set = None
++    else:
++        if not isinstance(excluded_fields, Collection) or isinstance(
++            excluded_fields, (str, bytes, bytearray)
++        ):
++            raise ValueError(
++                "excluded_fields must be a Collection and not str, bytes, or bytearray"
++            )
++        validated_excluded: set[str] = set()
++        for field_name in excluded_fields:
++            if not isinstance(field_name, str) or not field_name.strip():
++                raise ValueError("excluded_fields elements must be non-empty strings")
++            validated_excluded.add(field_name)
++        excluded_set = frozenset(validated_excluded)
++
++    if not isinstance(drop_whole_item, bool):
++        raise ValueError("drop_whole_item must be a bool")
++
++    grouped: dict[str, list[PreferenceClause]] = {}
++    for clause in clauses:
++        if not isinstance(clause.source_id, str):
++            continue
++        grouped.setdefault(clause.source_id, []).append(clause)
++
++    sources: list[RuleSource] = []
++    for source_id, group_clauses in grouped.items():
++        parsed_id = _parse_base10_source_id(source_id)
++        if parsed_id is None or parsed_id not in items:
++            continue
++
++        item = items[parsed_id]
++        statement = item.statement
++        if not isinstance(statement, str):
++            continue
++
++        # Excerpt verification runs before exclusion filtering.
++        if any(
++            not isinstance(clause.source_excerpt, str)
++            or len(clause.source_excerpt) == 0
++            or clause.source_excerpt not in statement
++            for clause in group_clauses
++        ):
++            continue
++
++        if excluded_set is None:
++            kept = group_clauses
++        elif drop_whole_item:
++            if any(clause.field in excluded_set for clause in group_clauses):
++                continue
++            kept = group_clauses
++        else:
++            kept = [
++                clause for clause in group_clauses if clause.field not in excluded_set
++            ]
++            if not kept:
++                continue
++
++        sources.append(
++            RuleSource(
++                source_id=source_id,
++                importance=item.importance,
++                fields=tuple(clause.field for clause in kept),
++                clauses=tuple(kept),
++            )
++        )
++
++    return CompiledRules(sources=tuple(sources))
+
+--- a/benchmarks/sources/se4_greenfield_spec/runner.py
++++ b/benchmarks/sources/se4_greenfield_spec/runner.py
+@@ -2,9 +2,11 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Sequence
++from collections.abc import Sequence
+ 
+ from .models import PreparedBatch
++
++_VALID_FORCE_MODES = frozenset({"fast_tensor", "chunked_prefill"})
+ 
+ 
+ def prepare_inference_batch(
+@@ -16,4 +18,54 @@
+     force_mode: str | None = None,
+ ) -> PreparedBatch:
+     """Validate and prepare a local inference batch per SPEC.md."""
+-    raise NotImplementedError("Implement prepare_inference_batch per SPEC.md")
++    if not isinstance(prompt_text, str) or not prompt_text.strip():
++        raise ValueError(
++            "prompt_text must be a str containing at least one non-whitespace character"
++        )
++
++    if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes, bytearray)):
++        raise ValueError("tools must be a Sequence and not str, bytes, or bytearray")
++
++    for tool in tools:
++        if not isinstance(tool, str) or not tool.strip():
++            raise ValueError(
++                "each tool must be a str containing at least one non-whitespace character"
++            )
++
++    if force_mode is not None and (
++        not isinstance(force_mode, str) or force_mode not in _VALID_FORCE_MODES
++    ):
++        raise ValueError(
++            "force_mode must be None, 'fast_tensor', or 'chunked_prefill'"
++        )
++
++    prompt_bytes = len(prompt_text.encode("utf-8"))
++    tool_count = len(tools)
++
++    if max_prompt_bytes is not None:
++        if (
++            isinstance(max_prompt_bytes, bool)
++            or not isinstance(max_prompt_bytes, int)
++            or max_prompt_bytes <= 0
++        ):
++            raise ValueError("max_prompt_bytes must be a strictly positive int")
++        if prompt_bytes > max_prompt_bytes:
++            raise ValueError("prompt_bytes exceeds max_prompt_bytes")
++
++    if max_tools is not None:
++        if (
++            isinstance(max_tools, bool)
++            or not isinstance(max_tools, int)
++            or max_tools < 0
++        ):
++            raise ValueError("max_tools must be a non-negative int")
++        if tool_count > max_tools:
++            raise ValueError("tool_count exceeds max_tools")
++
++    execution_mode = "fast_tensor" if force_mode is None else force_mode
++    return PreparedBatch(
++        prompt_bytes=prompt_bytes,
++        tool_count=tool_count,
++        execution_mode=execution_mode,
++        truncated=False,
++    )

@@ -1,0 +1,9 @@
+### Hardening Summary
+- `matcher.py`: Validated `PreferenceClause` elements, non-empty string `clause.field`, and matched `WrittenPreference` values (raising `ValueError` instead of `AttributeError`/`TypeError`), using zero-allocation whitespace checks.
+- `runner.py`: Replaced full-string `.strip()` and full-buffer UTF-8 encoding with zero-allocation whitespace checks and chunked UTF-8 byte counting (with early exit on opt-in `max_prompt_bytes`), fail-fast parameter checks, and `ValueError` on lone Unicode surrogates.
+
+### Declined Constraints
+- Declined default sensitive-attribute exclusions (`skin_tone`, `ethnicity`, `religion`), default prompt/tool caps, size-based `chunked_prefill` switching, and silent truncation to preserve `SPEC.md`'s caller opt-in contract.
+
+### Verification
+- `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py`: exit `0`, `Ran 4 tests in 0.000s`, `OK` (frozen files unchanged).

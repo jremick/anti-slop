@@ -1,0 +1,13 @@
+`matcher.py` validates preference records, field names, and value types with errors that omit user content. Sensitive attributes remain eligible by default. Caller-selected exclusions apply only after every excerpt in the source group passes verification.
+
+`runner.py` checks tool-count limits before scanning entries and measures UTF-8 prompt size in bounded chunks. Limits remain opt-in, so callers control the memory budget for incoming payloads. Default routing and non-truncation are preserved.
+
+Targeted checks passed, including an 8,000,000-byte prompt with 501 tools and under 1 MiB of peak traced allocation during preparation.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0`.
+
+```text
+Ran 4 tests in 0.000s
+
+OK
+```

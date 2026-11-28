@@ -1,0 +1,1 @@
+Follow the user's request directly using only the files provided in this workspace.

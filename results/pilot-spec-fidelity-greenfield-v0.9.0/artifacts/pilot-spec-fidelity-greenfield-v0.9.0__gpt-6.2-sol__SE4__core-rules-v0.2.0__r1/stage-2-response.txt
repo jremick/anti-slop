@@ -1,0 +1,3 @@
+- Hardened preference compilation to reject invalid clause objects and skip malformed or stale source groups. Sensitive fields remain included by default. Caller exclusions match field names, and retained values and excerpts stay verbatim.
+- Hardened inference preparation with bounded UTF-8 encoding buffers, early enforcement of caller-supplied limits, and generic errors for invalid UTF-8. Limits remain opt-in, with `fast_tensor` routing by default and no truncation.
+- Focused edge-case checks passed, including a 9 MB prompt and 100,000 tools. All four frozen files matched their original checksums. `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` and reported `Ran 4 tests in 0.000s` and `OK`.

@@ -1,0 +1,3 @@
+- Hardened `matcher.py` to skip invalid source IDs and reject malformed records with errors that omit user data. Excerpt verification still precedes exclusions. Sensitive attributes remain eligible by default, with exclusions controlled by the caller.
+- Hardened `runner.py` with bounded UTF-8 encoding buffers, early enforcement of caller limits, and validation of inconsistent tool sequences. Defaults remain uncapped, so production resource limits depend on caller configuration.
+- `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0`: `Ran 4 tests in 0.000s` → `OK`. Frozen files were unchanged. Targeted assertions passed, including 524,408 bytes of peak traced allocation while measuring a preallocated 12,000,002-byte prompt.

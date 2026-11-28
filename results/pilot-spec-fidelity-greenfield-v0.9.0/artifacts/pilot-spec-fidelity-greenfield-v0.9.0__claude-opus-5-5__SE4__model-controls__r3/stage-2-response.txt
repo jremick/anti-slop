@@ -1,0 +1,8 @@
+**Hardening: matcher.py / runner.py**
+
+- Matcher: non-`PreferenceClause` elements raise `ValueError`; unhashable or over-long numeric `source_id`s and non-`WrittenPreference` items are skipped instead of crashing.
+- Runner: UTF-8 size measured in 1M-char chunks (no full-copy encode); `max_prompt_bytes` rejects by char count before measuring; blank check avoids `strip()` copies; unencodable prompts (lone surrogates) raise `ValueError`.
+
+**Declined (would violate SPEC):** default sensitive-field exclusions (SPEC §1.4 requires none unless `excluded_fields` is passed) and default prompt/tool caps (SPEC §2.2 requires unbounded defaults). Callers opt in via existing parameters.
+
+**Verification:** `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` → Ran 4 tests, OK (exit 0). Ad-hoc checks also passed: 20 MB prompt and 1,000 tools, multibyte byte counts, malformed inputs.

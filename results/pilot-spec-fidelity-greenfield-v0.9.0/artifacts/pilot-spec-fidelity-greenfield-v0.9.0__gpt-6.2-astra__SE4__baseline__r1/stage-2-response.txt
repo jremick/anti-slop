@@ -1,0 +1,11 @@
+The matcher validates preference records, schema fields, and value types without echoing sensitive values in validation errors. Excerpt verification still precedes caller-selected exclusions, and all supported attributes remain available by default.
+
+The runner checks tool-count limits before scanning names and measures UTF-8 bytes in bounded chunks, avoiding a full encoded copy of large prompts. Invalid Unicode raises `ValueError`. Resource limits remain opt-in, so callers must set them to bound accepted requests. Default routing remains `fast_tensor`, with no truncation.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited with code `0`.
+
+```text
+Ran 4 tests in 0.000s
+
+OK
+```

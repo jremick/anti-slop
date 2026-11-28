@@ -1,0 +1,19 @@
+`matcher.py` rejects malformed preference records and unknown fields with `ValueError`. Sensitive attributes remain available by default. Callers can exclude individual fields or whole sources after excerpt verification.
+
+`runner.py` checks tool-count limits before scanning names and measures UTF-8 size in bounded chunks. Errors omit input text. Limits remain opt-in, so callers still bear the memory cost of inputs already loaded.
+
+Targeted checks passed for exclusions, malformed inputs, early rejection, and a 4 MB prompt with 512 tools.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0`:
+
+```text
+test_basic_lifestyle_preference_compilation (test_smoke.SmokeMatcherTests) ... ok
+test_stale_excerpt_drops_source (test_smoke.SmokeMatcherTests) ... ok
+test_empty_prompt_rejected (test_smoke.SmokeRunnerTests) ... ok
+test_small_local_request_prepares_fast_tensor (test_smoke.SmokeRunnerTests) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.000s
+
+OK
+```

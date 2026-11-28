@@ -1,0 +1,5 @@
+Harden preference compilation by rejecting malformed clause objects and dropping sources with malformed records or stale excerpts before applying exclusions. Sensitive-field exclusions remain opt-in. Retained clauses carry verbatim excerpts, so callers can select whole-source exclusion when those excerpts may contain an excluded attribute.
+
+Enforce caller-supplied limits early, count UTF-8 bytes in bounded chunks, and report invalid Unicode without echoing prompt content. Default limits remain unbounded and routing stays `fast_tensor`.
+
+Focused checks passed, including a 12 MB prompt and early rejection of an oversized tool list. Frozen-file checksums matched. `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` with `Ran 4 tests in 0.000s` and `OK`.

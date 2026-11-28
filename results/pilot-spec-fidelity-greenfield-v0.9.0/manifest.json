@@ -1,0 +1,240 @@
+{
+  "experiment_id": "pilot-spec-fidelity-greenfield-v0.9.0",
+  "created_at_utc": "2026-11-27T23:24:52Z",
+  "source_snapshot_id": "git-f09c0b39f148",
+  "seed": 20261128,
+  "timeout_seconds": 360,
+  "max_workers": 3,
+  "child_max_rss_mb": 1536,
+  "cases": [
+    "SE4"
+  ],
+  "models": [
+    "claude-opus-5-5",
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gemini-4-neon"
+  ],
+  "conditions": {
+    "baseline": {
+      "path": "results/pilot-spec-fidelity-greenfield-v0.9.0/conditions/baseline.txt",
+      "sha256": "6bdfa57671846de79a50da481e4b83de2ac57b56d00570e52f7912b22c4e561a"
+    },
+    "core-rules-v0.2.0": {
+      "path": "results/pilot-spec-fidelity-greenfield-v0.9.0/conditions/core-rules-v0.2.0.txt",
+      "sha256": "7339ed05c02bda723409895d95ddbb3bcb14b453c21b41e6beaac80e362ae53e"
+    },
+    "model-controls__claude-opus-5-5": {
+      "path": "results/pilot-spec-fidelity-greenfield-v0.9.0/conditions/model-controls__claude-opus-5-5.txt",
+      "sha256": "d7023d56ef236510750ea9de834e7f8c91bc0e201e7db71bf8511dbc56ba17e1"
+    },
+    "model-controls__gpt-6.2-astra": {
+      "path": "results/pilot-spec-fidelity-greenfield-v0.9.0/conditions/model-controls__gpt-6.2-astra.txt",
+      "sha256": "25177c033c22cd4ffefd5a0a701383ebce697be099baab4ddc3ae4c78874c670"
+    },
+    "model-controls__gpt-6.2-sol": {
+      "path": "results/pilot-spec-fidelity-greenfield-v0.9.0/conditions/model-controls__gpt-6.2-sol.txt",
+      "sha256": "0b7a0b40985204a1cf6e221808d724f9dff5d1617d196b6332876931fcf4a5c6"
+    },
+    "model-controls__gemini-4-neon": {
+      "path": "results/pilot-spec-fidelity-greenfield-v0.9.0/conditions/model-controls__gemini-4-neon.txt",
+      "sha256": "eb0b8c62339c1903b46b6d1ce7e24c5bda75234aed987c0b53db73fe405a1164"
+    }
+  },
+  "cli_versions": {
+    "claude-opus-5-5": "2.1.330 (Claude Code)",
+    "gpt-6.2-astra": "codex-cli 0.171.0",
+    "gpt-6.2-sol": "codex-cli 0.171.0",
+    "gemini-4-neon": "1.5.18"
+  },
+  "schedule": {
+    "claude-opus-5-5": [
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 3
+      }
+    ],
+    "gpt-6.2-astra": [
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 3
+      }
+    ],
+    "gpt-6.2-sol": [
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      }
+    ],
+    "gemini-4-neon": [
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 1
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 2
+      },
+      {
+        "case_id": "SE4",
+        "condition": "model-controls",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "core-rules-v0.2.0",
+        "replicate": 3
+      },
+      {
+        "case_id": "SE4",
+        "condition": "baseline",
+        "replicate": 3
+      }
+    ]
+  }
+}

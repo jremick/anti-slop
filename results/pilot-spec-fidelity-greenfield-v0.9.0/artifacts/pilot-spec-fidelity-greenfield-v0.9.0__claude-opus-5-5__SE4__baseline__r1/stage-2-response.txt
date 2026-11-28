@@ -1,0 +1,10 @@
+**Harden `se4_greenfield_spec` input handling and payload measurement**
+
+- **Malformed input:** bad clause objects, non-`str` `source_id`s, non-`WrittenPreference` items and non-UTF-8 prompts now raise `ValueError` that names the bad element.
+- **Resource limits:** set limits now fail before scanning tools or encoding the prompt. Byte counting encodes in 1M-character chunks, stopping early once over the limit, and blank checks no longer copy the input.
+
+**Declined, because SPEC.md requires otherwise:**
+- Excluding sensitive fields (`ethnicity`, `skin_tone`, `religion`) by default. They stay included unless callers pass `excluded_fields`.
+- Default prompt/tool caps or automatic `chunked_prefill`. Requests stay unbounded unless callers pass limits.
+
+**Verification:** `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py`: `Ran 4 tests … OK`, exit code 0.

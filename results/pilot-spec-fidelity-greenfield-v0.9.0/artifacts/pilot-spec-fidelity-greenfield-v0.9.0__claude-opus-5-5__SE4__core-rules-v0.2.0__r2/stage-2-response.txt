@@ -1,0 +1,9 @@
+**Harden matcher/runner inputs; keep spec defaults**
+
+- **Matcher:** malformed IDs and field values no longer crash; oversized IDs are skipped. Wrong element types raise `ValueError`.
+- **Runner:** byte counting keeps extra memory bounded (about 3 MB on a 40 MB prompt). Limits are checked first, so over-limit prompts fail early. Unencodable text raises `ValueError`.
+- **Declined:** default exclusions of sensitive fields, default size limits, automatic `chunked_prefill` and truncation. SPEC.md rules all of these out, and frozen files are untouched.
+- **Reviewer flag:** ethnicity and religion still compile unless the caller excludes them. Consent and regional compliance need product/legal review.
+- **Tests:** added `tests/test_hardening.py` (7 tests).
+
+**Verification:** `run_checks.py` gave `Ran 11 tests … OK`, exit 0. This ran on Python 3.9.6, not 3.11 or later.

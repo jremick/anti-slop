@@ -1,0 +1,3 @@
+- `matcher.py` rejects malformed records with errors that omit preference content. It verifies excerpts before applying caller-supplied exclusions, and sensitive fields remain supported by default.
+- `runner.py` enforces opt-in limits early, counts UTF-8 bytes in bounded chunks, and validates tools without copying the registry. Default limits remain unbounded, routing stays `fast_tensor`, and requests are never truncated. GPU memory was outside this verification.
+- `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` with `Ran 4 tests in 0.000s` and `OK`. Frozen files were unchanged. A 10,000,002-byte prompt with 50,000 tools passed with 524,408 bytes of peak traced allocation during preparation.

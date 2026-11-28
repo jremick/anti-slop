@@ -1,0 +1,11 @@
+`matcher.py` now rejects malformed preference records with `ValueError` messages that omit user text. Sensitive fields retain the specified behavior. Callers can explicitly exclude individual clauses or their entire source after excerpt verification.
+
+`runner.py` now checks caller-supplied limits before scanning tool names, counts UTF-8 bytes in 65,536-character chunks, and rejects unencodable prompts. Chunking bounds temporary encoding memory. Total input size remains unbounded by default, and valid requests retain the specified routing without truncation.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited with code `0`.
+
+```text
+Ran 4 tests in 0.000s
+
+OK
+```

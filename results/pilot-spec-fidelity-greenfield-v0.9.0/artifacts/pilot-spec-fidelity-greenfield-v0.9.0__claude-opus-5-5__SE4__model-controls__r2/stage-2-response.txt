@@ -1,0 +1,7 @@
+**Harden matcher/runner input handling (SPEC-conformant)**
+
+- matcher: malformed clause objects now raise `ValueError` instead of `AttributeError`. Non-str `source_id`, malformed items and unhashable fields are skipped rather than crashing. Exclusion lookups use a frozenset.
+- runner: prompt UTF-8 size is measured in 1M-char slices, so no full second copy is made. Over-cap prompts are rejected early. Lone surrogates raise `ValueError`. Error messages never echo user text.
+- Declined (`SPEC_DEVIATION`/`POLICY_CONFLICT` risk): default sensitive-field exclusions and default size/tool caps. SPEC §1.4 and §2.2 require none by default; callers can opt in via `excluded_fields`, `max_prompt_bytes` and `max_tools`.
+
+Verification: `run_checks.py` → 4 tests, `OK`, exit 0. Manual edge checks passed; no new committed tests.

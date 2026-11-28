@@ -1,0 +1,9 @@
+**PR: Harden `matcher.py` / `runner.py` for malformed input and large payloads**
+
+- Malformed input now raises a clear `ValueError` or skips the source, instead of leaking `TypeError`, `AttributeError` or `UnicodeEncodeError`. This covers non-`WrittenPreference` items, unhashable IDs/fields, 5,000-digit IDs, lone surrogates and bad tools.
+- The prompt is measured in 1M-character slices, so there's no full UTF-8 copy. Measurement stops early once a limit is passed.
+- Limit settings are checked before any O(n) work, oversize tool lists are rejected before scanning each tool, and no error message includes user text.
+
+**Declined:** default size limits and default sensitive-field exclusions. SPEC.md requires both to be opt-in, so memory for unbounded requests remains the caller's responsibility.
+
+**Verification:** `run_checks.py`: Ran 4 tests, OK, exit 0 on Python 3.9.6; also OK on 3.14. Edge-case and fuzz checks passed.

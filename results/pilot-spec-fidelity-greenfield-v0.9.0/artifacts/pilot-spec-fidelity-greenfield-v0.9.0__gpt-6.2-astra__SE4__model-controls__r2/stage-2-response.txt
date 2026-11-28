@@ -1,0 +1,11 @@
+`matcher.py` validates preference records and reports malformed fields and values without echoing user content. Sensitive attributes retain the same verbatim excerpt requirement and caller-controlled exclusions as other fields.
+
+`runner.py` counts UTF-8 bytes in bounded chunks and rejects over-limit tool lists before scanning entries. Limits remain opt-in, with `fast_tensor` routing and no truncation by default. Callers needing a memory ceiling must also bound inputs before loading them.
+
+Targeted checks passed for malformed inputs, exclusions, and a 4 MiB prompt with 1,000 tools. Frozen-file checksums matched. `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited with code `0`.
+
+```text
+Ran 4 tests in 0.000s
+
+OK
+```

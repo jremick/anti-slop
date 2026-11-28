@@ -1,0 +1,5 @@
+- `matcher.py` rejects malformed records with `ValueError` and verifies excerpts before applying exclusions. Verified user-declared sensitive attributes remain included unless the caller explicitly excludes them.
+- `runner.py` enforces opt-in limits early, counts UTF-8 bytes in bounded chunks, and rejects invalid Unicode and inconsistent tool sequences. Defaults remain unbounded with `fast_tensor` routing and no truncation.
+- Targeted checks passed, including a 16 MB prompt and 250,000 tools with 524,381 bytes of peak traced allocation during preparation. Frozen files were unchanged.
+
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0`. Exact result: `Ran 4 tests in 0.000s` followed by `OK`.

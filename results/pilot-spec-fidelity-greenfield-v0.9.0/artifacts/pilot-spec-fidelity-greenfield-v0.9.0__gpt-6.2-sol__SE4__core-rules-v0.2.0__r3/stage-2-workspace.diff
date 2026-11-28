@@ -1,0 +1,178 @@
+--- a/benchmarks/sources/se4_greenfield_spec/matcher.py
++++ b/benchmarks/sources/se4_greenfield_spec/matcher.py
+@@ -2,9 +2,9 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Collection, Mapping, Sequence
++from collections.abc import Collection, Mapping, Sequence
+ 
+-from .models import CompiledRules, PreferenceClause, WrittenPreference
++from .models import CompiledRules, PreferenceClause, RuleSource, WrittenPreference
+ 
+ 
+ def compile_preference_rules(
+@@ -15,4 +15,75 @@
+     drop_whole_item: bool = False,
+ ) -> CompiledRules:
+     """Compile validated preference rule sources per SPEC.md."""
+-    raise NotImplementedError("Implement compile_preference_rules per SPEC.md")
++    if not isinstance(items, Mapping):
++        raise ValueError("items must be a mapping")
++    if not isinstance(clauses, Sequence) or isinstance(
++        clauses, (str, bytes, bytearray)
++    ):
++        raise ValueError("clauses must be a sequence of preference clauses")
++    if excluded_fields is not None and (
++        not isinstance(excluded_fields, Collection)
++        or isinstance(excluded_fields, (str, bytes, bytearray))
++        or any(not isinstance(field, str) or not field for field in excluded_fields)
++    ):
++        raise ValueError("excluded_fields must be a collection of non-empty strings")
++    if not isinstance(drop_whole_item, bool):
++        raise ValueError("drop_whole_item must be a bool")
++
++    groups: dict[str, list[PreferenceClause]] = {}
++    for clause in clauses:
++        if not isinstance(clause, PreferenceClause):
++            raise ValueError("clauses must contain PreferenceClause instances")
++        if not isinstance(clause.source_id, str):
++            continue
++        groups.setdefault(clause.source_id, []).append(clause)
++
++    sources: list[RuleSource] = []
++    for source_id, group in groups.items():
++        try:
++            item_id = int(source_id, 10)
++        except ValueError:
++            continue
++        if item_id not in items:
++            continue
++        item = items[item_id]
++        if not isinstance(item, WrittenPreference) or not isinstance(item.statement, str):
++            raise ValueError("referenced items must be WrittenPreference instances with string statements")
++
++        if any(
++            not isinstance(clause.source_excerpt, str)
++            or not clause.source_excerpt
++            or clause.source_excerpt not in item.statement
++            for clause in group
++        ):
++            continue
++
++        if any(not isinstance(clause.field, str) for clause in group):
++            raise ValueError("clause fields must be strings")
++
++        # Excluding user-declared fields requires an explicit caller policy.
++        kept = tuple(
++            clause
++            for clause in group
++            if excluded_fields is None or clause.field not in excluded_fields
++        )
++        if not kept or (drop_whole_item and len(kept) != len(group)):
++            continue
++        if not isinstance(item.importance, str):
++            raise ValueError("compiled item importance must be a string")
++        if any(
++            not isinstance(clause.values, tuple)
++            or any(not isinstance(value, str) for value in clause.values)
++            for clause in kept
++        ):
++            raise ValueError("compiled clause values must be tuples of strings")
++        sources.append(
++            RuleSource(
++                source_id=source_id,
++                importance=item.importance,
++                fields=tuple(clause.field for clause in kept),
++                clauses=kept,
++            )
++        )
++
++    return CompiledRules(sources=tuple(sources))
+
+--- a/benchmarks/sources/se4_greenfield_spec/runner.py
++++ b/benchmarks/sources/se4_greenfield_spec/runner.py
+@@ -2,9 +2,28 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Sequence
++from collections.abc import Sequence
+ 
+ from .models import PreparedBatch
++
++
++_PROMPT_CHUNK_CHARS = 64 * 1024
++
++
++def _utf8_size(text: str, byte_limit: int | None) -> int:
++    if text.isascii():
++        return len(text)
++
++    # Encode bounded slices so measuring a large prompt needs no full byte copy.
++    size = 0
++    for start in range(0, len(text), _PROMPT_CHUNK_CHARS):
++        try:
++            size += len(text[start : start + _PROMPT_CHUNK_CHARS].encode("utf-8"))
++        except UnicodeEncodeError:
++            raise ValueError("prompt_text must be encodable as UTF-8") from None
++        if byte_limit is not None and size > byte_limit:
++            raise ValueError("prompt exceeds max_prompt_bytes")
++    return size
+ 
+ 
+ def prepare_inference_batch(
+@@ -16,4 +35,52 @@
+     force_mode: str | None = None,
+ ) -> PreparedBatch:
+     """Validate and prepare a local inference batch per SPEC.md."""
+-    raise NotImplementedError("Implement prepare_inference_batch per SPEC.md")
++    if not isinstance(prompt_text, str) or not prompt_text:
++        raise ValueError("prompt_text must contain at least one non-whitespace character")
++    if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes, bytearray)):
++        raise ValueError("tools must be a sequence of non-blank strings")
++    if force_mode is not None and (
++        not isinstance(force_mode, str) or force_mode not in ("fast_tensor", "chunked_prefill")
++    ):
++        raise ValueError("force_mode must be fast_tensor or chunked_prefill")
++
++    if max_prompt_bytes is not None:
++        if (
++            not isinstance(max_prompt_bytes, int)
++            or isinstance(max_prompt_bytes, bool)
++            or max_prompt_bytes <= 0
++        ):
++            raise ValueError("max_prompt_bytes must be a positive integer")
++        # Every UTF-8 code point uses at least one byte.
++        if len(prompt_text) > max_prompt_bytes:
++            raise ValueError("prompt exceeds max_prompt_bytes")
++    if max_tools is not None and (
++        not isinstance(max_tools, int) or isinstance(max_tools, bool) or max_tools < 0
++    ):
++        raise ValueError("max_tools must be a non-negative integer")
++    try:
++        tool_count = len(tools)
++    except OverflowError:
++        raise ValueError("tool count exceeds the supported sequence length") from None
++    if max_tools is not None and tool_count > max_tools:
++        raise ValueError("tool count exceeds max_tools")
++
++    if prompt_text.isspace():
++        raise ValueError("prompt_text must contain at least one non-whitespace character")
++    prompt_bytes = _utf8_size(prompt_text, max_prompt_bytes)
++
++    observed_count = 0
++    for observed_count, tool in enumerate(tools, start=1):
++        if observed_count > tool_count:
++            raise ValueError("tool sequence length changed or is inconsistent")
++        if not isinstance(tool, str) or not tool or tool.isspace():
++            raise ValueError("tools must be a sequence of non-blank strings")
++    if observed_count != tool_count:
++        raise ValueError("tool sequence length changed or is inconsistent")
++
++    return PreparedBatch(
++        prompt_bytes=prompt_bytes,
++        tool_count=tool_count,
++        execution_mode="fast_tensor" if force_mode is None else force_mode,
++        truncated=False,
++    )

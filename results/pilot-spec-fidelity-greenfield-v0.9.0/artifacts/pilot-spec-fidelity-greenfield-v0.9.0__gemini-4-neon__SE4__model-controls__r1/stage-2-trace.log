@@ -1,0 +1,12 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+### Hardening Summary
+- **`matcher.py`**: Guarded `source_id` integer parsing against Python's `int_max_str_digits` limit and non-string/unhashable IDs; validated `PreferenceClause`, `clause.field`, and `WrittenPreference` types to raise `ValueError` instead of `AttributeError`/`TypeError`.
+- **`runner.py`**: Replaced `.strip()` with zero-copy `.isspace()`, switched UTF-8 byte counting to an O(1)-memory ASCII fast path plus 64 KiB chunked encoding (rejecting lone surrogates with `ValueError`), and validated `max_prompt_bytes`/`max_tools` before scanning payloads.
+- **Declined per `SPEC.md`**: Added no default exclusions for sensitive/demographic fields (`skin_tone`, `ethnicity`, `religion`), no default prompt/tool caps, no auto-switching from `fast_tensor`, and no silent truncation; all remain caller opt-in.
+- **Verification**: `python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0` (`Ran 4 tests in 0.000s`, `OK`).
+
+STDERR:
+

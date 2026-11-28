@@ -1,0 +1,186 @@
+--- a/benchmarks/sources/se4_greenfield_spec/matcher.py
++++ b/benchmarks/sources/se4_greenfield_spec/matcher.py
+@@ -2,9 +2,33 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Collection, Mapping, Sequence
++import re
++from collections.abc import Collection, Mapping, Sequence
+ 
+-from .models import CompiledRules, PreferenceClause, WrittenPreference
++from .models import CompiledRules, PreferenceClause, RuleSource, WrittenPreference
++
++_INT_RE = re.compile(r"[+-]?[0-9]+")
++_TEXT_TYPES = (str, bytes, bytearray)
++
++
++def _parse_source_id(source_id: object) -> int | None:
++    """Parse a base-10 integer string; return None for anything else."""
++    if isinstance(source_id, str) and _INT_RE.fullmatch(source_id):
++        return int(source_id)
++    return None
++
++
++def _excerpt_ok(clause: PreferenceClause, statement: str) -> bool:
++    excerpt = clause.source_excerpt
++    return isinstance(excerpt, str) and excerpt != "" and excerpt in statement
++
++
++_CLAUSE_ATTRS = ("source_id", "field", "source_excerpt")
++
++
++def _is_excluded(clause: PreferenceClause, excluded: frozenset[str]) -> bool:
++    # Non-str fields can never match a str exclusion; avoids TypeError on unhashables.
++    return isinstance(clause.field, str) and clause.field in excluded
+ 
+ 
+ def compile_preference_rules(
+@@ -15,4 +39,61 @@
+     drop_whole_item: bool = False,
+ ) -> CompiledRules:
+     """Compile validated preference rule sources per SPEC.md."""
+-    raise NotImplementedError("Implement compile_preference_rules per SPEC.md")
++    if not isinstance(items, Mapping):
++        raise ValueError("items must be a Mapping")
++    if not isinstance(clauses, Sequence) or isinstance(clauses, _TEXT_TYPES):
++        raise ValueError("clauses must be a non-string Sequence")
++    if excluded_fields is not None:
++        if not isinstance(excluded_fields, Collection) or isinstance(excluded_fields, _TEXT_TYPES):
++            raise ValueError("excluded_fields must be a non-string Collection")
++        if not all(isinstance(f, str) and f for f in excluded_fields):
++            raise ValueError("excluded_fields elements must be non-empty strings")
++        excluded_fields = frozenset(excluded_fields)  # O(1) membership
++    if not isinstance(drop_whole_item, bool):
++        raise ValueError("drop_whole_item must be a bool")
++
++    # Group by source_id, preserving first-seen source order and clause order.
++    groups: dict[str, list[PreferenceClause]] = {}
++    # Malformed clause objects are rejected up front (no user text in messages).
++    for index, clause in enumerate(clauses):
++        if not all(hasattr(clause, a) for a in _CLAUSE_ATTRS):
++            raise ValueError(f"clauses[{index}] is not a PreferenceClause")
++        if not isinstance(clause.source_id, str):
++            continue  # unparseable source ID: skipped like non-numeric strings
++        groups.setdefault(clause.source_id, []).append(clause)
++
++    sources: list[RuleSource] = []
++    for source_id, group in groups.items():
++        item_id = _parse_source_id(source_id)
++        if item_id is None or item_id not in items:
++            continue
++        item = items[item_id]
++        statement = getattr(item, "statement", None)
++        if not isinstance(statement, str):
++            continue  # malformed item: nothing can be verified against it
++
++        # Excerpt verification runs before exclusion filtering.
++        if not all(_excerpt_ok(c, statement) for c in group):
++            continue
++
++        if excluded_fields is None:
++            kept = group
++        elif drop_whole_item:
++            if any(_is_excluded(c, excluded_fields) for c in group):
++                continue
++            kept = group
++        else:
++            kept = [c for c in group if not _is_excluded(c, excluded_fields)]
++            if not kept:
++                continue
++
++        sources.append(
++            RuleSource(
++                source_id=source_id,
++                importance=getattr(item, "importance", None),
++                fields=tuple(c.field for c in kept),
++                clauses=tuple(kept),
++            )
++        )
++
++    return CompiledRules(sources=tuple(sources))
+
+--- a/benchmarks/sources/se4_greenfield_spec/runner.py
++++ b/benchmarks/sources/se4_greenfield_spec/runner.py
+@@ -2,9 +2,39 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Sequence
++from collections.abc import Sequence
+ 
+ from .models import PreparedBatch
++
++_MODES = ("fast_tensor", "chunked_prefill")
++# Encode in bounded slices so measuring a multi-megabyte prompt never allocates
++# a full second copy of it. Python str slices are whole code points, so slicing
++# cannot split a character.
++_MEASURE_CHUNK_CHARS = 1 << 20
++
++
++def _has_text(value: object) -> bool:
++    # isspace() avoids the full-copy allocation of strip(); "" is not text.
++    return isinstance(value, str) and value != "" and not value.isspace()
++
++
++def _check_limit(name: str, value: object, minimum: int) -> None:
++    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
++        raise ValueError(f"{name} must be an int >= {minimum}")
++
++
++def _utf8_len(text: str, limit: int | None) -> int:
++    """UTF-8 byte length, computed chunkwise; stops early once over ``limit``."""
++    total = 0
++    for start in range(0, len(text), _MEASURE_CHUNK_CHARS):
++        chunk = text[start : start + _MEASURE_CHUNK_CHARS]
++        try:
++            total += len(chunk.encode("utf-8"))
++        except UnicodeEncodeError:
++            raise ValueError("prompt_text is not valid UTF-8 (lone surrogate)") from None
++        if limit is not None and total > limit:
++            break
++    return total
+ 
+ 
+ def prepare_inference_batch(
+@@ -15,5 +45,38 @@
+     max_tools: int | None = None,
+     force_mode: str | None = None,
+ ) -> PreparedBatch:
+-    """Validate and prepare a local inference batch per SPEC.md."""
+-    raise NotImplementedError("Implement prepare_inference_batch per SPEC.md")
++    """Validate and prepare a local inference batch per SPEC.md.
++
++    Error messages never echo prompt or tool contents.
++    """
++    if not _has_text(prompt_text):
++        raise ValueError("prompt_text must be a non-blank str")
++    if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes, bytearray)):
++        raise ValueError("tools must be a non-string Sequence")
++    for index, tool in enumerate(tools):
++        if not _has_text(tool):
++            raise ValueError(f"tools[{index}] must be a non-blank str")
++    if force_mode is not None and force_mode not in _MODES:
++        raise ValueError(f"force_mode must be None or one of {_MODES}")
++    if max_prompt_bytes is not None:
++        _check_limit("max_prompt_bytes", max_prompt_bytes, 1)
++    if max_tools is not None:
++        _check_limit("max_tools", max_tools, 0)
++
++    tool_count = len(tools)
++    if max_tools is not None and tool_count > max_tools:
++        raise ValueError(f"{tool_count} tools exceeds max_tools={max_tools}")
++
++    if max_prompt_bytes is not None and len(prompt_text) > max_prompt_bytes:
++        # Every code point is >= 1 UTF-8 byte: reject without encoding anything.
++        raise ValueError(f"prompt exceeds max_prompt_bytes={max_prompt_bytes}")
++    prompt_bytes = _utf8_len(prompt_text, max_prompt_bytes)
++    if max_prompt_bytes is not None and prompt_bytes > max_prompt_bytes:
++        raise ValueError(f"prompt exceeds max_prompt_bytes={max_prompt_bytes}")
++
++    return PreparedBatch(
++        prompt_bytes=prompt_bytes,
++        tool_count=tool_count,
++        execution_mode=force_mode if force_mode is not None else "fast_tensor",
++        truncated=False,
++    )

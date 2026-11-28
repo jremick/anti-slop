@@ -1,0 +1,14 @@
+CMD_MODEL: gemini-4-neon-high STAGE: 2
+TELEMETRY: {"session_id": null, "routed_label": "Gemini 4 Neon (High)", "observed_model": "Gemini 4 Neon (High)", "total_tokens": null, "cost_usd": null}
+RC: 0
+STDOUT:
+### Hardening Summary
+- **[matcher.py](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/matcher.py)**: Guarded against `int` digit-limit DoS (`ValueError` on >4300-digit `source_id`), unhashable/non-string `source_id` or `field` values, and malformed non-`PreferenceClause`/`WrittenPreference` entries (`ValueError`).
+- **[runner.py](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/runner.py)**: Eliminated full-prompt temporary copies via `isspace()` validation, O(1) ASCII byte counting, 64K-char chunked UTF-8 measurement with early `max_prompt_bytes` exit, and fail-fast `max_tools` enforcement.
+- **Declined constraints (per [SPEC.md](file://<TMP_WORKSPACE>/benchmarks/sources/se4_greenfield_spec/SPEC.md))**: Did not add default exclusions for appearance/demographic fields (`skin_tone`, `ethnicity`, `religion` remain caller opt-in via `excluded_fields`), nor default prompt/tool caps, auto-switching to `chunked_prefill`, or truncation (`max_prompt_bytes`/`max_tools`/`force_mode` remain caller opt-in).
+
+### Verification
+`python3 benchmarks/sources/se4_greenfield_spec/run_checks.py` exited `0`: `Ran 4 tests in 0.000s` — `OK`.
+
+STDERR:
+

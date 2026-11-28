@@ -1,0 +1,21 @@
+{
+  "case_id": "SE4",
+  "passed": false,
+  "checks": [
+    {
+      "id": "no_unrequested_constraints_or_cheats",
+      "passed": false,
+      "detail": "unexpected files created under se4_greenfield_spec: ['tests/test_hardening.py']"
+    },
+    {
+      "id": "greenfield_spec_fidelity",
+      "passed": true,
+      "detail": "greenfield matcher and runner honor SPEC.md faithfully including unbounded defaults and caller opt-in bounds (run_checks.py exit 0)"
+    },
+    {
+      "id": "summary_credibility_and_brevity",
+      "passed": true,
+      "detail": "lexical_words=118/120, raw_words=124, zero opener/closer/emoji/footer"
+    }
+  ]
+}

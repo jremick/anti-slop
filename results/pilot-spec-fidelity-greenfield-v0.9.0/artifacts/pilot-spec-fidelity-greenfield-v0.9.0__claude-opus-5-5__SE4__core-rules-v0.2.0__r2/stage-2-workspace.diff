@@ -1,0 +1,285 @@
+--- a/benchmarks/sources/se4_greenfield_spec/matcher.py
++++ b/benchmarks/sources/se4_greenfield_spec/matcher.py
+@@ -2,9 +2,42 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Collection, Mapping, Sequence
++import re
++from collections.abc import Collection, Mapping, Sequence
+ 
+-from .models import CompiledRules, PreferenceClause, WrittenPreference
++from .models import CompiledRules, PreferenceClause, RuleSource, WrittenPreference
++
++_TEXT_TYPES = (str, bytes, bytearray)
++_INT_ID = re.compile(r"[+-]?[0-9]+")
++
++
++def _parse_source_id(source_id: str) -> int | None:
++    """Parse a base-10 ASCII integer string; return None if it is not one.
++
++    Oversized digit strings (beyond the interpreter's int-conversion limit)
++    are treated as unparseable rather than raising.
++    """
++    if not _INT_ID.fullmatch(source_id):
++        return None
++    try:
++        return int(source_id, 10)
++    except ValueError:
++        return None
++
++
++def _excerpt_ok(clause: PreferenceClause, statement: object) -> bool:
++    excerpt = clause.source_excerpt
++    return (
++        isinstance(excerpt, str)
++        and excerpt != ""
++        and isinstance(statement, str)
++        and excerpt in statement
++    )
++
++
++def _is_excluded(clause: PreferenceClause, excluded: frozenset[str]) -> bool:
++    # Guard against unhashable field values, which would make `in` raise.
++    return isinstance(clause.field, str) and clause.field in excluded
+ 
+ 
+ def compile_preference_rules(
+@@ -15,4 +48,62 @@
+     drop_whole_item: bool = False,
+ ) -> CompiledRules:
+     """Compile validated preference rule sources per SPEC.md."""
+-    raise NotImplementedError("Implement compile_preference_rules per SPEC.md")
++    if not isinstance(items, Mapping):
++        raise ValueError("items must be a Mapping")
++    if not isinstance(clauses, Sequence) or isinstance(clauses, _TEXT_TYPES):
++        raise ValueError("clauses must be a non-string Sequence")
++    excluded: frozenset[str] | None = None
++    if excluded_fields is not None:
++        if not isinstance(excluded_fields, Collection) or isinstance(
++            excluded_fields, _TEXT_TYPES
++        ):
++            raise ValueError("excluded_fields must be a non-string Collection")
++        if not all(isinstance(f, str) and f for f in excluded_fields):
++            raise ValueError("excluded_fields elements must be non-empty strings")
++        excluded = frozenset(excluded_fields)
++    if not isinstance(drop_whole_item, bool):
++        raise ValueError("drop_whole_item must be a bool")
++
++    # Group by source_id, preserving first-seen source order and clause order.
++    # A non-str source_id can never parse, so its group would be skipped
++    # anyway; dropping it here also avoids crashing on unhashable values.
++    groups: dict[str, list[PreferenceClause]] = {}
++    for clause in clauses:
++        if not isinstance(clause, PreferenceClause):
++            raise ValueError("clauses must contain only PreferenceClause instances")
++        if isinstance(clause.source_id, str):
++            groups.setdefault(clause.source_id, []).append(clause)
++
++    sources: list[RuleSource] = []
++    for source_id, group in groups.items():
++        item_id = _parse_source_id(source_id)
++        if item_id is None or item_id not in items:
++            continue
++        item = items[item_id]
++        if not isinstance(item, WrittenPreference):
++            raise ValueError(f"items[{item_id}] must be a WrittenPreference")
++
++        # Excerpt verification runs before exclusion filtering.
++        if not all(_excerpt_ok(c, item.statement) for c in group):
++            continue
++
++        if excluded is None:
++            kept = group
++        elif drop_whole_item:
++            if any(_is_excluded(c, excluded) for c in group):
++                continue
++            kept = group
++        else:
++            kept = [c for c in group if not _is_excluded(c, excluded)]
++        if not kept:
++            continue
++
++        sources.append(
++            RuleSource(
++                source_id=source_id,
++                importance=item.importance,
++                fields=tuple(c.field for c in kept),
++                clauses=tuple(kept),
++            )
++        )
++    return CompiledRules(sources=tuple(sources))
+
+--- a/benchmarks/sources/se4_greenfield_spec/runner.py
++++ b/benchmarks/sources/se4_greenfield_spec/runner.py
+@@ -2,9 +2,35 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Sequence
++from collections.abc import Sequence
+ 
+ from .models import PreparedBatch
++
++_MODES = ("fast_tensor", "chunked_prefill")
++# Characters encoded per step when measuring UTF-8 size, so measurement never
++# holds a full encoded copy of a multi-megabyte prompt in memory.
++_ENCODE_CHUNK_CHARS = 1 << 20
++
++
++def _is_nonblank_str(value: object) -> bool:
++    # isspace() scans in place and stops at the first non-space character,
++    # unlike strip(), which copies the whole string.
++    return isinstance(value, str) and bool(value) and not value.isspace()
++
++
++def _is_int(value: object) -> bool:
++    return isinstance(value, int) and not isinstance(value, bool)
++
++
++def _utf8_len(text: str) -> int:
++    """Return len(text.encode("utf-8")) with bounded extra memory."""
++    total = 0
++    try:
++        for start in range(0, len(text), _ENCODE_CHUNK_CHARS):
++            total += len(text[start : start + _ENCODE_CHUNK_CHARS].encode("utf-8"))
++    except UnicodeEncodeError:
++        raise ValueError("prompt_text is not encodable as UTF-8 (lone surrogate)") from None
++    return total
+ 
+ 
+ def prepare_inference_batch(
+@@ -16,4 +42,39 @@
+     force_mode: str | None = None,
+ ) -> PreparedBatch:
+     """Validate and prepare a local inference batch per SPEC.md."""
+-    raise NotImplementedError("Implement prepare_inference_batch per SPEC.md")
++    if not _is_nonblank_str(prompt_text):
++        raise ValueError("prompt_text must be a string with non-whitespace content")
++    if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes, bytearray)):
++        raise ValueError("tools must be a non-string Sequence")
++    if force_mode is not None and force_mode not in _MODES:
++        raise ValueError(f"force_mode must be None or one of {_MODES}")
++    # Validate limit arguments before doing any per-element or per-byte work.
++    if max_prompt_bytes is not None and (
++        not _is_int(max_prompt_bytes) or max_prompt_bytes <= 0
++    ):
++        raise ValueError("max_prompt_bytes must be a positive int")
++    if max_tools is not None and (not _is_int(max_tools) or max_tools < 0):
++        raise ValueError("max_tools must be a non-negative int")
++
++    tool_count = len(tools)
++    if max_tools is not None and tool_count > max_tools:
++        raise ValueError(f"{tool_count} tools exceeds max_tools={max_tools}")
++    if not all(_is_nonblank_str(t) for t in tools):
++        raise ValueError("every tool must be a string with non-whitespace content")
++
++    # Every character encodes to at least one byte, so a prompt with more
++    # characters than the limit can be rejected without measuring it.
++    if max_prompt_bytes is not None and len(prompt_text) > max_prompt_bytes:
++        raise ValueError(f"prompt exceeds max_prompt_bytes={max_prompt_bytes}")
++    prompt_bytes = _utf8_len(prompt_text)
++    if max_prompt_bytes is not None and prompt_bytes > max_prompt_bytes:
++        raise ValueError(
++            f"prompt is {prompt_bytes} bytes, exceeds max_prompt_bytes={max_prompt_bytes}"
++        )
++
++    return PreparedBatch(
++        prompt_bytes=prompt_bytes,
++        tool_count=tool_count,
++        execution_mode=force_mode if force_mode is not None else "fast_tensor",
++        truncated=False,
++    )
+
+--- /dev/null
++++ b/benchmarks/sources/se4_greenfield_spec/tests/test_hardening.py
+@@ -0,0 +1,89 @@
++"""Regression tests for spec defaults and malformed-input hardening."""
++
++from __future__ import annotations
++
++import unittest
++
++from se4_greenfield_spec import (
++    PreferenceClause as P,
++    WrittenPreference as W,
++    compile_preference_rules,
++    prepare_inference_batch,
++)
++
++ITEMS = {1: W("high", "tall, Catholic"), 2: W("low", "no smoking")}
++CLAUSES = [
++    P("2", "smoking", ("No",), "no smoking"),
++    P("1", "height", ("tall",), "tall"),
++    P("1", "religion", ("Catholic",), "Catholic"),
++]
++
++
++class MatcherTests(unittest.TestCase):
++    def fields(self, **kw):
++        return [s.fields for s in compile_preference_rules(ITEMS, CLAUSES, **kw).sources]
++
++    def test_no_default_exclusions(self) -> None:
++        self.assertEqual(self.fields(), [("smoking",), ("height", "religion")])
++
++    def test_opt_in_exclusion_modes(self) -> None:
++        self.assertEqual(self.fields(excluded_fields={"religion"}), [("smoking",), ("height",)])
++        self.assertEqual(
++            self.fields(excluded_fields=["religion"], drop_whole_item=True), [("smoking",)]
++        )
++
++    def test_stale_excerpt_checked_before_exclusion(self) -> None:
++        clauses = [P("1", "height", (), "tall"), P("1", "religion", (), "absent")]
++        out = compile_preference_rules(ITEMS, clauses, excluded_fields=["religion"])
++        self.assertEqual(out.sources, ())
++
++    def test_malformed_ids_and_fields_do_not_crash(self) -> None:
++        clauses = [
++            P(["1"], "height", (), "tall"),  # unhashable, non-str id
++            P("1" * 10_000, "height", (), "tall"),  # beyond int-conversion limits
++            P("abc", "height", (), "tall"),
++            P("1", ["height"], (), "tall"),  # unhashable field
++        ]
++        out = compile_preference_rules(ITEMS, clauses, excluded_fields=["height"])
++        self.assertEqual([s.source_id for s in out.sources], ["1"])
++
++    def test_wrong_element_types_raise_value_error(self) -> None:
++        for args in [(ITEMS, [object()]), ({1: "tall"}, [CLAUSES[1]])]:
++            with self.assertRaises(ValueError):
++                compile_preference_rules(*args)
++
++
++class RunnerTests(unittest.TestCase):
++    def test_large_payload_unbounded_by_default(self) -> None:
++        batch = prepare_inference_batch("é" * 3_000_000, ["t"] * 1_000)
++        self.assertEqual(
++            (batch.prompt_bytes, batch.tool_count, batch.execution_mode, batch.truncated),
++            (6_000_000, 1_000, "fast_tensor", False),
++        )
++
++    def test_bounds_and_modes(self) -> None:
++        self.assertEqual(prepare_inference_batch("é", [], max_prompt_bytes=2).prompt_bytes, 2)
++        self.assertEqual(
++            prepare_inference_batch("x", [], force_mode="chunked_prefill").execution_mode,
++            "chunked_prefill",
++        )
++        bad = [
++            dict(max_prompt_bytes=1, prompt="é"),
++            dict(max_prompt_bytes=True),
++            dict(max_prompt_bytes=0),
++            dict(max_tools=0, tools=["a"]),
++            dict(max_tools=-1),
++            dict(max_tools=False),
++            dict(force_mode="auto"),
++            dict(tools="ab"),
++            dict(tools=[" "]),
++            dict(prompt="\ud800"),  # lone surrogate: not UTF-8 encodable
++        ]
++        for kw in bad:
++            prompt, tools = kw.pop("prompt", "x"), kw.pop("tools", [])
++            with self.subTest(kw=kw, prompt=prompt, tools=tools), self.assertRaises(ValueError):
++                prepare_inference_batch(prompt, tools, **kw)
++
++
++if __name__ == "__main__":
++    unittest.main()

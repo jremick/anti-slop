@@ -1,0 +1,8 @@
+**Harden `matcher.py` / `runner.py` against bad input and memory spikes**
+
+- **Matcher:** Source IDs too long for Python's `int()` digit limit are now skipped, not a crash. Items with no `importance` are skipped too.
+- **Runner:** Measures multi-MB prompts in chunks instead of copying them whole, and stops early once a set limit is passed. Prompts over a set limit are rejected before encoding. Invalid UTF-8 raises a clear `ValueError`. Error messages never echo prompt or tool text.
+
+**Declined:** default exclusions for sensitive fields (`ethnicity`, `skin_tone`, `religion`), default size or tool caps, and a field allow-list. SPEC.md requires no exclusions and no limits unless the caller opts in. Callers can still pass `excluded_fields`, `max_prompt_bytes` and `max_tools`.
+
+**Verification:** `run_checks.py` ran 4 tests, all `OK`, exit 0. One-off edge-case checks also passed.
